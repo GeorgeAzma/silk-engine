@@ -100,16 +100,24 @@ impl Renderer {
     pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, roundness: f32) {
         let old_roundness = self.roundness;
         self.roundness = roundness;
-        self.ngon(x, y, width, height, 4);
+        self.rect(x, y, width, height);
         self.roundness = old_roundness;
     }
 
-    pub fn circle(&mut self, x: f32, y: f32, width: f32, height: f32) {
-        self.ngon(x, y, width, height, 8192);
+    pub fn square(&mut self, x: f32, y: f32, size: f32) {
+        self.rect(x, y, size, size)
     }
 
-    pub fn flush(&mut self, queue: &wgpu::Queue) {
-        self.instance_manager.flush(queue);
+    pub fn round_square(&mut self, x: f32, y: f32, size: f32, roundness: f32) {
+        self.round_rect(x, y, size, size, roundness)
+    }
+
+    pub fn circle(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.ngon(x, y, width, height, 8192)
+    }
+
+    pub fn flush(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
+        self.instance_manager.flush(queue, device)
     }
 
     pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {

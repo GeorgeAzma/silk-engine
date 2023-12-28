@@ -106,7 +106,7 @@ impl App {
             });
 
         self.simple_app.render(&mut self.renderer);
-        self.renderer.flush(&self.queue);
+        self.renderer.flush(&self.queue, &self.device);
         self.renderer.render(&mut encoder, &view);
 
         self.queue.submit(std::iter::once(encoder.finish()));
