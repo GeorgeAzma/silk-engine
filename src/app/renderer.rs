@@ -90,7 +90,7 @@ impl Renderer {
     }
 
     pub fn tri(&mut self, x: f32, y: f32, width: f32, height: f32) {
-        self.ngon(x, y, width, height, 4);
+        self.ngon(x, y, width, height, 3);
     }
 
     pub fn rect(&mut self, x: f32, y: f32, width: f32, height: f32) {

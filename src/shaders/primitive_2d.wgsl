@@ -50,7 +50,7 @@ fn sdf_ngon(uv: vec2f, sides: i32, roundness: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
-    let f = length(vec2f(dpdx(in.uv.x), dpdy(in.uv.y))) * 1.5;
+    let f = length(fwidth(in.uv));
     let d = sdf_ngon(in.uv, in.sides, in.roundness);
     color = mix(color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + f, d));
     color.a *= smoothstep(0.0, -f, d);
