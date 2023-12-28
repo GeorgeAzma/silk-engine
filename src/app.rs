@@ -21,8 +21,11 @@ struct App {
 impl App {
     async fn new(window: Window) -> Self {
         let size = window.inner_size();
+
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+
         let surface = unsafe { instance.create_surface(&window) }.unwrap();
+
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -31,6 +34,7 @@ impl App {
             })
             .await
             .unwrap();
+
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
@@ -42,6 +46,7 @@ impl App {
             )
             .await
             .unwrap();
+
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
