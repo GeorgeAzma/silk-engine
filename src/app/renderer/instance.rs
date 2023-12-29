@@ -1,7 +1,7 @@
 use crate::cooldown::{self, *};
 use wgpu::{self, util::DeviceExt, VertexAttribute};
 
-#[repr(C, align(16))]
+#[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct Instance {
     position: [f32; 2],
@@ -12,7 +12,6 @@ pub struct Instance {
     roundness: f32,
     rotation: f32,
     sides: i32,
-    _padding: [u32; 2],
 }
 
 impl Instance {
@@ -35,11 +34,10 @@ impl Instance {
             roundness,
             rotation,
             sides,
-            _padding: [0, 0],
         }
     }
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        static ATTRS: [VertexAttribute; 9] = wgpu::vertex_attr_array![
+        static ATTRS: [VertexAttribute; 8] = wgpu::vertex_attr_array![
             0 => Float32x2,
             1 => Float32x2,
             2 => Uint32,
@@ -48,7 +46,6 @@ impl Instance {
             5 => Float32,
             6 => Float32,
             7 => Sint32,
-            8 => Float32x2,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Instance>() as u64,
