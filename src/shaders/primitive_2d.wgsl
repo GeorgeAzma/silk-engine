@@ -1,11 +1,11 @@
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
+    @builtin(position) clip_position: vec4f,
     @location(0) uv: vec2f,
     @location(1) @interpolate(flat) color: vec4f,
     @location(2) @interpolate(flat) stroke_color: vec4f,
     @location(3) @interpolate(flat) stroke_width: f32,
     @location(4) @interpolate(flat) roundness: f32,
-    @location(5) @interpolate(flat) sides: i32,
+    @location(5) @interpolate(flat) side_ang: f32,
 }
 
 @vertex
@@ -28,19 +28,16 @@ fn vs_main(
     out.stroke_color = unpack4x8unorm(stroke_color);
     out.stroke_width = stroke_width;
     out.roundness = roundness;
-    out.sides = sides;
+    out.side_ang = 3.141592653589793 / f32(sides);
     return out;
 }
 
-const PI: f32 = 3.141592653589793; 
-
-fn sdf_ngon(uv: vec2f, sides: i32, roundness: f32) -> f32 {
-    let an = PI / f32(sides);
-    let r = cos(an);
+fn sdf_ngon(uv: vec2f, side_ang: f32, roundness: f32) -> f32 {
+    let r = cos(side_ang);
     var p = uv * (1.0 + roundness / r);
-    let he = r * tan(an);
+    let he = r * tan(side_ang);
     p = -p.yx;
-    let bn = 2. * an * floor((atan2(p.y, p.x) + an) / an * .5);
+    let bn = 2. * side_ang * floor((atan2(p.y, p.x) + side_ang) / side_ang * .5);
     let cs = vec2f(cos(bn), sin(bn));
     p = mat2x2(cs.x, -cs.y, cs.y, cs.x) * p;
     return (length(p - vec2(r, clamp(p.y, -he, he))) * sign(p.x - r) - roundness) / (1.0 + roundness);
@@ -49,8 +46,8 @@ fn sdf_ngon(uv: vec2f, sides: i32, roundness: f32) -> f32 {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
+    let d = sdf_ngon(in.uv, in.side_ang, in.roundness);
     let f = length(fwidth(in.uv));
-    let d = sdf_ngon(in.uv, in.sides, in.roundness);
     color = mix(color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + f, d));
     color.a *= smoothstep(0.0, -f, d);
     return color;
