@@ -6,20 +6,21 @@ use wgpu::{self, util::DeviceExt, VertexAttribute};
 pub struct Instance {
     position: [f32; 2],
     scale: [f32; 2],
-    color: [f32; 4],
-    stroke_color: [f32; 4],
+    color: [u8; 4],
+    stroke_color: [u8; 4],
     stroke_width: f32,
     roundness: f32,
     rotation: f32,
     sides: i32,
+    _padding: [u32; 2],
 }
 
 impl Instance {
     pub fn new(
         position: [f32; 2],
         scale: [f32; 2],
-        color: [f32; 4],
-        stroke_color: [f32; 4],
+        color: [u8; 4],
+        stroke_color: [u8; 4],
         stroke_width: f32,
         roundness: f32,
         rotation: f32,
@@ -34,18 +35,20 @@ impl Instance {
             roundness,
             rotation,
             sides,
+            _padding: [0, 0],
         }
     }
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        static ATTRS: [VertexAttribute; 8] = wgpu::vertex_attr_array![
+        static ATTRS: [VertexAttribute; 9] = wgpu::vertex_attr_array![
             0 => Float32x2,
             1 => Float32x2,
-            2 => Float32x4,
-            3 => Float32x4,
+            2 => Uint32,
+            3 => Uint32,
             4 => Float32,
             5 => Float32,
             6 => Float32,
             7 => Sint32,
+            8 => Float32x2,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Instance>() as u64,

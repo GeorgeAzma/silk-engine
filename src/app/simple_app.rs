@@ -27,10 +27,10 @@ impl SimpleApp {
         let mut rng: StdRng = StdRng::seed_from_u64(1u64);
         for _ in 0..1_000_000 {
             gfx.color = [
-                rng.gen_range(0.0..1.0),
-                rng.gen_range(0.0..1.0),
-                rng.gen_range(0.0..1.0),
-                1.0,
+                rng.gen_range(0..255),
+                rng.gen_range(0..255),
+                rng.gen_range(0..255),
+                255,
             ];
             gfx.tri(
                 rng.gen_range(-1.0..1.0),

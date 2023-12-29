@@ -13,20 +13,21 @@ fn vs_main(
     @builtin(vertex_index) vert_id: u32,
     @location(0) position: vec2f,
     @location(1) scale: vec2f,
-    @location(2) color: vec4f,
-    @location(3) stroke_color: vec4f,
+    @location(2) color: u32,
+    @location(3) stroke_color: u32,
     @location(4) stroke_width: f32,
     @location(5) roundness: f32,
     @location(6) rotation: f32,
     @location(7) sides: i32,
+    @location(8) _padding: vec2f,
 ) -> VertexOutput {
     var out: VertexOutput;
     let rec = vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0;
     let pos = (cos(rotation) * rec + sin(rotation) * vec2f(rec.y, -rec.x)) * scale + position;
     out.clip_position = vec4f(pos, 0.0, 1.0);
     out.uv = rec;
-    out.color = color;
-    out.stroke_color = stroke_color;
+    out.color = unpack4x8unorm(color);
+    out.stroke_color = unpack4x8unorm(stroke_color);
     out.stroke_width = stroke_width;
     out.roundness = roundness;
     out.sides = sides;
