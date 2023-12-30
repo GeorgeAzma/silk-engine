@@ -4,7 +4,7 @@ use wgpu::{self, util::DeviceExt, VertexAttribute};
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct Instance {
-    position: [f32; 2],
+    position: [f32; 3],
     scale: [f32; 2],
     color: [u8; 4],
     stroke_color: [u8; 4],
@@ -16,7 +16,7 @@ pub struct Instance {
 
 impl Instance {
     pub fn new(
-        position: [f32; 2],
+        position: [f32; 3],
         scale: [f32; 2],
         color: [u8; 4],
         stroke_color: [u8; 4],
@@ -38,7 +38,7 @@ impl Instance {
     }
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         static ATTRS: [VertexAttribute; 8] = wgpu::vertex_attr_array![
-            0 => Float32x2,
+            0 => Float32x3,
             1 => Float32x2,
             2 => Uint32,
             3 => Uint32,

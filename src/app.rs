@@ -66,7 +66,7 @@ impl App {
         };
         surface.configure(&device, &surface_config);
 
-        let renderer = renderer::Renderer::new(&device, surface_config.format);
+        let renderer = renderer::Renderer::new(&device, &surface_config);
         let simple_app = simple_app::SimpleApp::new();
 
         return Self {
@@ -87,6 +87,7 @@ impl App {
             self.surface_config.width = size.width;
             self.surface_config.height = size.height;
             self.surface.configure(&self.device, &self.surface_config);
+            self.renderer.resize(&self.device, size.width, size.height);
         }
     }
 
