@@ -66,7 +66,7 @@ impl App {
         };
         surface.configure(&device, &surface_config);
 
-        let renderer = renderer::Renderer::new(&device, &surface_config);
+        let renderer = renderer::Renderer::new(&device, &queue, &surface_config);
         let simple_app = simple_app::SimpleApp::new();
 
         return Self {
