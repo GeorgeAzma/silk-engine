@@ -1,4 +1,3 @@
-use crate::assets;
 use easy_signed_distance_field as sdf;
 use image::EncodableLayout;
 
@@ -107,7 +106,7 @@ impl Font {
     }
 
     fn atlas_path(font_name: &str) -> String {
-        assets::get(format!("fonts/{font_name}.png"))
+        format!("assets/fonts/{font_name}.png")
     }
 
     fn save_atlas(font_name: &str, atlas: &Vec<u8>, atlas_width: i32, atlas_height: i32) {
@@ -129,7 +128,7 @@ impl Font {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, font_name: &str) -> Self {
         let max_glyph_size: i32 = 64;
         // Load TTF font
-        let font_path = assets::get(format!("fonts/{font_name}.ttf"));
+        let font_path = format!("assets/fonts/{font_name}.ttf");
         let font_data = std::fs::read(&font_path)
             .expect(format!("Failed to read font file: {font_path}").as_str());
         let font = sdf::Font::from_bytes(font_data.as_slice(), Default::default())
