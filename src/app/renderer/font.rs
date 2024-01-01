@@ -434,7 +434,9 @@ impl Font {
         let x_space = (font.global_bounding_box().width() as f32 * 1.2) as i32;
         let y_space = (font.global_bounding_box().height() as f32 * 2.2) as i32;
         let mut layout = Vec::with_capacity(text.len());
-        for c in text.chars() {
+        let mut it = text.chars().peekable();
+        let gap = (0.2 * font.units_per_em() as f32) as i32;
+        for c in it.clone() {
             match c {
                 ' ' => {
                     x += x_space;
@@ -452,12 +454,13 @@ impl Font {
                 _ if c.is_ascii_graphic() => {
                     let em = 1.0 / font.units_per_em() as f32;
                     let gid = font.glyph_index(c).unwrap();
-                    let yoff = font.glyph_hor_side_bearing(gid).unwrap_or_default() as i32;
-                    println!("{:?}", [yoff]);
+                    x += font.glyph_bounding_box(gid).unwrap().width() as i32 + gap;
+                    let yoff = 0; // TODO: Figure out bearings
                     layout.push((x as f32 * em, (y - yoff) as f32 * em));
-
-                    x += font.glyph_bounding_box(gid).unwrap().width() as i32 * 2
-                        + (font.units_per_em() as f32 * 0.1) as i32;
+                    if let Some(&next_c) = it.peek() {
+                        let ngid = font.glyph_index(next_c).unwrap();
+                        x += font.glyph_bounding_box(ngid).unwrap().width() as i32 + gap;
+                    }
                 }
                 _ => {
                     layout.push((-1.0, -1.0));

@@ -40,9 +40,9 @@ var s_atlas: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
-    let d = textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) * 1.2 + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r / 1.41421356 + in.bold ;
+    let d = (textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r + in.bold * 0.25) / 1.41421356;
     let f = length(fwidth(in.uv));
-    let strk = in.stroke_width * 0.5 + 0.5;
+    let strk = in.stroke_width * 0.5 + 0.5 - f;
     color = mix(color, in.stroke_color, smoothstep(strk, strk - f, d));
     color.a *= smoothstep(0.5 - f, 0.5, d);
     return color;
