@@ -1,4 +1,5 @@
-use wgpu::SurfaceConfiguration;
+use image::EncodableLayout;
+use wgpu::{util::DeviceExt, ShaderStages, SurfaceConfiguration};
 
 pub mod font;
 pub mod instance;
@@ -71,9 +72,9 @@ impl TextInstance {
 pub struct Renderer {
     // Note: it's possible to have a single instance manager, but this is cleaner
     primitive_instance_manager: instance::Manager<PrimitiveInstance>,
-    primitive_render_pipeline: wgpu::RenderPipeline,
+    primitive_pipeline: wgpu::RenderPipeline,
     text_instance_manager: instance::Manager<TextInstance>,
-    text_render_pipeline: wgpu::RenderPipeline,
+    text_pipeline: wgpu::RenderPipeline,
     text_bind_group: wgpu::BindGroup,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -97,55 +98,46 @@ impl Renderer {
         surf_conf: &wgpu::SurfaceConfiguration,
     ) -> Self {
         let primitive_shader = device.create_shader_module(assets::get_shader("primitive.wgsl"));
-
-        let primitive_render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Primitive"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
-
-        let primitive_render_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Primitive"),
-                layout: Some(&primitive_render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &primitive_shader,
-                    entry_point: "vs_main",
-                    buffers: &[PrimitiveInstance::desc()],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &primitive_shader,
-                    entry_point: "fs_main",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: surf_conf.format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleStrip,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill, // Features::NON_FILL_POLYGON_MODE
-                    unclipped_depth: false,                // Features::DEPTH_CLIP_CONTROL
-                    conservative: false,                   // Features::CONSERVATIVE_RASTERIZATION
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-            });
+        let primitive_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Primitive"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &primitive_shader,
+                entry_point: "vs_main",
+                buffers: &[PrimitiveInstance::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &primitive_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surf_conf.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill, // Features::NON_FILL_POLYGON_MODE
+                unclipped_depth: false,                // Features::DEPTH_CLIP_CONTROL
+                conservative: false,                   // Features::CONSERVATIVE_RASTERIZATION
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        });
 
         let text_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -187,18 +179,16 @@ impl Renderer {
             label: Some("diffuse_bind_group"),
         });
 
-        let text_shader = device.create_shader_module(assets::get_shader("text.wgsl"));
-
-        let text_render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Text"),
-                bind_group_layouts: &[&text_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let text_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let text_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Text"),
-            layout: Some(&text_render_pipeline_layout),
+            bind_group_layouts: &[&text_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let text_shader = device.create_shader_module(assets::get_shader("text.wgsl"));
+        let text_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Text"),
+            layout: Some(&text_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &text_shader,
                 entry_point: "vs_main",
@@ -256,9 +246,9 @@ impl Renderer {
 
         Self {
             primitive_instance_manager: instance::Manager::new(device),
-            primitive_render_pipeline,
+            primitive_pipeline,
             text_instance_manager: instance::Manager::new(device),
-            text_render_pipeline,
+            text_pipeline,
             text_bind_group,
             depth_texture,
             depth_view,
@@ -297,6 +287,9 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
+        self.depth_view = self
+            .depth_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
     }
 
     pub fn add(&mut self, instance: PrimitiveInstance) {
@@ -340,45 +333,35 @@ impl Renderer {
         self.round_rect(x, y, size, size, roundness)
     }
 
-    pub fn circle(&mut self, x: f32, y: f32, width: f32, height: f32) {
+    pub fn circle(&mut self, x: f32, y: f32, radius: f32) {
+        self.ngon(x, y, radius, radius, 8192)
+    }
+
+    pub fn ellipse(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.ngon(x, y, width, height, 8192)
     }
 
-    pub fn text(&mut self, text: &str, mut x: f32, mut y: f32, size: f32) {
-        let s = self.font.max_glyph_size() as f32;
-        let m = self.font.units_per_em() * size / self.width as f32 / s * 0.5;
-        let space_adv = s * m * 0.2;
-        for c in text.chars() {
-            let metric = self.font.char_metrics(c);
-            if c == '\n' {
-                y += metric.height as f32;
+    pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32) {
+        let layout = self.font.calc_layout(text);
+        for (i, c) in text.chars().enumerate() {
+            let (cx, cy) = layout[i];
+            if cx < 0.0 {
                 continue;
             }
-            let adv = metric.advance_width * m;
-            if c == ' ' {
-                x += space_adv;
-                continue;
-            } else if c == '\t' {
-                x += space_adv * 4.0;
-                continue;
-            }
+            let (cw, ch) = self.font.char_size(c);
             self.text_instance_manager.add(TextInstance {
                 position: [
-                    x + self.font.char_metrics(c).bounds.xmin * m + self.position[0],
-                    y + self.font.char_metrics(c).bounds.ymin * m + self.position[1],
+                    x + cx * size * self.scale[0],
+                    y + cy * size * self.scale[1],
                     self.depth,
                 ],
-                scale: [
-                    size * self.scale[0] * metric.width as f32 / s,
-                    size * self.scale[1] * metric.height as f32 / s,
-                ],
+                scale: [size * self.scale[0] * cw, size * self.scale[1] * ch],
                 color: self.color,
                 stroke_color: self.stroke_color,
                 stroke_width: self.stroke_width,
                 rotation: self.rotation,
                 uv: self.font.char_uv(c),
             });
-            x += adv;
         }
         self.depth -= f32::EPSILON;
     }
@@ -417,11 +400,12 @@ impl Renderer {
             occlusion_query_set: None,
         });
 
-        // render_pass.set_pipeline(&self.primitive_render_pipeline);
-        // self.primitive_instance_manager.render(&mut render_pass);
+        render_pass.set_pipeline(&self.primitive_pipeline);
+        self.primitive_instance_manager.render(&mut render_pass);
 
-        render_pass.set_pipeline(&self.text_render_pipeline);
+        render_pass.set_pipeline(&self.text_pipeline);
         render_pass.set_bind_group(0, &self.text_bind_group, &[]);
         self.text_instance_manager.render(&mut render_pass);
+        drop(render_pass);
     }
 }

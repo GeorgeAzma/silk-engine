@@ -1,3 +1,4 @@
+use image::EncodableLayout;
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -38,7 +39,7 @@ impl App {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS,
                     limits: wgpu::Limits::default(),
                     label: None,
                 },
@@ -116,6 +117,7 @@ impl App {
         self.renderer.render(&mut encoder, &view);
 
         self.queue.submit(std::iter::once(encoder.finish()));
+
         output.present();
 
         Ok(())

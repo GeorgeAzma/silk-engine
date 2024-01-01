@@ -4,7 +4,7 @@ struct VertexOutput {
     @location(1) @interpolate(flat) color: vec4f,
     @location(2) @interpolate(flat) stroke_color: vec4f,
     @location(3) @interpolate(flat) stroke_width: f32,
-    @location(4) texcoord: vec4f,
+    @location(4) @interpolate(flat) texcoord: vec4f,
 }
 
 @vertex
@@ -37,9 +37,9 @@ var s_atlas: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
-    let d = -textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) + 0.5) * in.texcoord.zw + in.texcoord.xy).r * 2.0 + 1.0;
-    let f = length(fwidth(in.uv)) * 3.0;
-    color = mix(color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + f, d));
+    let d = -textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r * 2.0 + 1.0;
+    let f = length(fwidth(in.uv)) * 2.0;
+    // color = mix(color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + f, d));
     color.a *= smoothstep(0.0, -f, d);
     return color;
 }

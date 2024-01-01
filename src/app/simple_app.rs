@@ -14,19 +14,20 @@ pub struct SimpleApp {
     instances: Vec<InstanceData>,
 }
 
-const INSTANCES: usize = 10;
+const INSTANCES: usize = 5;
 
 impl SimpleApp {
     pub fn new() -> Self {
         let mut instances = Vec::with_capacity(INSTANCES);
         let mut rng: StdRng = StdRng::seed_from_u64(1u64);
+
         for _ in 0..INSTANCES {
             instances.push(InstanceData {
                 color: [
                     rng.gen_range(0..255),
                     rng.gen_range(0..255),
                     rng.gen_range(0..255),
-                    32,
+                    255,
                 ],
                 position: [rng.gen_range(-1.0..1.0), rng.gen_range(-1.0..1.0)],
             });
@@ -49,11 +50,16 @@ impl SimpleApp {
         for i in 0..self.instances.len() {
             gfx.color = self.instances[i].color;
             gfx.text(
-                "Acd g    BIC",
+                "ABCabcIIII@",
                 self.instances[i].position[0],
                 self.instances[i].position[1],
-                0.2,
+                0.1,
             );
+            // gfx.circle(
+            //     self.instances[i].position[0],
+            //     self.instances[i].position[1],
+            //     0.02,
+            // );
         }
     }
 }
