@@ -5,6 +5,7 @@ struct VertexOutput {
     @location(2) @interpolate(flat) stroke_color: vec4f,
     @location(3) @interpolate(flat) stroke_width: f32,
     @location(4) @interpolate(flat) texcoord: vec4f,
+    @location(5) @interpolate(flat) bold: f32,
 }
 
 @vertex
@@ -17,15 +18,17 @@ fn vs_main(
     @location(4) stroke_width: f32,
     @location(5) rotation: f32,
     @location(6) texcoord: vec4f,
+    @location(7) bold: f32,
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.uv = vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0;
+    out.uv = (vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0) * 1.25;
     let pos = (cos(rotation) * out.uv + sin(rotation) * vec2f(out.uv.y, -out.uv.x)) * scale + position.xy;
     out.clip_position = vec4f(pos, position.z, 1.0);
     out.color = unpack4x8unorm(color);
     out.stroke_color = unpack4x8unorm(stroke_color);
     out.stroke_width = stroke_width;
     out.texcoord = texcoord;
+    out.bold = bold;
     return out;
 }
 
@@ -37,10 +40,11 @@ var s_atlas: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
-    let d = -textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r * 2.0 + 1.0;
-    let f = length(fwidth(in.uv)) * 2.0;
-    // color = mix(color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + f, d));
-    color.a *= smoothstep(0.0, -f, d);
+    let d = textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) * 1.2 + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r / 1.41421356 + in.bold ;
+    let f = length(fwidth(in.uv));
+    let strk = in.stroke_width * 0.5 + 0.5;
+    color = mix(color, in.stroke_color, smoothstep(strk, strk - f, d));
+    color.a *= smoothstep(0.5 - f, 0.5, d);
     return color;
 }
  

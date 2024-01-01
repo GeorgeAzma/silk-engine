@@ -184,7 +184,7 @@ impl Font {
         char_atlas_uvs: &mut [[f32; 2]; 128],
     ) -> (i32, i32) {
         // Prediction of atlas width to match its height as closely as possible
-        let padding = (max_glyph_size as f32 * 0.28) as i32;
+        let padding = (max_glyph_size as f32 * 0.4) as i32;
         let mut atlas_width: i32 = ((max_glyph_size + padding) as f32
             * (Font::MAX_GRAPHIC_CHARS as f32).sqrt()
             * 0.64) as i32
@@ -217,7 +217,7 @@ impl Font {
 
             let idx = i as usize;
             max_height = max_height.max(height);
-            if x + width + px >= atlas_width {
+            if x + width >= atlas_width {
                 x = px;
                 y += max_height;
                 max_height = 0;
@@ -451,9 +451,11 @@ impl Font {
                 }
                 _ if c.is_ascii_graphic() => {
                     let em = 1.0 / font.units_per_em() as f32;
-                    layout.push((x as f32 * em, y as f32 * em));
-
                     let gid = font.glyph_index(c).unwrap();
+                    let yoff = font.glyph_hor_side_bearing(gid).unwrap_or_default() as i32;
+                    println!("{:?}", [yoff]);
+                    layout.push((x as f32 * em, (y - yoff) as f32 * em));
+
                     x += font.glyph_bounding_box(gid).unwrap().width() as i32 * 2
                         + (font.units_per_em() as f32 * 0.1) as i32;
                 }

@@ -49,11 +49,14 @@ impl SimpleApp {
     pub fn render(&mut self, gfx: &mut renderer::Renderer) {
         for i in 0..self.instances.len() {
             gfx.color = self.instances[i].color;
+            gfx.stroke_color = [0, 255, 0, 255];
+            gfx.stroke_width = 0.1;
+            gfx.bold = 0.0;
             gfx.text(
-                "ABCabcIIII@",
+                "I@AD",
                 self.instances[i].position[0],
                 self.instances[i].position[1],
-                0.1,
+                0.2,
             );
             // gfx.circle(
             //     self.instances[i].position[0],

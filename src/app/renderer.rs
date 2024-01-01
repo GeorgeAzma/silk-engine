@@ -48,11 +48,12 @@ pub struct TextInstance {
     pub stroke_width: f32,
     pub rotation: f32,
     pub uv: [f32; 4],
+    pub bold: f32,
 }
 
 impl TextInstance {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        static ATTRS: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+        static ATTRS: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
             0 => Float32x3,
             1 => Float32x2,
             2 => Uint32,
@@ -60,6 +61,7 @@ impl TextInstance {
             4 => Float32,
             5 => Float32,
             6 => Float32x4,
+            7 => Float32,
         ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Self>() as u64,
@@ -89,6 +91,7 @@ pub struct Renderer {
     pub stroke_width: f32,
     pub roundness: f32,
     pub rotation: f32,
+    pub bold: f32,
 }
 
 impl Renderer {
@@ -263,6 +266,7 @@ impl Renderer {
             stroke_width: 0.0,
             roundness: 0.0,
             rotation: 0.0,
+            bold: 0.0,
         }
     }
 
@@ -361,6 +365,7 @@ impl Renderer {
                 stroke_width: self.stroke_width,
                 rotation: self.rotation,
                 uv: self.font.char_uv(c),
+                bold: self.bold,
             });
         }
         self.depth -= f32::EPSILON;

@@ -51,7 +51,7 @@ fn solve_cubic(a: f32, b: f32, c: f32) -> vec3f
 }
 
 fn bezier_sdf(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {    
-    let b1 = mix(B + vec2(1e-5), B - vec2(1e-5), abs(sign(B * 2.0 - A - C)));
+    let b1 = mix(B + vec2(1e-4), B - vec2(1e-4), abs(sign(B * 2.0 - A - C)));
     let a2 = b1 - A;
     let b2 = A - b1 * 2.0 + C;
     let c2 = a2 * 2.0;
@@ -87,8 +87,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3u) {
                 d = d1;
             }
         }
-        var sd = smoothstep(-0.2, 0.2, d);
-        let sdu = u32(round(sd * 255.0));
-        sdf[id] |= sdu << (i * 8u);
+        sdf[id] |= clamp(u32(round(smoothstep(-0.3, 0.3, d) * 255.0 * 1.41421356)), 0u, 255u) << (i * 8u);
     }
 }
