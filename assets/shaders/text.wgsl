@@ -21,7 +21,7 @@ fn vs_main(
     @location(7) bold: f32,
 ) -> VertexOutput {
     var out: VertexOutput;
-    out.uv = (vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0) * 1.25;
+    out.uv = (vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0) * 1.75;
     let pos = (cos(rotation) * out.uv + sin(rotation) * vec2f(out.uv.y, -out.uv.x)) * scale + position.xy;
     out.clip_position = vec4f(pos, position.z, 1.0);
     out.color = unpack4x8unorm(color);
