@@ -1,7 +1,9 @@
 use image::EncodableLayout;
+use std::rc::Rc;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    keyboard::NamedKey,
     window::Window,
     window::WindowBuilder,
 };
@@ -14,13 +16,14 @@ struct App {
     queue: wgpu::Queue,
     surface_config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
-    window: Window,
+    window: Rc<Window>,
     renderer: renderer::Renderer,
     simple_app: simple_app::SimpleApp,
+    start_time: std::time::Instant,
 }
 
 impl App {
-    async fn new(window: Window) -> Self {
+    async fn new(window: Rc<Window>) -> Self {
         let size = window.inner_size();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
@@ -68,7 +71,19 @@ impl App {
         surface.configure(&device, &surface_config);
 
         let renderer = renderer::Renderer::new(&device, &queue, &surface_config);
-        let simple_app = simple_app::SimpleApp::new();
+        let simple_app = simple_app::SimpleApp {
+            window: window.clone(),
+            time: 0.0,
+            dt: 0.0,
+            width: size.width,
+            height: size.height,
+            mouse_x: 0.0,
+            mouse_y: 0.0,
+            mouse_left: false,
+            mouse_right: false,
+            mouse_middle: false,
+            key: [false; NamedKey::F35 as usize + 1],
+        };
 
         return Self {
             surface,
@@ -76,15 +91,18 @@ impl App {
             queue,
             surface_config,
             size,
-            window,
+            window: window.clone(),
             renderer,
             simple_app,
+            start_time: std::time::Instant::now(),
         };
     }
 
     fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        self.size = size;
+        self.simple_app.width = size.width;
+        self.simple_app.width = size.height;
         if size.width > 0 && size.height > 0 {
-            self.size = size;
             self.surface_config.width = size.width;
             self.surface_config.height = size.height;
             self.surface.configure(&self.device, &self.surface_config);
@@ -92,11 +110,73 @@ impl App {
         }
     }
 
-    fn input(&mut self, _event: &WindowEvent) -> bool {
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
+                self.simple_app.mouse_x =
+                    position.x as f32 / self.window.inner_size().width as f32 * 2.0 - 1.0;
+                self.simple_app.mouse_y =
+                    1.0 - position.y as f32 / self.window.inner_size().height as f32 * 2.0;
+            }
+            WindowEvent::MouseInput {
+                device_id: _,
+                state,
+                button,
+            } => match button {
+                MouseButton::Left => {
+                    self.simple_app.mouse_left = state.is_pressed();
+                }
+                MouseButton::Right => {
+                    self.simple_app.mouse_right = state.is_pressed();
+                }
+                MouseButton::Middle => {
+                    self.simple_app.mouse_middle = state.is_pressed();
+                }
+                _ => {}
+            },
+            WindowEvent::Touch(touch) => {
+                self.simple_app.mouse_x = touch.location.x as f32;
+                self.simple_app.mouse_y = touch.location.y as f32;
+                match touch.phase {
+                    winit::event::TouchPhase::Started => {
+                        self.simple_app.mouse_left = true;
+                    }
+                    winit::event::TouchPhase::Ended => {
+                        self.simple_app.mouse_left = false;
+                    }
+                    winit::event::TouchPhase::Moved => {
+                        self.simple_app.mouse_left = true;
+                    }
+                    winit::event::TouchPhase::Cancelled => {
+                        self.simple_app.mouse_left = false;
+                    }
+                }
+            }
+            WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic: _,
+            } => match event.logical_key {
+                winit::keyboard::Key::Named(key) => {
+                    self.simple_app.key[key as usize] = event.state.is_pressed();
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        self.simple_app.event(event);
         false
     }
 
     fn update(&mut self) {
+        let now = std::time::Instant::now()
+            .duration_since(self.start_time)
+            .as_secs_f32();
+        self.simple_app.dt = now - self.simple_app.time;
+        self.simple_app.time = now;
         self.simple_app.update();
     }
 
@@ -127,10 +207,12 @@ impl App {
 pub async fn run() {
     let size = winit::dpi::PhysicalSize::new(500, 500);
     let event_loop = EventLoop::new().unwrap();
-    let window = WindowBuilder::new()
-        .with_inner_size(size)
-        .build(&event_loop)
-        .unwrap();
+    let window = std::rc::Rc::new(
+        WindowBuilder::new()
+            .with_inner_size(size)
+            .build(&event_loop)
+            .unwrap(),
+    );
 
     let mut app = App::new(window).await;
     event_loop.set_control_flow(ControlFlow::Poll);

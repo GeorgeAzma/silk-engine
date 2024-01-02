@@ -324,7 +324,7 @@ impl Renderer {
 
     pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, roundness: f32) {
         let old_roundness = self.roundness;
-        self.roundness = roundness;
+        self.roundness += roundness;
         self.rect(x, y, width, height);
         self.roundness = old_roundness;
     }
@@ -335,6 +335,27 @@ impl Renderer {
 
     pub fn round_square(&mut self, x: f32, y: f32, size: f32, roundness: f32) {
         self.round_rect(x, y, size, size, roundness)
+    }
+
+    pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, size: f32) {
+        let mid_x = (x1 + x2) * 0.5;
+        let mid_y = (y1 + y2) * 0.5;
+        let dir_x = x2 - x1;
+        let dir_y = y2 - y1;
+        let length = (dir_x * dir_x + dir_y * dir_y).sqrt() * 0.5;
+        let old_rotation = self.rotation;
+        self.rotation -= dir_y.atan2(dir_x);
+        self.round_rect(mid_x, mid_y, length, size, 1.0);
+        self.rotation = old_rotation;
+    }
+
+    pub fn lines(&mut self, points: &[[f32; 2]], size: f32) {
+        assert!(points.len() > 1, "must specify at least two points!");
+        for i in 0..points.len() - 1 {
+            let p1 = points[i];
+            let p2 = points[i + 1];
+            self.line(p1[0], p1[1], p2[0], p2[1], size);
+        }
     }
 
     pub fn circle(&mut self, x: f32, y: f32, radius: f32) {
