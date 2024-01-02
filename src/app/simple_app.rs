@@ -14,7 +14,7 @@ pub struct SimpleApp {
     instances: Vec<InstanceData>,
 }
 
-const INSTANCES: usize = 5;
+const INSTANCES: usize = 1;
 
 impl SimpleApp {
     pub fn new() -> Self {
@@ -49,8 +49,10 @@ impl SimpleApp {
     pub fn render(&mut self, gfx: &mut renderer::Renderer) {
         for i in 0..self.instances.len() {
             gfx.color = self.instances[i].color;
+            gfx.stroke_color = [0, 255, 0, 255];
+            gfx.stroke_width = 0.0;
             gfx.text(
-                "W@@W rendering...",
+                "Quick brown fox jumps\nover a lazy dog",
                 self.instances[i].position[0],
                 self.instances[i].position[1],
                 0.1,
