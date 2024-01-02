@@ -3,6 +3,7 @@ mod app;
 mod assets;
 mod cooldown;
 
-fn main() {
-    pollster::block_on(app::run());
+#[tokio::main]
+async fn main() {
+    app::run().await;
 }

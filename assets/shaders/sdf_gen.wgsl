@@ -68,7 +68,7 @@ fn bezier_sdf(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {
 }
 
 @compute
-@workgroup_size(64)
+@workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3u) {
     let id = global_id.x / 4u;
     for (var i = 0u; i < 4u; i += 1u) {

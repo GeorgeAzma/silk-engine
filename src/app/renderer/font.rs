@@ -308,6 +308,9 @@ impl Font {
             module: &device.create_shader_module(assets::get_shader("sdf_gen.wgsl")),
             entry_point: "main",
         });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
         let start_time = std::time::Instant::now();
         for i in 0..=127u8 {
             let c = i as char;
@@ -355,9 +358,6 @@ impl Font {
                     },
                 ],
             });
-
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
@@ -365,16 +365,12 @@ impl Font {
             compute_pass.set_pipeline(&sdf_gen_pipeline);
             compute_pass.set_bind_group(0, &sdf_gen_bind_group, &[]);
             compute_pass.dispatch_workgroups(
-                atlas_texture.width() * atlas_texture.height() / 64,
+                atlas_texture.width() * atlas_texture.height() / 256, // This is correct, because atlas_texture.width() has 256 byte alignment
                 1,
                 1,
             );
-            drop(compute_pass);
-
-            queue.submit(std::iter::once(encoder.finish()));
         }
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         encoder.copy_buffer_to_texture(
             wgpu::ImageCopyBuffer {
                 buffer: &sdf_buffer_atlas,
@@ -400,7 +396,10 @@ impl Font {
         let atlas_bytes = sdf_buffer_atlas.slice(..).get_mapped_range();
         let atlas_pixels = atlas_bytes.as_bytes().to_owned();
         drop(atlas_bytes);
-        dbg!(std::time::Instant::now().duration_since(start_time));
+        println!(
+            "SDF Gen: {:?}",
+            std::time::Instant::now().duration_since(start_time)
+        );
 
         atlas_pixels
     }
