@@ -92,7 +92,7 @@ pub struct Font {
 }
 
 impl Font {
-    const MAX_GRAPHIC_CHARS: i32 = 96;
+    const MAX_GRAPHIC_CHARS: u32 = 96;
 
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, font_name: &str) -> Self {
         let max_glyph_size: i32 = 64;
@@ -251,24 +251,6 @@ impl Font {
         char_atlas_uvs: &[[f32; 2]; 128],
         atlas_texture: &wgpu::Texture,
     ) -> Vec<u8> {
-        let mut outline_gen = OutlineGenerator::new();
-        for i in 0..=127u8 {
-            let c = i as char;
-            if !char::is_ascii_graphic(&c) {
-                continue;
-            }
-            outline_gen.gen(c, font);
-        }
-
-        let sdf_buffer_atlas = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("SDF Buffer"),
-            size: (atlas_texture.width() * atlas_texture.height()) as u64,
-            usage: wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
         let sdf_gen_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,
@@ -293,6 +275,16 @@ impl Font {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             });
 
@@ -309,9 +301,35 @@ impl Font {
             entry_point: "main",
         });
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let mut outline_gen = OutlineGenerator::new();
+        for i in 0..=127u8 {
+            let c = i as char;
+            if !char::is_ascii_graphic(&c) {
+                continue;
+            }
+            outline_gen.gen(c, font);
+        }
 
-        let start_time = std::time::Instant::now();
+        let sdf_buffer_atlas = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("SDF Atlas"),
+            size: (atlas_texture.width() * atlas_texture.height()) as u64,
+            usage: wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+        struct Glyph {
+            offset: u32,
+            size: u32,
+            res: [u32; 2],
+            uv: [f32; 4],
+        }
+        let mut glyphs: Vec<Glyph> = Vec::new();
+        let mut all_points: Vec<[[f32; 2]; 3]> = Vec::new();
+        let mut offset: u32 = 0;
         for i in 0..=127u8 {
             let c = i as char;
             if !char::is_ascii_graphic(&c) {
@@ -320,56 +338,71 @@ impl Font {
             let idx = i as usize;
 
             let points = &outline_gen.shapes[idx].bezier_points;
-            let uv_data = [
-                char_atlas_uvs[idx][0],
-                char_atlas_uvs[idx][1],
-                max_glyph_size as f32 / atlas_texture.width() as f32,
-                max_glyph_size as f32 / atlas_texture.height() as f32,
-            ];
-            let res_data = [atlas_texture.width(), atlas_texture.height()];
-            let mut contents: Vec<u8> = Vec::new();
-            contents.extend(bytemuck::cast_slice(&uv_data));
-            contents.extend(bytemuck::cast_slice(&res_data));
-            contents.extend((points.len() as u32).to_le_bytes().as_bytes());
-            contents.extend((points.len() as u32).to_le_bytes().as_bytes());
-            contents.extend(bytemuck::cast_slice(&points));
-
-            let bezier_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                usage: wgpu::BufferUsages::STORAGE,
-                contents: &contents,
-            });
-
-            let sdf_gen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &sdf_gen_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(
-                            sdf_buffer_atlas.as_entire_buffer_binding(),
-                        ),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(
-                            bezier_buffer.as_entire_buffer_binding(),
-                        ),
-                    },
+            all_points.extend(points);
+            glyphs.push(Glyph {
+                offset,
+                size: points.len() as u32,
+                res: [atlas_texture.width(), atlas_texture.height()],
+                uv: [
+                    char_atlas_uvs[idx][0],
+                    char_atlas_uvs[idx][1],
+                    max_glyph_size as f32 / atlas_texture.width() as f32,
+                    max_glyph_size as f32 / atlas_texture.height() as f32,
                 ],
             });
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None,
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&sdf_gen_pipeline);
-            compute_pass.set_bind_group(0, &sdf_gen_bind_group, &[]);
-            compute_pass.dispatch_workgroups(
-                atlas_texture.width() * atlas_texture.height() / 256, // This is correct, because atlas_texture.width() has 256 byte alignment
-                1,
-                1,
-            );
+            offset += points.len() as u32;
         }
+
+        let glyph_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Glyph"),
+            usage: wgpu::BufferUsages::STORAGE,
+            contents: bytemuck::cast_slice(&glyphs),
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let curve_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Curve"),
+            usage: wgpu::BufferUsages::STORAGE,
+            contents: bytemuck::cast_slice(&all_points),
+        });
+
+        let sdf_gen_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &sdf_gen_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(
+                        sdf_buffer_atlas.as_entire_buffer_binding(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(
+                        curve_buffer.as_entire_buffer_binding(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Buffer(
+                        glyph_buffer.as_entire_buffer_binding(),
+                    ),
+                },
+            ],
+        });
+
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: None,
+            timestamp_writes: None,
+        });
+        compute_pass.set_pipeline(&sdf_gen_pipeline);
+        compute_pass.set_bind_group(0, &sdf_gen_bind_group, &[]);
+        compute_pass.dispatch_workgroups(
+            atlas_texture.width() * atlas_texture.height() / 256, // This is correct, because atlas_texture.width() has 256 byte alignment
+            Self::MAX_GRAPHIC_CHARS,
+            1,
+        );
+        drop(compute_pass);
 
         encoder.copy_buffer_to_texture(
             wgpu::ImageCopyBuffer {
@@ -387,7 +420,6 @@ impl Font {
                 depth_or_array_layers: 1,
             },
         );
-
         queue.submit(std::iter::once(encoder.finish()));
         sdf_buffer_atlas
             .slice(..)
@@ -396,10 +428,6 @@ impl Font {
         let atlas_bytes = sdf_buffer_atlas.slice(..).get_mapped_range();
         let atlas_pixels = atlas_bytes.as_bytes().to_owned();
         drop(atlas_bytes);
-        println!(
-            "SDF Gen: {:?}",
-            std::time::Instant::now().duration_since(start_time)
-        );
 
         atlas_pixels
     }

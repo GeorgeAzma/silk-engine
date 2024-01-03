@@ -1,19 +1,21 @@
 @group(0) @binding(0) var<storage, read_write> sdf: array<u32>;
 
-struct Curves {
+struct Curve {
     a: vec2f,
     b: vec2f,
     c: vec2f,
 }
 
-struct Data {
-    uvs: vec4f,
-    res: vec2u,
-    size: vec2u,
-    data: array<Curves>,
-}
+@group(0) @binding(1) var<storage, read> curves: array<Curve>;
 
-@group(0) @binding(1) var<storage, read> curves: Data;
+struct Glyph {
+    offset: u32,
+    size: u32,
+    res: vec2u,
+    uv: vec4f,
+} 
+
+@group(0) @binding(2) var<storage, read> glyphs: array<Glyph>;
 
 fn test_cross(a: vec2f, b: vec2f, p: vec2f) -> f32 {
     return sign((b.y - a.y) * (p.x - a.x) - (b.x - a.x) * (p.y - a.y));
@@ -30,7 +32,6 @@ fn sign_bezier(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {
         step((d.x - d.y), 0.0)) * test_cross(A, C, B);
 }
 
-// Solve cubic equation for roots
 fn solve_cubic(a: f32, b: f32, c: f32) -> vec3f
 {
     let p = b - a * a / 3.0;
@@ -71,18 +72,20 @@ fn bezier_sdf(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {
 @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3u) {
     let id = global_id.x / 4u;
+    let glyph = glyphs[global_id.y];
+    let gp = glyph.uv.xy + glyph.uv.zw * 0.5;
+    let p = vec2f(f32((id * 4u) % glyph.res.x), f32(glyph.res.y - (id * 4u) / glyph.res.x)) / vec2f(glyph.res);
+    if abs(gp.y - p.y) > glyph.uv.w || abs(gp.x - p.x) > glyph.uv.z {
+        return;
+    }
     for (var i = 0u; i < 4u; i += 1u) {
         let cd = id * 4u + i;
-        var p = vec2f(f32(cd % curves.res.x), f32(cd / curves.res.x)) / vec2f(curves.res);
-        p.y = 1.0 - p.y;
-        p = p / curves.uvs.zw;
-        p -= curves.uvs.xy / curves.uvs.zw;
-     
+        let p = (vec2f(f32(cd % glyph.res.x), f32(glyph.res.y - cd / glyph.res.x)) / vec2f(glyph.res) - glyph.uv.xy) / glyph.uv.zw;
         var d = 10000.0;
-        for (var j = 0u; j < curves.size.x; j += 1u) {
-            let curve = curves.data[j];
-            let dir = normalize(curve.c - curve.a) * 0.001;
-            var d1 = bezier_sdf(curve.a + dir, curve.b, curve.c - dir, p);
+        for (var j = 0u; j < glyph.size; j += 1u) {
+            let curve = curves[j + glyph.offset];
+            let dir = normalize(curve.c - curve.a) * 0.002;
+            let d1 = bezier_sdf(curve.a + dir, curve.b, curve.c - dir, p);
             if abs(d1) < abs(d) {
                 d = d1;
             }
