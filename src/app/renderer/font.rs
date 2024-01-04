@@ -251,6 +251,7 @@ impl Font {
         char_atlas_uvs: &[[f32; 2]; 128],
         atlas_texture: &wgpu::Texture,
     ) -> Vec<u8> {
+        let start = std::time::Instant::now();
         let sdf_gen_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: None,
@@ -428,6 +429,11 @@ impl Font {
         let atlas_bytes = sdf_buffer_atlas.slice(..).get_mapped_range();
         let atlas_pixels = atlas_bytes.as_bytes().to_owned();
         drop(atlas_bytes);
+
+        println!(
+            "SDF Gen: {:?}",
+            std::time::Instant::now().duration_since(start)
+        );
 
         atlas_pixels
     }

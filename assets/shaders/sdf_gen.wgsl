@@ -73,9 +73,8 @@ fn bezier_sdf(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {
 fn main(@builtin(global_invocation_id) global_id: vec3u) {
     let id = global_id.x / 4u;
     let glyph = glyphs[global_id.y];
-    let gp = glyph.uv.xy + glyph.uv.zw * 0.5;
     let p = vec2f(f32((id * 4u) % glyph.res.x), f32(glyph.res.y - (id * 4u) / glyph.res.x)) / vec2f(glyph.res);
-    if abs(gp.y - p.y) > glyph.uv.w || abs(gp.x - p.x) > glyph.uv.z {
+    if p.x < glyph.uv.x || p.y < glyph.uv.y || p.x > glyph.uv.x + glyph.uv.z || p.y > glyph.uv.y + glyph.uv.w {
         return;
     }
     for (var i = 0u; i < 4u; i += 1u) {
