@@ -147,7 +147,7 @@ impl Font {
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(atlas_width as u32),
-                    rows_per_image: Some(atlas_height as u32),
+                    rows_per_image: None,
                 },
                 wgpu::Extent3d {
                     width: atlas_width as u32,

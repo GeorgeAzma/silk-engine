@@ -7,6 +7,7 @@ struct VertexOutput {
     @location(4) @interpolate(flat) roundness: f32,
     @location(5) @interpolate(flat) side_ang: f32,
     @location(6) @interpolate(flat) scale: vec2f,
+    @location(7) @interpolate(flat) atlas_uv: vec4f,
 }
 
 @vertex
@@ -19,7 +20,8 @@ fn vs_main(
     @location(4) stroke_width: f32,
     @location(5) roundness: f32,
     @location(6) rotation: f32,
-    @location(7) sides: i32,
+    @location(7) sides: u32,
+    @location(8) atlas_uv: vec4f,
 ) -> VertexOutput {
     var out: VertexOutput;
     out.uv = vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0;
@@ -31,6 +33,7 @@ fn vs_main(
     out.roundness = roundness;
     out.side_ang = 3.141592653589793 / f32(sides);
     out.scale = scale;
+    out.atlas_uv = atlas_uv;
     return out;
 }
 
@@ -46,11 +49,13 @@ fn sdf_ngon(uv: vec2f, side_ang: f32, roundness: f32) -> f32 {
     return (length(p - vec2(r, clamp(p.y, -he, he))) * sign(p.x - r) - rnd) / (1.0 + rnd);
 }
 
-fn elongate(p: vec2f, h: vec2f) -> vec3f
-{
+fn elongate(p: vec2f, h: vec2f) -> vec3f {
     let q = abs(p) - h;
     return vec3f(max(q, vec2f(0.0)), min(max(q.x, q.y), 0.0));
 }
+
+@group(0) @binding(0) var t_atlas: texture_2d<f32>;
+@group(0) @binding(1) var s_atlas: sampler;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
@@ -65,7 +70,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     }
     let dd = length(vec2f(dpdx(d), dpdy(d))) * 1.5;
     var color = mix(in.color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + dd, d));
-    color.a *= smoothstep(0.0, -dd, d); 
+    color.a *= smoothstep(0.0, -dd, d);
+    var tex_uv = in.uv * vec2f(0.5, -0.5) + 0.5;
+    var tex_sc = in.atlas_uv.zw;
+    if in.atlas_uv.z < 0.0 {
+        tex_uv = tex_uv.yx;
+        tex_sc = -tex_sc.xy;
+    }
+    let tex = textureSample(t_atlas, s_atlas, tex_uv * tex_sc + in.atlas_uv.xy);
+    if abs(in.atlas_uv.z) > 0.0 {
+        color *= tex;
+    }
+    if color.a < 0.001 {
+        discard;
+    }
     return color;
 }
  

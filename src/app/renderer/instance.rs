@@ -1,7 +1,10 @@
 use crate::cooldown::{self, *};
+use std::rc::Rc;
 use wgpu::{self, util::DeviceExt};
 
 pub struct Manager<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable + Default> {
+    device: Rc<wgpu::Device>,
+    queue: Rc<wgpu::Queue>,
     instances: Vec<T>,
     instance_buffer: wgpu::Buffer,
     index: usize,
@@ -11,7 +14,7 @@ pub struct Manager<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable + Defaul
 
 impl<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable + Default> Manager<T> {
     const MIN_INSTANCES: usize = 8192;
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &Rc<wgpu::Device>, queue: &Rc<wgpu::Queue>) -> Self {
         let mut instances = Vec::new();
         instances.resize(Self::MIN_INSTANCES, T::default());
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -22,6 +25,8 @@ impl<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable + Default> Manager<T> 
         let max_instances = instances.len();
 
         Self {
+            device: device.clone(),
+            queue: queue.clone(),
             instances,
             instance_buffer,
             index: 0,
@@ -63,17 +68,19 @@ impl<T: Copy + Clone + bytemuck::Pod + bytemuck::Zeroable + Default> Manager<T> 
     }
 
     // Called after finishing adding the instances
-    pub fn flush(&mut self, queue: &wgpu::Queue, device: &wgpu::Device) {
+    pub fn flush(&mut self) {
         self.try_shrink();
         if self.instance_buffer.size() as usize != self.max_instances * std::mem::size_of::<T>() {
-            self.instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: None,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                contents: bytemuck::cast_slice(&self.instances),
-            });
+            self.instance_buffer =
+                self.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: None,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        contents: bytemuck::cast_slice(&self.instances),
+                    });
             println!("Instance buffer resized");
         } else {
-            queue.write_buffer(
+            self.queue.write_buffer(
                 &self.instance_buffer,
                 0,
                 bytemuck::cast_slice(&self.instances[0..self.index]),
