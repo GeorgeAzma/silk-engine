@@ -26,12 +26,15 @@ fn vs_main(
     var out: VertexOutput;
     out.uv = vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0;
     let pos = (cos(rotation) * out.uv * scale + sin(rotation) * vec2f(out.uv.y * scale.y, -out.uv.x * scale.x)) + position.xy;
+    out.side_ang = 3.141592653589793 / f32(sides);
+    if sides != 4u {
+        out.uv /= cos(out.side_ang);
+    }
     out.clip_position = vec4f(pos, position.z, 1.0);
     out.color = unpack4x8unorm(color);
     out.stroke_color = unpack4x8unorm(stroke_color);
     out.stroke_width = stroke_width;
     out.roundness = roundness;
-    out.side_ang = 3.141592653589793 / f32(sides);
     out.scale = scale;
     out.atlas_uv = atlas_uv;
     return out;
@@ -51,7 +54,7 @@ fn sdf_ngon(uv: vec2f, side_ang: f32, roundness: f32) -> f32 {
 
 fn elongate(p: vec2f, h: vec2f) -> vec3f {
     let q = abs(p) - h;
-    return vec3f(max(q, vec2f(0.0)), min(max(q.x, q.y), 0.0));
+    return vec3f(sign(p) * max(q, vec2f(0.0)), min(max(q.x, q.y), 0.0));
 }
 
 @group(0) @binding(0) var t_atlas: texture_2d<f32>;
@@ -68,9 +71,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         let w = elongate(in.uv, vec2f(0.0, 1.0 - scl.x));
         d = w.z + sdf_ngon(w.xy * vec2f(1.0, scl.y), in.side_ang, in.roundness);
     }
+    // let d = sdf_ngon(in.uv, in.side_ang, in.roundness);
+    let px = length(fwidth(in.uv)) * 1.5;
     let dd = length(vec2f(dpdx(d), dpdy(d))) * 1.5;
-    var color = mix(in.color, in.stroke_color, smoothstep(-in.stroke_width, -in.stroke_width + dd, d));
-    color.a *= smoothstep(0.0, -dd, d);
+    var color = mix(in.color, in.stroke_color, clamp((d + in.stroke_width) / dd, 0.0, 1.0));
+    color.a *= clamp((-d + px) / dd, 0.0, 1.0);
     var tex_uv = in.uv * vec2f(0.5, -0.5) + 0.5;
     var tex_sc = in.atlas_uv.zw;
     if in.atlas_uv.z < 0.0 {

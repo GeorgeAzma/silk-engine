@@ -2,3 +2,4 @@
 - Sampler caching
 - Shader caching
 - Reset/Defragment atlas at some point
+- Fix transparency

@@ -1,3 +1,5 @@
+use crate::cooldown;
+
 use super::assets;
 use super::image::Image;
 use std::{
@@ -26,71 +28,122 @@ impl Hash for RcWrapper {
 }
 
 pub struct Packer {
-    size: u32,
+    width: u32,
+    height: u32,
     empty_spaces: Vec<(u32, u32, u32, u32)>,
+    occupied_space: u32,
 }
 
 impl Packer {
-    pub fn new(size: u32) -> Self {
+    pub fn new(width: u32, height: u32) -> Self {
         Self {
-            size,
-            empty_spaces: vec![(0, 0, size, size)],
+            width,
+            height,
+            empty_spaces: vec![(0, 0, width, height)],
+            occupied_space: 0,
         }
     }
 
     // Might rotate the rectangle, do (width == old_width) to check
     pub fn pack(&mut self, mut w: u32, mut h: u32) -> Option<(u32, u32, u32, u32)> {
-        let s = self.empty_spaces.len();
-        for i in 0..s {
-            let (ex, ey, ew, eh) = self.empty_spaces[i];
+        let mut start_i = 0;
 
-            // Rotation
-            if ew > eh && h > w {
-                std::mem::swap(&mut w, &mut h);
-            } else if eh > ew && w > h {
-                std::mem::swap(&mut w, &mut h);
+        let space = self.empty_spaces.binary_search_by(|(_, _, ew, eh)| {
+            let cmp_wh = ew.cmp(&w).then(eh.cmp(&h));
+            if cmp_wh == std::cmp::Ordering::Equal {
+                return std::cmp::Ordering::Equal;
             }
 
-            if w < ew && h < eh {
-                self.empty_spaces.remove(i);
-                if w < h {
-                    self.empty_spaces.push((ex + w, ey, ew - w, h));
-                    self.empty_spaces.push((ex, ey + h, ew, eh - h));
-                } else {
-                    self.empty_spaces.push((ex, ey + h, w, eh - h));
-                    self.empty_spaces.push((ex + w, ey, ew - w, eh));
-                }
-                return Some((ex, ey, w, h));
-            } else if w == ew && h == eh {
-                self.empty_spaces.remove(i);
-                return Some((ex, ey, w, h));
-            } else if w < ew && h == eh {
-                self.empty_spaces.remove(i);
-                self.empty_spaces.push((ex + w, ey, ew - w, eh));
-                return Some((ex, ey, w, h));
-            } else if w == ew && h < eh {
-                self.empty_spaces.remove(i);
-                self.empty_spaces.push((ex, ey + h, ew, eh - h));
-                return Some((ex, ey, w, h));
+            let cmp_hw = ew.cmp(&h).then(eh.cmp(&w));
+            if cmp_hw == std::cmp::Ordering::Equal {
+                std::mem::swap(&mut w, &mut h);
+                return std::cmp::Ordering::Equal;
             }
+
+            if cmp_wh == std::cmp::Ordering::Greater || cmp_hw == std::cmp::Ordering::Greater {
+                return std::cmp::Ordering::Greater;
+            }
+
+            std::cmp::Ordering::Less
+        });
+        if let Ok(space) = space {
+            let (ex, ey, _, _) = self.empty_spaces[space];
+            self.empty_spaces.swap_remove(space);
+            return Some((ex, ey, w, h));
+        } else if let Err(space) = space {
+            start_i = space;
         }
-        return None;
+
+        let len = self.empty_spaces.len();
+        let mut search = |start, end| {
+            for i in start..end {
+                let (ex, ey, ew, eh) = self.empty_spaces[i];
+
+                // Rotation
+                if (ew - w) * (eh - h) > (ew - h) * (eh - w) {
+                    std::mem::swap(&mut w, &mut h);
+                }
+
+                if w < ew && h < eh {
+                    let (big, small) = if ew - w < eh - h {
+                        ((ex, ey + h, ew, eh - h), (ex + w, ey, ew - w, h))
+                    } else {
+                        ((ex + w, ey, ew - w, eh), (ex, ey + h, w, eh - h))
+                    };
+                    self.empty_spaces.push(big);
+                    self.empty_spaces.push(small);
+                    self.empty_spaces.swap_remove(i);
+                    return Some((ex, ey, w, h));
+                } else if w < ew && h == eh {
+                    self.empty_spaces.push((ex + w, ey, ew - w, eh));
+                    self.empty_spaces.swap_remove(i);
+                    return Some((ex, ey, w, h));
+                } else if w == ew && h < eh {
+                    self.empty_spaces.push((ex, ey + h, ew, eh - h));
+                    self.empty_spaces.swap_remove(i);
+                    return Some((ex, ey, w, h));
+                }
+            }
+
+            return None;
+        };
+
+        if let Some(space) = search(start_i, len) {
+            return Some(space);
+        } else {
+            return search(0, start_i);
+        }
     }
 
     pub fn reset(&mut self) {
-        self.empty_spaces = vec![(0, 0, self.size, self.size)];
+        self.empty_spaces = vec![(0, 0, self.width, self.height)];
     }
 
     // Note: not a perfect resize
-    pub fn resize(&mut self, size: u32) {
-        assert!(size >= self.size);
-        if size == self.size {
+    pub fn resize(&mut self, width: u32, height: u32) {
+        assert!(width >= self.width && height >= self.height);
+        if width == self.width && height == self.height {
             return;
         }
-        let dt = size - self.size;
-        self.empty_spaces.push((self.size, 0, dt, size - dt));
-        self.empty_spaces.push((0, self.size, size, dt));
-        self.size = size;
+        let (big, small) = if width - self.width < height - self.height {
+            (
+                (0, self.height, width, height - self.height),
+                (self.width, 0, width - self.width, self.height),
+            )
+        } else {
+            (
+                (self.width, 0, width - self.width, height),
+                (0, self.height, self.width, height - self.height),
+            )
+        };
+        self.empty_spaces.push(big);
+        self.empty_spaces.push(small);
+        self.width = width;
+        self.height = height;
+    }
+
+    pub fn occupied(&self) -> u32 {
+        self.occupied_space
     }
 }
 
@@ -107,16 +160,17 @@ pub struct Manager {
     needs_resize: bool,
     textures: HashMap<RcWrapper, (u32, u32, u32, u32)>,
     scheduled_writes: Vec<(Rc<Image>, u32, u32, u32, u32)>,
+    shrink_cooldown: cooldown::Cooldown,
 }
 
 impl Manager {
     pub fn new(device: &Rc<wgpu::Device>, queue: &Rc<wgpu::Queue>) -> Self {
-        let packer = Packer::new(64);
+        let packer = Packer::new(64, 64);
 
         let mut atlas = Image::new_2d(
             device,
-            packer.size,
-            packer.size,
+            packer.width,
+            packer.height,
             wgpu::TextureFormat::Rgba8Unorm,
             wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
@@ -243,6 +297,7 @@ impl Manager {
             needs_resize: false,
             textures: HashMap::new(),
             scheduled_writes: Vec::new(),
+            shrink_cooldown: cooldown::Cooldown::new(std::time::Duration::from_secs_f32(5.0)),
         }
     }
 
@@ -257,12 +312,11 @@ impl Manager {
             if *w != image.texture.width() {
                 s = -1.0;
             }
-            let n = 1.0 / self.packer.size as f32;
             return (
-                *x as f32 * n,
-                *y as f32 * n,
-                *w as f32 * n * s,
-                *h as f32 * n * s,
+                *x as f32 / self.packer.width as f32,
+                *y as f32 / self.packer.height as f32,
+                *w as f32 / self.packer.width as f32 * s,
+                *h as f32 / self.packer.height as f32 * s,
             );
         }
 
@@ -271,8 +325,12 @@ impl Manager {
             .pack(image.texture.width(), image.texture.height());
         if let Some((x, y, w, h)) = space {
             self.write(image, x, y, w, h);
-            let n = 1.0 / self.packer.size as f32;
-            return (x as f32 * n, y as f32 * n, w as f32 * n, h as f32 * n);
+            return (
+                x as f32 / self.packer.width as f32,
+                y as f32 / self.packer.height as f32,
+                w as f32 / self.packer.width as f32,
+                h as f32 / self.packer.height as f32,
+            );
         }
 
         self.needs_resize = true;
@@ -286,7 +344,11 @@ impl Manager {
     }
 
     pub fn flush(&mut self, encoder: &mut wgpu::CommandEncoder) {
-        self.resize();
+        if self.needs_resize {
+            self.needs_resize = false;
+            self.resize(self.packer.width * 2, self.packer.height * 2);
+        }
+        // TODO: shrink overtime
         for (image, x, y, w, h) in self.scheduled_writes.iter() {
             // Rotated
             if *w != image.texture.width() {
@@ -360,24 +422,19 @@ impl Manager {
         self.scheduled_writes.clear();
     }
 
-    fn resize(&mut self) {
-        if !self.needs_resize {
-            return;
-        }
-        self.needs_resize = false;
-
+    fn resize(&mut self, width: u32, height: u32) {
         // This will recalculate everything next frame
         // It's avoidable, but I was encountering bugs
         // So decided to leave it
-        self.packer.resize(self.packer.size * 2);
+        self.packer.resize(width, height);
         self.packer.reset();
         self.textures.clear();
 
         let sampler = self.atlas.sampler.as_ref().unwrap().clone();
         self.atlas = Image::new_2d(
             &self.device,
-            self.packer.size,
-            self.packer.size,
+            self.packer.width,
+            self.packer.height,
             wgpu::TextureFormat::Rgba8Unorm,
             wgpu::TextureUsages::STORAGE_BINDING
                 | wgpu::TextureUsages::TEXTURE_BINDING
