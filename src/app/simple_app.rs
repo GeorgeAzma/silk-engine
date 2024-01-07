@@ -42,9 +42,7 @@ impl SimpleApp {
         }
     }
 
-    pub fn update(&mut self) {
-        // println!("Frame: {:.2}ms", self.dt * 1000.0)
-    }
+    pub fn update(&mut self) {}
 
     pub fn event(&mut self, _event: &WindowEvent) {}
 

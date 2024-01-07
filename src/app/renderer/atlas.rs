@@ -31,7 +31,6 @@ pub struct Packer {
     width: u32,
     height: u32,
     empty_spaces: Vec<(u32, u32, u32, u32)>,
-    occupied_space: u32,
 }
 
 impl Packer {
@@ -40,7 +39,6 @@ impl Packer {
             width,
             height,
             empty_spaces: vec![(0, 0, width, height)],
-            occupied_space: 0,
         }
     }
 
@@ -68,7 +66,7 @@ impl Packer {
         });
         if let Ok(space) = space {
             let (ex, ey, _, _) = self.empty_spaces[space];
-            self.empty_spaces.swap_remove(space);
+            self.empty_spaces.remove(space);
             return Some((ex, ey, w, h));
         } else if let Err(space) = space {
             start_i = space;
@@ -79,33 +77,33 @@ impl Packer {
             for i in start..end {
                 let (ex, ey, ew, eh) = self.empty_spaces[i];
 
-                // Rotation
-                if (ew - w) * (eh - h) > (ew - h) * (eh - w) {
-                    std::mem::swap(&mut w, &mut h);
-                }
+                if w <= ew && h <= eh || h <= ew && w <= eh {
+                    if (ew - w) * (eh - h) > (ew - h) * (eh - w) {
+                        std::mem::swap(&mut w, &mut h); // Rotate
+                    }
 
-                if w < ew && h < eh {
-                    let (big, small) = if ew - w < eh - h {
-                        ((ex, ey + h, ew, eh - h), (ex + w, ey, ew - w, h))
+                    return if w < ew && h < eh {
+                        if ew - w < eh - h {
+                            self.empty_spaces[i] = (ex + w, ey, ew - w, h);
+                            self.empty_spaces.push((ex, ey + h, ew, eh - h));
+                        } else {
+                            self.empty_spaces[i] = (ex, ey + h, w, eh - h);
+                            self.empty_spaces.push((ex + w, ey, ew - w, eh));
+                        }
+                        Some((ex, ey, w, h))
+                    } else if h == eh {
+                        self.empty_spaces[i] = (ex + w, ey, ew - w, eh);
+                        Some((ex, ey, w, h))
+                    } else if w == ew {
+                        self.empty_spaces[i] = (ex, ey + h, ew, eh - h);
+                        Some((ex, ey, w, h))
                     } else {
-                        ((ex + w, ey, ew - w, eh), (ex, ey + h, w, eh - h))
+                        self.empty_spaces.swap_remove(i);
+                        Some((ex, ey, w, h))
                     };
-                    self.empty_spaces.push(big);
-                    self.empty_spaces.push(small);
-                    self.empty_spaces.swap_remove(i);
-                    return Some((ex, ey, w, h));
-                } else if w < ew && h == eh {
-                    self.empty_spaces.push((ex + w, ey, ew - w, eh));
-                    self.empty_spaces.swap_remove(i);
-                    return Some((ex, ey, w, h));
-                } else if w == ew && h < eh {
-                    self.empty_spaces.push((ex, ey + h, ew, eh - h));
-                    self.empty_spaces.swap_remove(i);
-                    return Some((ex, ey, w, h));
                 }
             }
-
-            return None;
+            None
         };
 
         if let Some(space) = search(start_i, len) {
@@ -140,10 +138,6 @@ impl Packer {
         self.empty_spaces.push(small);
         self.width = width;
         self.height = height;
-    }
-
-    pub fn occupied(&self) -> u32 {
-        self.occupied_space
     }
 }
 
