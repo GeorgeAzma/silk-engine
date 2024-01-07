@@ -31,14 +31,16 @@ pub struct Packer {
     width: u32,
     height: u32,
     empty_spaces: Vec<(u32, u32, u32, u32)>,
+    allow_rotate: bool,
 }
 
 impl Packer {
-    pub fn new(width: u32, height: u32) -> Self {
+    pub fn new(width: u32, height: u32, allow_rotate: bool) -> Self {
         Self {
             width,
             height,
             empty_spaces: vec![(0, 0, width, height)],
+            allow_rotate,
         }
     }
 
@@ -46,24 +48,32 @@ impl Packer {
     pub fn pack(&mut self, mut w: u32, mut h: u32) -> Option<(u32, u32, u32, u32)> {
         let mut start_i = 0;
 
-        let space = self.empty_spaces.binary_search_by(|(_, _, ew, eh)| {
-            let cmp_wh = ew.cmp(&w).then(eh.cmp(&h));
-            if cmp_wh == std::cmp::Ordering::Equal {
-                return std::cmp::Ordering::Equal;
-            }
+        let space;
+        if self.allow_rotate {
+            space = self.empty_spaces.binary_search_by(|(_, _, ew, eh)| {
+                let cmp_wh = ew.cmp(&w).then(eh.cmp(&h));
+                if cmp_wh == std::cmp::Ordering::Equal {
+                    return std::cmp::Ordering::Equal;
+                }
 
-            let cmp_hw = ew.cmp(&h).then(eh.cmp(&w));
-            if cmp_hw == std::cmp::Ordering::Equal {
-                std::mem::swap(&mut w, &mut h);
-                return std::cmp::Ordering::Equal;
-            }
+                let cmp_hw = ew.cmp(&h).then(eh.cmp(&w));
+                if cmp_hw == std::cmp::Ordering::Equal {
+                    std::mem::swap(&mut w, &mut h);
+                    return std::cmp::Ordering::Equal;
+                }
 
-            if cmp_wh == std::cmp::Ordering::Greater || cmp_hw == std::cmp::Ordering::Greater {
-                return std::cmp::Ordering::Greater;
-            }
+                if cmp_wh == std::cmp::Ordering::Greater || cmp_hw == std::cmp::Ordering::Greater {
+                    return std::cmp::Ordering::Greater;
+                }
 
-            std::cmp::Ordering::Less
-        });
+                std::cmp::Ordering::Less
+            });
+        } else {
+            space = self
+                .empty_spaces
+                .binary_search_by(|(_, _, ew, eh)| ew.cmp(&w).then(eh.cmp(&h)));
+        }
+
         if let Ok(space) = space {
             let (ex, ey, _, _) = self.empty_spaces[space];
             self.empty_spaces.remove(space);
@@ -77,8 +87,8 @@ impl Packer {
             for i in start..end {
                 let (ex, ey, ew, eh) = self.empty_spaces[i];
 
-                if w <= ew && h <= eh || h <= ew && w <= eh {
-                    if (ew - w) * (eh - h) > (ew - h) * (eh - w) {
+                if (w <= ew && h <= eh) || (self.allow_rotate && h <= ew && w <= eh) {
+                    if self.allow_rotate && ((ew - w) * (eh - h) > (ew - h) * (eh - w)) {
                         std::mem::swap(&mut w, &mut h); // Rotate
                     }
 
@@ -159,7 +169,7 @@ pub struct Manager {
 
 impl Manager {
     pub fn new(device: &Rc<wgpu::Device>, queue: &Rc<wgpu::Queue>) -> Self {
-        let packer = Packer::new(64, 64);
+        let packer = Packer::new(64, 64, true);
 
         let mut atlas = Image::new_2d(
             device,
