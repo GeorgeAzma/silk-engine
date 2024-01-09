@@ -1,3 +1,4 @@
+use crate::renderer;
 use image::EncodableLayout;
 use std::rc::Rc;
 use winit::{
@@ -7,7 +8,6 @@ use winit::{
     window::Window,
     window::WindowBuilder,
 };
-mod renderer;
 mod simple_app;
 
 struct App {

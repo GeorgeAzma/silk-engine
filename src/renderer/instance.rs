@@ -1,4 +1,4 @@
-use crate::cooldown::{self, *};
+use crate::cooldown;
 use std::rc::Rc;
 use wgpu::{self, util::DeviceExt};
 
