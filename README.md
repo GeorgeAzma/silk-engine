@@ -29,7 +29,6 @@ gfx.bold = 0.5;
 gfx.text("Efficient Text Rendering", 0.0, 0.0, 1.0);
 ```
 
-Interestingly this renderers all the shapes using a single shader with Signed Distance Fields (SDFs).
 Using WGPU for rendering.
 
 ## Future Plan:
@@ -41,3 +40,7 @@ Using WGPU for rendering.
 - Fix wrong antialiasing for straight edges
 - Shader data compression
 - Render text using same shader
+
+## Renderer Technical Details
+- 2D primitives/shapes are rendered using a single shader for efficiency
+- Font SDF is generated in compute shader using bezier curves directly (in 10ms for 96 chars on GTX 1060)
