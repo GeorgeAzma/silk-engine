@@ -29,8 +29,6 @@ gfx.bold = 0.5;
 gfx.text("Efficient Text Rendering", 0.0, 0.0, 1.0);
 ```
 
-Using WGPU for rendering.
-
 ## Future Plan:
 - Add blurred shape rendering (simple)
 - Add shadows/glow (or do them using blurred shapes)
@@ -44,3 +42,4 @@ Using WGPU for rendering.
 ## Renderer Technical Details
 - 2D primitives/shapes are rendered using a single shader for efficiency
 - Font SDF is generated in compute shader using bezier curves directly (in 10ms for 96 chars on GTX 1060)
+- Uses WGPU for rendering, might switch to vulkano if performance demands it, but probably not
