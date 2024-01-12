@@ -1,4 +1,4 @@
-# 2D Rust Graphics Library
+# 2D Rust Graphics Library (Super Simple, Super Efficient)
 ### **Render 1M+ 2D shapes, with 240+ FPS**
 
 ## Features
