@@ -230,7 +230,7 @@ impl App {
 
     #[allow(dead_code)]
     pub fn mouse_down(&self, m: MouseButton) -> bool {
-        return self.key[Self::mouse_button_idx(m)];
+        return self.mouse[Self::mouse_button_idx(m)];
     }
 
     #[allow(dead_code)]
