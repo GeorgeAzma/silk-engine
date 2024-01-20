@@ -1,12 +1,8 @@
-use crate::cooldown;
-
 use super::assets;
 use super::image::Image;
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
-    num::NonZeroU32,
-    ops::Deref,
     rc::Rc,
 };
 
@@ -164,7 +160,6 @@ pub struct Manager {
     needs_resize: bool,
     textures: HashMap<RcWrapper, (u32, u32, u32, u32)>,
     scheduled_writes: Vec<(Rc<Image>, u32, u32, u32, u32)>,
-    shrink_cooldown: cooldown::Cooldown,
 }
 
 impl Manager {
@@ -301,7 +296,6 @@ impl Manager {
             needs_resize: false,
             textures: HashMap::new(),
             scheduled_writes: Vec::new(),
-            shrink_cooldown: cooldown::Cooldown::new(std::time::Duration::from_secs_f32(5.0)),
         }
     }
 

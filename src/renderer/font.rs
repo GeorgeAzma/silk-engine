@@ -1,7 +1,6 @@
 use crate::assets;
 use image::EncodableLayout;
 use owned_ttf_parser::AsFaceRef;
-use rand::Error;
 use wgpu::util::*;
 
 #[derive(Clone, Debug)]

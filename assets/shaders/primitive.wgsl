@@ -42,14 +42,13 @@ fn vs_main(
 
 fn sdf_ngon(uv: vec2f, side_ang: f32, roundness: f32) -> f32 {
     let rnd = 2.0 / clamp(1.0 - roundness, 1e-5, 1.0) - 2.0;
-    let r = 1.0;
-    var p = uv * (1.0 + rnd / r);
-    let he = r * tan(side_ang);
+    var p = uv * (1.0 + rnd);
+    let he = tan(side_ang);
     p = -p.yx;
     let bn = 2. * side_ang * floor((atan2(p.y, p.x) + side_ang) / side_ang * .5);
     let cs = vec2f(cos(bn), sin(bn));
     p = mat2x2(cs.x, -cs.y, cs.y, cs.x) * p;
-    return (length(p - vec2(r, clamp(p.y, -he, he))) * sign(p.x - r) - rnd) / (1.0 + rnd);
+    return (length(p - vec2(1.0, clamp(p.y, -he, he))) * sign(p.x - 1.0) - rnd) / (1.0 + rnd);
 }
 
 fn elongate(p: vec2f, h: vec2f) -> vec3f {

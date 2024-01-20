@@ -1,7 +1,4 @@
-use std::{f32::EPSILON, num::NonZeroU32};
-
 use std::rc::Rc;
-use wgpu::{util::DeviceExt, ShaderStages, SurfaceConfiguration};
 
 pub mod atlas;
 pub mod font;
@@ -79,7 +76,7 @@ impl TextInstance {
 
 pub struct Renderer {
     device: Rc<wgpu::Device>,
-    queue: Rc<wgpu::Queue>,
+    _queue: Rc<wgpu::Queue>,
     primitive_instance_manager: instance::Manager<PrimitiveInstance>,
     primitive_pipeline: wgpu::RenderPipeline,
     text_instance_manager: instance::Manager<TextInstance>,
@@ -267,7 +264,7 @@ impl Renderer {
 
         Self {
             device: device.clone(),
-            queue: queue.clone(),
+            _queue: queue.clone(),
             primitive_instance_manager: instance::Manager::new(device, queue),
             primitive_pipeline,
             text_instance_manager: instance::Manager::new(device, queue),
@@ -371,15 +368,13 @@ impl Renderer {
     }
 
     pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, size: f32) {
-        let mid_x = (x1 + x2) * 0.5;
-        let mid_y = (y1 + y2) * 0.5;
         let dir_x = x2 - x1;
         let dir_y = y2 - y1;
         let length = (dir_x * dir_x + dir_y * dir_y).sqrt() * 0.5;
-        let old_rotation = self.rotation;
-        self.rotation -= dir_y.atan2(dir_x);
-        self.round_rect(mid_x, mid_y, length + size, size, 1.0);
-        self.rotation = old_rotation;
+        let angle = dir_y.atan2(dir_x);
+        self.rotation -= angle;
+        self.round_rect((x1 + x2) * 0.5, (y1 + y2) * 0.5, length + size, size, 1.0);
+        self.rotation += angle;
     }
 
     pub fn lines(&mut self, points: &[f32], size: f32) {
