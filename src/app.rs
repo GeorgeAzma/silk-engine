@@ -24,6 +24,7 @@ struct App {
     dt: f32,
     mouse_x: f32,
     mouse_y: f32,
+    mouse_scroll: f32,
     mouse: [bool; 5],
     key: [bool; 194],
     mouse_pressed: [bool; 5],
@@ -98,6 +99,7 @@ impl App {
             dt: 0.0,
             mouse_x: 0.0,
             mouse_y: 0.0,
+            mouse_scroll: 0.0,
             mouse: [false; 5],
             key: [false; 194],
             mouse_pressed: [false; 5],
@@ -136,6 +138,17 @@ impl App {
                 state,
                 button,
             } => self.mouse[Self::mouse_button_idx(*button)] = state.is_pressed(),
+            WindowEvent::MouseWheel {
+                device_id: _,
+                delta,
+                phase: _,
+            } => {
+                use winit::event::MouseScrollDelta;
+                match delta {
+                    MouseScrollDelta::LineDelta(_, y) => self.mouse_scroll = *y,
+                    MouseScrollDelta::PixelDelta(_) => todo!(),
+                }
+            }
             WindowEvent::Touch(touch) => {
                 self.mouse_x = touch.location.x as f32;
                 self.mouse_y = touch.location.y as f32;
@@ -195,6 +208,7 @@ impl App {
 
         output.present();
 
+        self.mouse_scroll = 0.0;
         self.mouse_pressed = self.mouse.clone();
         self.key_pressed = self.key.clone();
 
