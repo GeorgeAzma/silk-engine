@@ -173,8 +173,6 @@ impl App {
         let simple_app = self.simple_app.as_mut().unwrap();
         simple_app.app = ptr;
         simple_app.update();
-        self.mouse_pressed = self.mouse.clone();
-        self.key_pressed = self.key.clone();
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -196,6 +194,9 @@ impl App {
         self.queue.submit(std::iter::once(encoder.finish()));
 
         output.present();
+
+        self.mouse_pressed = self.mouse.clone();
+        self.key_pressed = self.key.clone();
 
         Ok(())
     }
