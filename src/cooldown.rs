@@ -1,6 +1,6 @@
 pub struct Cooldown {
     timer: std::time::Instant,
-    delay: std::time::Duration,
+    pub delay: std::time::Duration,
 }
 
 impl Cooldown {
@@ -11,11 +11,19 @@ impl Cooldown {
         }
     }
 
+    pub fn ready(&self) -> bool {
+        self.dt() >= self.delay
+    }
+
+    pub fn dt(&self) -> std::time::Duration {
+        self.timer.elapsed()
+    }
+
     pub fn reset(&mut self) {
         self.timer = std::time::Instant::now();
     }
 
-    pub fn ready(&self) -> bool {
-        self.timer.elapsed() >= self.delay
+    pub fn next(&mut self) {
+        self.timer += self.delay;
     }
 }
