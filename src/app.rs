@@ -113,7 +113,7 @@ impl App {
 
     fn resize(&mut self, width: u32, height: u32) {
         self.width = width;
-        self.width = height;
+        self.height = height;
         if width > 0 && height > 0 {
             self.surface_config.width = width;
             self.surface_config.height = height;
@@ -206,7 +206,9 @@ impl App {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        output.present();
+        if self.width != 0 && self.height != 0 {
+            output.present();
+        }
 
         self.mouse_scroll = 0.0;
         self.mouse_pressed = self.mouse.clone();

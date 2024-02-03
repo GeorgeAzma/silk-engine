@@ -9,7 +9,7 @@ use crate::assets;
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct PrimitiveInstance {
-    pub position: [f32; 3],
+    pub position: [f32; 2],
     pub scale: [f32; 2],
     pub color: [u8; 4],
     pub stroke_color: [u8; 4],
@@ -23,7 +23,7 @@ pub struct PrimitiveInstance {
 impl PrimitiveInstance {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         static ATTRS: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
-            0 => Float32x3,
+            0 => Float32x2,
             1 => Float32x2,
             2 => Uint32,
             3 => Uint32,
@@ -44,7 +44,7 @@ impl PrimitiveInstance {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable, Default)]
 pub struct TextInstance {
-    pub position: [f32; 3],
+    pub position: [f32; 2],
     pub scale: [f32; 2],
     pub color: [u8; 4],
     pub stroke_color: [u8; 4],
@@ -57,7 +57,7 @@ pub struct TextInstance {
 impl TextInstance {
     pub fn desc() -> wgpu::VertexBufferLayout<'static> {
         static ATTRS: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array![
-            0 => Float32x3,
+            0 => Float32x2,
             1 => Float32x2,
             2 => Uint32,
             3 => Uint32,
@@ -82,14 +82,11 @@ pub struct Renderer {
     text_instance_manager: instance::Manager<TextInstance>,
     text_pipeline: wgpu::RenderPipeline,
     text_bind_group: wgpu::BindGroup,
-    depth_texture: wgpu::Texture,
-    depth_view: wgpu::TextureView,
     atlas_manager: atlas::Manager,
     current_texture_uv: [f32; 4],
     width: u32,
     height: u32,
     pub font: font::Font,
-    pub depth: f32,
     pub position: [f32; 2],
     pub scale: [f32; 2],
     pub color: [u8; 4],
@@ -106,23 +103,6 @@ impl Renderer {
         queue: &Rc<wgpu::Queue>,
         surf_conf: &wgpu::SurfaceConfiguration,
     ) -> Self {
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Depth"),
-            size: wgpu::Extent3d {
-                width: surf_conf.width,
-                height: surf_conf.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
         let atlas_manager = atlas::Manager::new(device, queue);
 
         let primitive_pipeline_layout =
@@ -159,13 +139,7 @@ impl Renderer {
                 unclipped_depth: false,                // Features::DEPTH_CLIP_CONTROL
                 conservative: false,                   // Features::CONSERVATIVE_RASTERIZATION
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -247,13 +221,7 @@ impl Renderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
+            depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -270,14 +238,11 @@ impl Renderer {
             text_instance_manager: instance::Manager::new(device, queue),
             text_pipeline,
             text_bind_group,
-            depth_texture,
-            depth_view,
             atlas_manager,
             current_texture_uv: [0.0, 0.0, 0.0, 0.0],
             font,
             width: surf_conf.width,
             height: surf_conf.height,
-            depth: 1.0,
             position: [0.0, 0.0],
             scale: [1.0, 1.0],
             color: [255, 255, 255, 255],
@@ -291,28 +256,11 @@ impl Renderer {
 
     // Always resize before rendering, if surface is same this does nothing
     pub fn resize(&mut self, width: u32, height: u32) {
-        if width == self.width && height == self.height {
+        if width == self.width && height == self.height || width == 0 || height == 0 {
             return;
         }
         self.width = width;
         self.height = height;
-        self.depth_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-        self.depth_view = self
-            .depth_texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
     }
 
     pub fn set_image(&mut self, image: &Rc<image::Image>) {
@@ -324,15 +272,13 @@ impl Renderer {
         self.current_texture_uv = [0.0, 0.0, 0.0, 0.0];
     }
 
-    pub fn add(&mut self, mut instance: PrimitiveInstance) {
-        self.depth -= f32::EPSILON;
-        instance.position[2] = self.depth;
+    pub fn add(&mut self, instance: PrimitiveInstance) {
         self.primitive_instance_manager.add(instance);
     }
 
     pub fn ngon(&mut self, x: f32, y: f32, width: f32, height: f32, sides: u32) {
         self.add(PrimitiveInstance {
-            position: [x + self.position[0], y + self.position[1], 0.0],
+            position: [x + self.position[0], y + self.position[1]],
             scale: [width * self.scale[0], height * self.scale[1]],
             color: self.color,
             stroke_color: self.stroke_color,
@@ -386,9 +332,7 @@ impl Renderer {
             let p2x = points[(i + 1) * 2];
             let p2y = points[(i + 1) * 2 + 1];
             self.line(p1x, p1y, p2x, p2y, size);
-            self.depth += f32::EPSILON;
         }
-        self.depth -= f32::EPSILON;
     }
 
     pub fn circle(&mut self, x: f32, y: f32, radius: f32) {
@@ -409,9 +353,8 @@ impl Renderer {
             let (cw, ch) = self.font.char_size(c);
             self.text_instance_manager.add(TextInstance {
                 position: [
-                    x + cx * size * self.scale[0],
-                    y + cy * size * self.scale[1],
-                    self.depth,
+                    x + self.position[0] + cx * size * self.scale[0],
+                    y + self.position[1] + cy * size * self.scale[1],
                 ],
                 scale: [size * self.scale[0] * cw, size * self.scale[1] * ch],
                 color: self.color,
@@ -422,7 +365,6 @@ impl Renderer {
                 bold: self.bold,
             });
         }
-        self.depth -= f32::EPSILON;
     }
 
     pub fn atlas(&mut self) {
@@ -442,7 +384,6 @@ impl Renderer {
     }
 
     pub fn render(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        self.depth = 1.0;
         self.reset();
         self.atlas_manager.flush(encoder);
         self.primitive_instance_manager.flush();
@@ -462,14 +403,7 @@ impl Renderer {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.depth_view,
-                depth_ops: Some(wgpu::Operations::<f32> {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
+            depth_stencil_attachment: None,
             timestamp_writes: None,
             occlusion_query_set: None,
         });
