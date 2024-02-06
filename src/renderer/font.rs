@@ -540,8 +540,13 @@ impl Font {
 
     pub fn char_size(&self, c: char) -> (f32, f32) {
         let font = self.font.as_face_ref();
-        let gid = font.glyph_index(c).unwrap();
-        let bb = font.glyph_bounding_box(gid).unwrap();
+        let gid = font.glyph_index(c).unwrap_or_default();
+        let bb = font.glyph_bounding_box(gid).unwrap_or(Rect {
+            x_min: 0,
+            y_min: 0,
+            x_max: 0,
+            y_max: 0,
+        });
         let em = 1.0 / font.units_per_em() as f32;
         (bb.width() as f32 * em, bb.height() as f32 * em)
     }
@@ -557,6 +562,15 @@ impl Font {
         });
         let em = 1.0 / font.units_per_em() as f32;
         (bb.x_min as f32 * em, (bb.y_min + bb.y_max) as f32 * em)
+    }
+
+    pub fn global_size(&self) -> (f32, f32) {
+        let font = self.font.as_face_ref();
+        let em = 1.0 / font.units_per_em() as f32;
+        (
+            font.global_bounding_box().width() as f32 * em,
+            font.global_bounding_box().height() as f32 * em,
+        )
     }
 
     pub fn atlas_view(&self) -> &wgpu::TextureView {
