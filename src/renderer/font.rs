@@ -478,8 +478,8 @@ impl Font {
                     layout.push((x as f32 * em, y * em));
                 }
                 '\n' => {
-                    y -= y_space;
                     layout.push((x as f32 * em, y * em));
+                    y -= y_space;
                     x = 0.0;
                 }
                 '\t' => {
@@ -538,7 +538,7 @@ impl Font {
 
     pub fn char_off(&self, c: char) -> (f32, f32) {
         let font = self.font.as_face_ref();
-        let gid = font.glyph_index(c).unwrap();
+        let gid = font.glyph_index(c).unwrap_or_default();
         let bb = font.glyph_bounding_box(gid).unwrap_or(Rect {
             x_min: 0,
             y_min: 0,
