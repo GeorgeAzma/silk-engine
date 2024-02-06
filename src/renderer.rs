@@ -299,10 +299,9 @@ impl Renderer {
     }
 
     pub fn round_rect(&mut self, x: f32, y: f32, width: f32, height: f32, roundness: f32) {
-        let old_roundness = self.roundness;
         self.roundness += roundness;
         self.rect(x, y, width, height);
-        self.roundness = old_roundness;
+        self.roundness -= roundness;
     }
 
     pub fn square(&mut self, x: f32, y: f32, size: f32) {
@@ -343,11 +342,17 @@ impl Renderer {
         self.ngon(x, y, width, height, 8192)
     }
 
-    pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32) {
-        let layout = self.font.calc_layout(text);
+    pub fn text_with_layout(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        size: f32,
+        layout: &Vec<(f32, f32)>,
+    ) {
         for (i, c) in text.chars().enumerate() {
             let (cx, cy) = layout[i];
-            if cx < 0.0 {
+            if !c.is_ascii_graphic() {
                 continue;
             }
             let (cw, ch) = self.font.char_size(c);
@@ -365,6 +370,11 @@ impl Renderer {
                 bold: self.bold,
             });
         }
+    }
+
+    pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32) {
+        let layout = self.font.calc_layout(text);
+        self.text_with_layout(text, x, y, size, &layout);
     }
 
     pub fn atlas(&mut self) {

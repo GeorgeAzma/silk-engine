@@ -70,7 +70,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         let w = elongate(in.uv, vec2f(0.0, 1.0 - scl.x));
         d = w.z + sdf_ngon(w.xy * vec2f(1.0, scl.y), in.side_ang, in.roundness);
     }
-    let dd = length(vec2f(dpdx(d), dpdy(d))) * 1.5;
+    let dd = length(vec2f(dpdx(d), dpdy(d)));
     var color = mix(in.color, in.stroke_color, clamp((d + in.stroke_width) / dd, 0.0, 1.0));
     color.a *= clamp(-d / dd, 0.0, 1.0);
     var tex_uv = in.uv * vec2f(0.5, -0.5) + 0.5;

@@ -457,50 +457,52 @@ impl Font {
         img.to_luma8().into_vec()
     }
 
-    /// # Returns
-    /// (x: f32, y: f32) locations of chars in em units, x or y is negative if char is not renderable
     pub fn calc_layout(&self, text: &str) -> Vec<(f32, f32)> {
-        let mut x: i32 = 0;
-        let mut y: i32 = 0;
+        let mut x = 0.0;
+        let mut y = 0.0;
         let font = self.font.as_face_ref();
-        let x_space = (font.global_bounding_box().width() as f32 * 0.5) as i32;
-        let y_space = (font.global_bounding_box().height() as f32 * 1.5) as i32;
+        let x_space = font.global_bounding_box().width() as f32 * 0.5;
+        let y_space = font.global_bounding_box().height() as f32 * 1.5;
         let mut layout = Vec::with_capacity(text.len());
-        let gap = (0.1 * font.units_per_em() as f32) as i32;
+        let gap = 0.1 * font.units_per_em() as f32;
+        let em = 1.0 / font.units_per_em() as f32;
         let mut prev_c: char = '\0';
         for c in text.chars() {
             match c {
                 ' ' => {
                     x += x_space;
-                    layout.push((-1.0, -1.0));
+                    layout.push((x * em, y * em));
+                }
+                '\r' => {
+                    x = 0.0;
+                    layout.push((x as f32 * em, y * em));
                 }
                 '\n' => {
                     y -= y_space;
-                    x = 0;
-                    layout.push((-1.0, -1.0));
+                    layout.push((x as f32 * em, y * em));
+                    x = 0.0;
                 }
                 '\t' => {
-                    x += x_space * 4;
-                    layout.push((-1.0, -1.0));
+                    x += x_space * 4.0;
+                    layout.push((x * em, y * em));
                 }
                 _ if c.is_ascii_graphic() => {
-                    let em = 1.0 / font.units_per_em() as f32;
                     let gid = font.glyph_index(c).unwrap();
                     let bb = font.glyph_bounding_box(gid).unwrap();
                     let prev_gid = font.glyph_index(prev_c);
                     if let Some(prev_gid) = prev_gid {
                         let prev_bb = font.glyph_bounding_box(prev_gid);
                         if let Some(prev_bb) = prev_bb {
-                            x += prev_bb.width() as i32 + gap;
+                            x += prev_bb.width() as f32 + gap;
                         }
                     }
-                    x += bb.width() as i32 + gap;
-                    let xoff = bb.x_min as i32;
-                    let yoff = (bb.y_min + bb.y_max) as i32;
-                    layout.push(((x + xoff) as f32 * em, (y + yoff) as f32 * em));
+                    x += bb.width() as f32 + gap;
+                    let xoff = bb.x_min as f32;
+                    let yoff = (bb.y_min + bb.y_max) as f32;
+                    layout.push(((x + xoff) * em, (y + yoff) * em));
                 }
                 _ => {
-                    layout.push((-1.0, -1.0));
+                    layout.push((x * em, y * em));
                 }
             }
             prev_c = c;
@@ -530,8 +532,21 @@ impl Font {
         let font = self.font.as_face_ref();
         let gid = font.glyph_index(c).unwrap();
         let bb = font.glyph_bounding_box(gid).unwrap();
-        let n = 1.0 / font.units_per_em() as f32;
-        (bb.width() as f32 * n, bb.height() as f32 * n)
+        let em = 1.0 / font.units_per_em() as f32;
+        (bb.width() as f32 * em, bb.height() as f32 * em)
+    }
+
+    pub fn char_off(&self, c: char) -> (f32, f32) {
+        let font = self.font.as_face_ref();
+        let gid = font.glyph_index(c).unwrap();
+        let bb = font.glyph_bounding_box(gid).unwrap_or(Rect {
+            x_min: 0,
+            y_min: 0,
+            x_max: 0,
+            y_max: 0,
+        });
+        let em = 1.0 / font.units_per_em() as f32;
+        (bb.x_min as f32 * em, (bb.y_min + bb.y_max) as f32 * em)
     }
 
     pub fn atlas_view(&self) -> &wgpu::TextureView {
