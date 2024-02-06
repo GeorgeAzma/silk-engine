@@ -457,34 +457,40 @@ impl Font {
         img.to_luma8().into_vec()
     }
 
-    pub fn calc_layout(&self, text: &str) -> Vec<(f32, f32)> {
+    pub fn calc_layout(
+        &self,
+        text: &str,
+        space_width: f32,
+        new_line_height: f32,
+        char_gap: f32,
+    ) -> Vec<(f32, f32)> {
+        let mut layout = Vec::with_capacity(text.len());
         let mut x = 0.0;
         let mut y = 0.0;
         let font = self.font.as_face_ref();
-        let x_space = font.global_bounding_box().width() as f32 * 0.5;
-        let y_space = font.global_bounding_box().height() as f32 * 1.5;
-        let mut layout = Vec::with_capacity(text.len());
-        let gap = 0.1 * font.units_per_em() as f32;
         let em = 1.0 / font.units_per_em() as f32;
+        let x_space = font.global_bounding_box().width() as f32 * em * space_width;
+        let y_space = font.global_bounding_box().height() as f32 * em * new_line_height;
+        let gap = font.units_per_em() as f32 * em * char_gap;
         let mut prev_c: char = '\0';
         for c in text.chars() {
             match c {
                 ' ' => {
                     x += x_space;
-                    layout.push((x * em, y * em));
+                    layout.push((x, y));
                 }
                 '\r' => {
                     x = 0.0;
-                    layout.push((x as f32 * em, y * em));
+                    layout.push((x, y));
                 }
                 '\n' => {
-                    layout.push((x as f32 * em, y * em));
+                    layout.push((x, y));
                     y -= y_space;
                     x = 0.0;
                 }
                 '\t' => {
                     x += x_space * 4.0;
-                    layout.push((x * em, y * em));
+                    layout.push((x, y));
                 }
                 _ if c.is_ascii_graphic() => {
                     let gid = font.glyph_index(c).unwrap();
@@ -493,21 +499,25 @@ impl Font {
                     if let Some(prev_gid) = prev_gid {
                         let prev_bb = font.glyph_bounding_box(prev_gid);
                         if let Some(prev_bb) = prev_bb {
-                            x += prev_bb.width() as f32 + gap;
+                            x += prev_bb.width() as f32 * em + gap;
                         }
                     }
-                    x += bb.width() as f32 + gap;
-                    let xoff = bb.x_min as f32;
-                    let yoff = (bb.y_min + bb.y_max) as f32;
-                    layout.push(((x + xoff) * em, (y + yoff) * em));
+                    x += bb.width() as f32 * em + gap;
+                    let xoff = bb.x_min as f32 * em;
+                    let yoff = (bb.y_min + bb.y_max) as f32 * em;
+                    layout.push((x + xoff, y + yoff));
                 }
                 _ => {
-                    layout.push((x * em, y * em));
+                    layout.push((x, y));
                 }
             }
             prev_c = c;
         }
         layout
+    }
+
+    pub fn calc_layout_default(&self, text: &str) -> Vec<(f32, f32)> {
+        self.calc_layout(text, 0.5, 1.5, 0.15)
     }
 
     fn glyph2uv(&self, x: i16) -> f32 {

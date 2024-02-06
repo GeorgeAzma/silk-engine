@@ -373,7 +373,7 @@ impl Renderer {
     }
 
     pub fn text(&mut self, text: &str, x: f32, y: f32, size: f32) {
-        let layout = self.font.calc_layout(text);
+        let layout = self.font.calc_layout_default(text);
         self.text_with_layout(text, x, y, size, &layout);
     }
 
