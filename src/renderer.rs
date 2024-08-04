@@ -75,8 +75,6 @@ impl TextInstance {
 }
 
 pub struct Renderer {
-    device: Rc<wgpu::Device>,
-    _queue: Rc<wgpu::Queue>,
     primitive_instance_manager: instance::Manager<PrimitiveInstance>,
     primitive_pipeline: wgpu::RenderPipeline,
     text_instance_manager: instance::Manager<TextInstance>,
@@ -231,8 +229,6 @@ impl Renderer {
         });
 
         Self {
-            device: device.clone(),
-            _queue: queue.clone(),
             primitive_instance_manager: instance::Manager::new(device, queue),
             primitive_pipeline,
             text_instance_manager: instance::Manager::new(device, queue),

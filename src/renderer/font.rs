@@ -190,11 +190,7 @@ impl Font {
             + padding;
 
         // For meeting row alignement requirements
-        atlas_width = if atlas_width < 128 {
-            256
-        } else {
-            ((atlas_width as f32 / 256.0).round() * 256.0) as i32
-        };
+        atlas_width = (atlas_width.max(128) as f32 / 256.0).round() as i32 * 256;
 
         let mut x: i32 = padding;
         let mut y: i32 = padding * 2;
@@ -304,10 +300,9 @@ impl Font {
         let mut outline_gen = OutlineGenerator::new();
         for i in 0..=127u8 {
             let c = i as char;
-            if !char::is_ascii_graphic(&c) {
-                continue;
+            if char::is_ascii_graphic(&c) {
+                outline_gen.gen(c, font);
             }
-            outline_gen.gen(c, font);
         }
 
         let sdf_buffer_atlas = device.create_buffer(&wgpu::BufferDescriptor {
@@ -399,6 +394,7 @@ impl Font {
         compute_pass.set_bind_group(0, &sdf_gen_bind_group, &[]);
         compute_pass.dispatch_workgroups(
             atlas_texture.width() * atlas_texture.height() / 256, // This is correct, because atlas_texture.width() has 256 byte alignment
+            // (max_glyph_size * max_glyph_size + 255) as u32 / 256,
             Self::MAX_GRAPHIC_CHARS,
             1,
         );

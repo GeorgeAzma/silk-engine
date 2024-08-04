@@ -39,7 +39,7 @@ fn vs_main(
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var color = in.color;
     let d = (textureSample(t_atlas, s_atlas, (in.uv * vec2f(0.5, -0.5) + vec2f(0.5, -0.5)) * in.texcoord.zw + in.texcoord.xy).r + in.bold * 0.25) / 1.41421356;
-    let dd = length(vec2f(dpdx(d), dpdy(d))) * 1.5;
+    let dd = length(vec2f(dpdx(d), dpdy(d)));
     color = mix(color, in.stroke_color, clamp((0.5 - d + in.stroke_width * 0.5) / dd, 0.0, 1.0));
     color.a = clamp((d - 0.5) / dd + 0.5, 0.0, 1.0);
     return color;

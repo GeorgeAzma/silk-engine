@@ -22,12 +22,14 @@ struct App {
     start_time: std::time::Instant,
     time: f32,
     dt: f32,
+    mouse: [bool; 5],
+    mouse_pressed: [bool; 5],
     mouse_x: f32,
     mouse_y: f32,
     mouse_scroll: f32,
-    mouse: [bool; 5],
+    mouse_press_x: [f32; 5],
+    mouse_press_y: [f32; 5],
     key: [bool; 194],
-    mouse_pressed: [bool; 5],
     key_pressed: [bool; 194],
 }
 
@@ -97,12 +99,14 @@ impl App {
             start_time: std::time::Instant::now(),
             time: 0.0,
             dt: 0.0,
+            mouse: [false; 5],
+            mouse_pressed: [false; 5],
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_scroll: 0.0,
-            mouse: [false; 5],
+            mouse_press_x: [0.0; 5],
+            mouse_press_y: [0.0; 5],
             key: [false; 194],
-            mouse_pressed: [false; 5],
             key_pressed: [false; 194],
         };
 
@@ -137,7 +141,13 @@ impl App {
                 device_id: _,
                 state,
                 button,
-            } => self.mouse[Self::mouse_button_idx(*button)] = state.is_pressed(),
+            } => {
+                self.mouse[Self::mouse_button_idx(*button)] = state.is_pressed();
+                if state.is_pressed() {
+                    self.mouse_press_x[Self::mouse_button_idx(*button)] = self.mouse_x;
+                    self.mouse_press_y[Self::mouse_button_idx(*button)] = self.mouse_y;
+                }
+            }
             WindowEvent::MouseWheel {
                 device_id: _,
                 delta,
@@ -241,28 +251,47 @@ impl App {
 
     #[allow(dead_code)]
     pub fn mouse_released(&self, m: MouseButton) -> bool {
-        return self.mouse_pressed[Self::mouse_button_idx(m)]
-            && !self.mouse[Self::mouse_button_idx(m)];
+        self.mouse_pressed[Self::mouse_button_idx(m)] && !self.mouse[Self::mouse_button_idx(m)]
     }
 
     #[allow(dead_code)]
     pub fn mouse_down(&self, m: MouseButton) -> bool {
-        return self.mouse[Self::mouse_button_idx(m)];
+        self.mouse[Self::mouse_button_idx(m)]
+    }
+
+    #[allow(dead_code)]
+    pub fn mouse_press_x(&self, m: MouseButton) -> f32 {
+        self.mouse_press_x[Self::mouse_button_idx(m)]
+    }
+
+    #[allow(dead_code)]
+    pub fn mouse_press_y(&self, m: MouseButton) -> f32 {
+        self.mouse_press_y[Self::mouse_button_idx(m)]
+    }
+
+    #[allow(dead_code)]
+    pub fn mouse_drag_x(&self, m: MouseButton) -> f32 {
+        self.mouse_x - self.mouse_press_x[Self::mouse_button_idx(m)]
+    }
+
+    #[allow(dead_code)]
+    pub fn mouse_drag_y(&self, m: MouseButton) -> f32 {
+        self.mouse_y - self.mouse_press_y[Self::mouse_button_idx(m)]
     }
 
     #[allow(dead_code)]
     pub fn key_pressed(&self, k: KeyCode) -> bool {
-        return !self.key_pressed[k as usize] && self.key[k as usize];
+        !self.key_pressed[k as usize] && self.key[k as usize]
     }
 
     #[allow(dead_code)]
     pub fn key_released(&self, k: KeyCode) -> bool {
-        return self.key_pressed[k as usize] && !self.key[k as usize];
+        self.key_pressed[k as usize] && !self.key[k as usize]
     }
 
     #[allow(dead_code)]
     pub fn key_down(&self, k: KeyCode) -> bool {
-        return self.key[k as usize];
+        self.key[k as usize]
     }
 }
 

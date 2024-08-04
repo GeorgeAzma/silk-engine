@@ -41,11 +41,11 @@ fn vs_main(
 }
 
 fn sdf_ngon(uv: vec2f, side_ang: f32, roundness: f32) -> f32 {
-    let rnd = 2.0 / clamp(1.0 - roundness, 1e-5, 1.0) - 2.0;
+    let rnd = 2.0 / clamp(1.0 - roundness, 0.00001, 1.0) - 2.0;
     var p = uv * (1.0 + rnd);
     let he = tan(side_ang);
     p = -p.yx;
-    let bn = 2. * side_ang * floor((atan2(p.y, p.x) + side_ang) / side_ang * .5);
+    let bn = 2. * side_ang * floor((atan2(p.y, p.x) + side_ang) / side_ang * 0.5);
     let cs = vec2f(cos(bn), sin(bn));
     p = mat2x2(cs.x, -cs.y, cs.y, cs.x) * p;
     return (length(p - vec2(1.0, clamp(p.y, -he, he))) * sign(p.x - 1.0) - rnd) / (1.0 + rnd);
