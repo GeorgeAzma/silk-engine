@@ -186,11 +186,11 @@ impl Font {
         let padding = (max_glyph_size as f32 * 0.4) as i32;
         let mut atlas_width: i32 = ((max_glyph_size + padding) as f32
             * (Font::MAX_GRAPHIC_CHARS as f32).sqrt()
-            * 0.64) as i32
+            * 0.75) as i32
             + padding;
 
         // For meeting row alignement requirements
-        atlas_width = (atlas_width.max(128) as f32 / 256.0).round() as i32 * 256;
+        atlas_width = (atlas_width.max(128) + 128) / 256 * 256;
 
         let mut x: i32 = padding;
         let mut y: i32 = padding * 2;

@@ -71,7 +71,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3u) {
     let id = global_id.x / 4u;
     let glyph = glyphs[global_id.y];
     let gp = vec2f(f32((id * 4u) % glyph.res.x), f32(glyph.res.y - (id * 4u) / glyph.res.x)) / vec2f(glyph.res);
-    if any(gp < glyph.uv.xy - glyph.uv.zw * vec2f(0.2, 0.3)) || any(gp > glyph.uv.xy + glyph.uv.zw) {
+    if any(gp < glyph.uv.xy - glyph.uv.zw * vec2f(0.25, 0.4)) || any(gp > glyph.uv.xy + glyph.uv.zw) {
         return;
     }
     for (var i = 0u; i < 4u; i += 1u) {
