@@ -352,10 +352,14 @@ impl Renderer {
                 continue;
             }
             let (cw, ch) = self.font.char_size(c);
+            let cx2 =
+                cx * self.scale[0] * self.rotation.cos() - cy * self.scale[1] * self.rotation.sin();
+            let cy2 =
+                cy * self.scale[1] * self.rotation.cos() + cx * self.scale[0] * self.rotation.sin();
             self.text_instance_manager.add(TextInstance {
                 position: [
-                    x + self.position[0] + cx * size * self.scale[0],
-                    y + self.position[1] + cy * size * self.scale[1],
+                    x + self.position[0] + cx2 * size,
+                    y + self.position[1] + cy2 * size,
                 ],
                 scale: [size * self.scale[0] * cw, size * self.scale[1] * ch],
                 color: self.color,

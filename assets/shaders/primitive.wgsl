@@ -25,7 +25,7 @@ fn vs_main(
 ) -> VertexOutput {
     var out: VertexOutput;
     out.uv = vec2f(f32(vert_id % 2u), f32(vert_id / 2u)) * 2.0 - 1.0;
-    let pos = (cos(rotation) * out.uv * scale + sin(rotation) * vec2f(out.uv.y * scale.y, -out.uv.x * scale.x)) + position.xy;
+    let pos = (cos(rotation) * out.uv * scale + sin(rotation) * vec2f(-out.uv.y * scale.y, out.uv.x * scale.x)) + position.xy;
     out.side_ang = 3.141592653589793 / f32(sides);
     if sides != 4u {
         out.uv /= cos(out.side_ang);
