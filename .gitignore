@@ -1,0 +1,16 @@
+.vscode/
+
+.cargo/
+target/
+clippy.toml
+rustfmt.toml
+res/cache
+
+*.lock
+*.cache
+*.tmp
+*.temp
+*.db
+*.log
+
+.env

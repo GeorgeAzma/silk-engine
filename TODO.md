@@ -1,0 +1,8 @@
+- better descriptor allocator
+- better memory allocator
+- command allocator
+- queue manager
+- image loading
+- render graph
+- model loading
+- simple scene
