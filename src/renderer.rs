@@ -55,7 +55,7 @@ impl Renderer {
     pub fn begin_render(&mut self, window: &WindowData) {
         let ctx = &mut self.context;
         unsafe {
-            // wait for previous frame
+            // wait prev frame
             DEVICE
                 .wait_for_fences(&[*PREV_FRAME_FINISHED_FENCE], false, u64::MAX)
                 .unwrap_or_default();
@@ -112,10 +112,9 @@ impl Renderer {
         ctx.end_render();
 
         // COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
-
         unsafe {
             DEVICE.cmd_pipeline_barrier2(
-                ctx.get_cmd("render"),
+                ctx.cmd(),
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
                         .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
@@ -135,9 +134,9 @@ impl Renderer {
             )
         };
 
-        // ctx.end_cmd();
+        ctx.end_cmd();
 
-        // wait(image_available), submit command buffer, signal(render_finished)
+        // wait(image_available), submit cmd, signal(render_finished)
         ctx.submit_cmd(
             "render",
             *QUEUE,

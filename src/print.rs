@@ -29,6 +29,41 @@ pub fn trace(text: &str) -> String {
     col(text, [150, 150, 150])
 }
 
+#[macro_export]
+macro_rules! fatal {
+    ($($args:tt),*) => {
+        panic!("{}", print::fatal(&format!($($args),*)));
+    };
+}
+
+#[macro_export]
+macro_rules! err {
+    ($($args:tt),*) => {
+        println!("{}", print::err(&format!($($args),*)));
+    };
+}
+
+#[macro_export]
+macro_rules! warn {
+    ($($args:tt),*) => {
+        println!("{}", print::warn(&format!($($args),*)));
+    };
+}
+
+#[macro_export]
+macro_rules! info {
+    ($($args:tt),*) => {
+        println!("{}", print::info(&format!($($args),*)));
+    };
+}
+
+#[macro_export]
+macro_rules! trace {
+    ($($args:tt),*) => {
+        println!("{}", print::trace(&format!($($args),*)));
+    };
+}
+
 lazy_static! {
     pub static ref INIT_LOG_FOLDER: () = {
         #[cfg(debug_assertions)]
