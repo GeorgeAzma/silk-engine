@@ -18,6 +18,7 @@ pub use input::{Event, Key, Mouse};
 mod pipeline;
 mod shader;
 mod util;
+pub use util::*;
 mod vulkan;
 pub use vulkan::*;
 mod window;
@@ -32,22 +33,6 @@ mod desc_alloc;
 mod dsl_manager;
 mod pipeline_layout_manager;
 mod render_context;
-
-macro_rules! expose {
-    ($member:ident.$method:ident($($arg_name:ident : $arg_type:ty),*) -> $ret:ty) => {
-        pub fn $method(&self, $($arg_name: $arg_type),*) -> $ret {
-            self.$member.$method($($arg_name),*)
-        }
-    }
-}
-
-macro_rules! expose_methods {
-    ($member:ident.[$($method:ident),*]($arg_name:ident : $arg_type:ty) -> $ret:ty) => {
-        $(
-            expose!($member.$method($arg_name: $arg_type) -> $ret);
-        )*
-    }
-}
 
 pub struct App {
     my_app: Option<MyApp>,
@@ -100,28 +85,17 @@ impl App {
         self.frame += 1;
 
         // TODO: simplify this
-        unsafe {
-            let ubo_ptr = DEVICE
-                .map_memory(
-                    *UNIFORM_MEMORY,
-                    0,
-                    size_of::<Uniform>() as _,
-                    vk::MemoryMapFlags::empty(),
-                )
-                .unwrap();
-            let ubo_data = Uniform {
-                resolution: [self.width, self.height],
-                mouse_pos: [self.mouse_x, self.mouse_y],
-                time: self.time,
-                dt: self.dt,
-            };
-            ubo_ptr.copy_from_nonoverlapping(
-                ptr::from_ref(&ubo_data) as *const _,
-                size_of::<Uniform>(),
-            );
-            DEVICE.unmap_memory(*UNIFORM_MEMORY);
+        let ubo_data = Uniform {
+            resolution: [self.width, self.height],
+            mouse_pos: [self.mouse_x, self.mouse_y],
+            time: self.time,
+            dt: self.dt,
+        };
+        let mut buf_alloc = BUFFER_ALLOC.lock().unwrap();
+        for _ in 0..8192 {
+            buf_alloc.copy(*UNIFORM_BUFFER, &ubo_data);
         }
-
+        drop(buf_alloc);
         self.my_app().update();
     }
 

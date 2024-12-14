@@ -161,10 +161,15 @@ impl RenderContext {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
-        let (_mem, buf) = (*BUFFER_ALLOC).alloc(size, usage, mem_props); // TODO: free
+        let buf = BUFFER_ALLOC.lock().unwrap().alloc(size, usage, mem_props); // TODO: free
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists");
         buf
+    }
+
+    pub fn remove_buffer(&mut self, name: &str) {
+        let buf = self.buffers.remove(name).unwrap();
+        BUFFER_ALLOC.lock().unwrap().dealloc(buf);
     }
 
     pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
@@ -264,7 +269,7 @@ impl RenderContext {
             extent: vk::Extent2D { width, height },
         };
         unsafe {
-            DYNAMIC_RENDERING.cmd_begin_rendering(
+            DEVICE.cmd_begin_rendering(
                 self.cmd_state.cmd,
                 &vk::RenderingInfo::default()
                     .render_area(self.cmd_state.render_area)
@@ -274,7 +279,7 @@ impl RenderContext {
                         .store_op(vk::AttachmentStoreOp::STORE)
                         .clear_value(vk::ClearValue {
                             color: vk::ClearColorValue {
-                                float32: [0.0, 0.0, 0.0, 0.0],
+                                float32: [1.0, 0.0, 1.0, 1.0],
                             },
                         })
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -286,7 +291,7 @@ impl RenderContext {
     pub fn end_render(&mut self) {
         self.cmd_state.render_area = Default::default();
         unsafe {
-            DYNAMIC_RENDERING.cmd_end_rendering(self.cmd_state.cmd);
+            DEVICE.cmd_end_rendering(self.cmd_state.cmd);
         }
     }
 
@@ -329,14 +334,15 @@ impl RenderContext {
         }
     }
 
-    pub fn bind_desc_set(&self, name: &str) {
+    pub fn bind_desc_set(&mut self, name: &str) {
+        self.cmd_state.desc_sets = vec![self.desc_sets[name]];
         unsafe {
             DEVICE.cmd_bind_descriptor_sets(
                 self.cmd_state.cmd,
                 self.cmd_state.pipeline_data.bind_point,
                 self.cmd_state.pipeline_data.info.layout,
                 0,
-                &[self.desc_sets[name]],
+                &self.cmd_state.desc_sets,
                 &[],
             );
         }

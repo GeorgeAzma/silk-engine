@@ -10,6 +10,7 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
+        ScopeTime::new("Renderer Init");
         let mut context = RenderContext::new();
         context.add_shader("screen");
         context.add_pipeline(
@@ -20,12 +21,6 @@ impl Renderer {
         );
         let desc_set = context.add_desc_set("global uniform", "screen", 0);
         context.add_cmd("render");
-        context.add_buffer(
-            "none",
-            1,
-            vk::BufferUsageFlags::VERTEX_BUFFER,
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        );
 
         // TODO: figure out simpler way for this
         // TODO: have single ubo that is used to create all ubos, same with ssbo etc.
@@ -58,11 +53,11 @@ impl Renderer {
             // wait prev frame
             DEVICE
                 .wait_for_fences(&[*PREV_FRAME_FINISHED_FENCE], false, u64::MAX)
-                .unwrap_or_default();
+                .unwrap();
             DEVICE.reset_fences(&[*PREV_FRAME_FINISHED_FENCE]).unwrap();
 
             // acquire next image
-            let (image_index, _suboptimal) = SWAPCHAIN_LOADER
+            let (image_index, suboptimal) = SWAPCHAIN_LOADER
                 .acquire_next_image(
                     window.swapchain.swapchain,
                     u64::MAX,
@@ -70,6 +65,9 @@ impl Renderer {
                     vk::Fence::null(),
                 )
                 .unwrap();
+            if suboptimal {
+                warn!("suboptimal swapchain");
+            }
             self.image_index = image_index;
             let img_view = window.swapchain.image_views[image_index as usize];
 
@@ -81,8 +79,8 @@ impl Renderer {
                 ctx.cmd(),
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
-                        .src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE)
-                        .src_access_mask(vk::AccessFlags2::empty())
+                        .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
                         .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .old_layout(vk::ImageLayout::UNDEFINED)
@@ -101,7 +99,6 @@ impl Renderer {
 
             ctx.bind_pipeline("main");
             ctx.bind_desc_set("global uniform");
-            ctx.bind_vert("none");
             DEVICE.cmd_draw(ctx.cmd(), 3, 1, 0, 0);
         }
     }

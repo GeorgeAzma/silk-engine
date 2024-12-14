@@ -232,7 +232,7 @@ impl GraphicsPipelineInfo {
                     None,
                 )
                 .unwrap_or_default()
-        }; // TODO: destroy
+        };
         let graphics_pipelines = unsafe {
             DEVICE
                 .create_graphics_pipelines(pipeline_cache, &[info], None)
@@ -244,6 +244,9 @@ impl GraphicsPipelineInfo {
                 .unwrap_or_default()
         })
         .unwrap_or_default();
+        unsafe {
+            DEVICE.destroy_pipeline_cache(pipeline_cache, None);
+        }
         graphics_pipelines[0]
     }
 }
@@ -259,7 +262,7 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
                 None,
             )
             .unwrap_or_default()
-    }; // TODO: destroy
+    };
     let compute_pipeline = unsafe {
         DEVICE
             .create_compute_pipelines(
@@ -283,5 +286,8 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
             .unwrap_or_default()
     })
     .unwrap_or_default();
+    unsafe {
+        DEVICE.destroy_pipeline_cache(pipeline_cache, None);
+    }
     compute_pipeline[0]
 }

@@ -32,35 +32,35 @@ pub fn trace(text: &str) -> String {
 #[macro_export]
 macro_rules! fatal {
     ($($args:tt),*) => {
-        panic!("{}", print::fatal(&format!($($args),*)));
+        panic!("{}", print::fatal(&format!($($args),*)))
     };
 }
 
 #[macro_export]
 macro_rules! err {
     ($($args:tt),*) => {
-        println!("{}", print::err(&format!($($args),*)));
+        println!("{}", print::err(&format!($($args),*)))
     };
 }
 
 #[macro_export]
 macro_rules! warn {
     ($($args:tt),*) => {
-        println!("{}", print::warn(&format!($($args),*)));
+        println!("{}", print::warn(&format!($($args),*)))
     };
 }
 
 #[macro_export]
 macro_rules! info {
     ($($args:tt),*) => {
-        println!("{}", print::info(&format!($($args),*)));
+        println!("{}", print::info(&format!($($args),*)))
     };
 }
 
 #[macro_export]
 macro_rules! trace {
     ($($args:tt),*) => {
-        println!("{}", print::trace(&format!($($args),*)));
+        println!("{}", print::trace(&format!($($args),*)))
     };
 }
 
@@ -98,26 +98,26 @@ pub fn backtrace() -> String {
 const LOG_PATH: &str = "logs/debug.log";
 const LOG_SIZE: usize = 65536;
 pub fn log(text: &str) {
-    #[cfg(not(debug_assertions))]
-    return;
-
-    *INIT_LOG_FOLDER;
-    if let Ok(mut log_file) = std::fs::OpenOptions::new()
-        .read(true)
-        .append(true)
-        .create(true)
-        .open(LOG_PATH)
+    #[cfg(debug_assertions)]
     {
-        log_file
-            .write_fmt(format_args!("{text}\n"))
-            .unwrap_or_default();
-        if log_file.metadata().unwrap().len() >= LOG_SIZE as u64 {
-            let mut buf = vec![0; LOG_SIZE / 2];
+        *INIT_LOG_FOLDER;
+        if let Ok(mut log_file) = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .create(true)
+            .open(LOG_PATH)
+        {
             log_file
-                .seek(std::io::SeekFrom::Start(LOG_SIZE as u64 / 2))
+                .write_fmt(format_args!("{text}\n"))
                 .unwrap_or_default();
-            log_file.read(&mut buf).unwrap_or_default();
-            std::fs::write(LOG_PATH, &buf).unwrap_or_default();
+            if log_file.metadata().unwrap().len() >= LOG_SIZE as u64 {
+                let mut buf = vec![0; LOG_SIZE / 2];
+                log_file
+                    .seek(std::io::SeekFrom::Start(LOG_SIZE as u64 / 2))
+                    .unwrap_or_default();
+                log_file.read(&mut buf).unwrap_or_default();
+                std::fs::write(LOG_PATH, &buf).unwrap_or_default();
+            }
         }
     }
 }

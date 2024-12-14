@@ -287,15 +287,21 @@ impl Shader {
             bindings
                 .iter()
                 .enumerate()
-                .map(|(i, binding)| {
-                    vk::VertexInputBindingDescription::default()
-                        .stride(binding_offset[i])
-                        .binding(i as u32)
-                        .input_rate(if binding.0 {
-                            vk::VertexInputRate::INSTANCE
-                        } else {
-                            vk::VertexInputRate::VERTEX
-                        })
+                .filter_map(|(i, binding)| {
+                    if binding.1.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            vk::VertexInputBindingDescription::default()
+                                .stride(binding_offset[i])
+                                .binding(i as u32)
+                                .input_rate(if binding.0 {
+                                    vk::VertexInputRate::INSTANCE
+                                } else {
+                                    vk::VertexInputRate::VERTEX
+                                }),
+                        )
+                    }
                 })
                 .collect(),
             vert_attrib_descs,

@@ -95,7 +95,7 @@ impl Swapchain {
             })
             .collect();
 
-        unsafe { DEVICE.device_wait_idle().unwrap_or_default() };
+        unsafe { DEVICE.device_wait_idle().unwrap() };
     }
 }
 
@@ -151,7 +151,7 @@ impl WindowData {
         let surface_formats = unsafe {
             SURFACE_LOADER
                 .get_physical_device_surface_formats(*GPU, self.surface)
-                .unwrap_or_default()
+                .unwrap()
         };
         let surface_format = surface_formats
             .iter()

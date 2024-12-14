@@ -1,10 +1,12 @@
-use crate::{
-    buffer_alloc::BufferAlloc, cmd_alloc::CmdAlloc, desc_alloc::DescAlloc, dsl_manager::DSLManager,
-    pipeline_layout_manager::PipelineLayoutManager, print,
-};
+use crate::*;
 pub use ash::vk;
 use ash::{ext, khr};
+use buffer_alloc::BufferAlloc;
+use cmd_alloc::CmdAlloc;
+use desc_alloc::DescAlloc;
+use dsl_manager::DSLManager;
 use lazy_static::lazy_static;
+use pipeline_layout_manager::PipelineLayoutManager;
 use std::{
     ffi::{CStr, CString},
     process::abort,
@@ -37,26 +39,21 @@ pub fn preferred_vulkan_instance_extensions() -> Vec<CString> {
 }
 
 pub fn enabled_layers() -> Vec<CString> {
-    #[cfg(debug_assertions)]
-    {
-        ["VK_LAYER_KHRONOS_validation"]
-            .into_iter()
-            .map(|e| CString::new(e).unwrap())
-            .collect()
-    }
-    #[cfg(not(debug_assertions))]
-    vec![]
+    [
+        // FOR SOME FUCKING REASON VALIDATION FIXES BLACK SCREEN BUT DOES NOT ERROR
+        // #[cfg(debug_assertions)]
+        "VK_LAYER_KHRONOS_validation",
+    ]
+    .into_iter()
+    .map(|e: &str| CString::new(e).unwrap())
+    .collect()
 }
 
 pub fn required_vulkan_gpu_extensions() -> Vec<CString> {
-    [
-        khr::synchronization2::NAME,
-        khr::swapchain::NAME,
-        khr::dynamic_rendering::NAME,
-    ]
-    .into_iter()
-    .map(|e| e.to_owned())
-    .collect()
+    [khr::swapchain::NAME]
+        .into_iter()
+        .map(|e| e.to_owned())
+        .collect()
 }
 
 pub fn preferred_vulkan_gpu_extensions() -> Vec<CString> {
@@ -72,6 +69,7 @@ lazy_static! {
     static ref ERROR_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 }
 
+#[cfg(debug_assertions)]
 unsafe extern "system" fn vulkan_debug_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -147,7 +145,24 @@ lazy_static!(
     pub static ref INSTANCE: ash::Instance = {
         let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
 
-        #[cfg(debug_assertions)]
+        let required_instance_extensions: Vec<CString> = required_vulkan_instance_extensions()
+            .into_iter()
+            .filter(|re| INSTANCE_EXTENSIONS.contains(re).then_some(true)
+            .unwrap_or_else(|| { fatal!("Unsupported vulkan instance extension: {re:?}") })).collect();
+
+        let preferred_instance_extensions: Vec<CString> = preferred_vulkan_instance_extensions()
+            .into_iter()
+            .filter(|pe| INSTANCE_EXTENSIONS.contains(pe).then_some(true)
+            .unwrap_or_else(|| { warn!("Unsupported vulkan instance extension: {pe:?}"); false })).collect();
+        let enabled_extensions =
+            [required_instance_extensions, preferred_instance_extensions].concat();
+
+        let enabled_exts = enabled_extensions.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
+        let info = vk::InstanceCreateInfo::default()
+                    .application_info(&app_info)
+                    .enabled_extension_names(&enabled_exts);
+
+
         let layers: Vec<CString> = unsafe {
             ENTRY
                 .enumerate_instance_layer_properties()
@@ -156,42 +171,16 @@ lazy_static!(
                 .map(|e| e.layer_name_as_c_str().unwrap().to_owned())
                 .collect()
         };
-
-        let required_instance_extensions: Vec<CString> = required_vulkan_instance_extensions()
-            .into_iter()
-            .filter(|re| INSTANCE_EXTENSIONS.contains(re).then_some(true)
-            .unwrap_or_else(|| { panic!("Unsupported vulkan instance extension: {re:?}") })).collect();
-
-        let preferred_instance_extensions: Vec<CString> = preferred_vulkan_instance_extensions()
-            .into_iter()
-            .filter(|pe| INSTANCE_EXTENSIONS.contains(pe).then_some(true)
-            .unwrap_or_else(|| { println!("Unsupported vulkan instance extension: {pe:?}"); false })).collect();
-        let enabled_extensions =
-            [required_instance_extensions, preferred_instance_extensions].concat();
-
         let mut enabled_layers = enabled_layers();
-        #[cfg(debug_assertions)]
         enabled_layers.retain(|e| layers.contains(e));
+        let enabled_layers = enabled_layers.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
+        let info = info.enabled_layer_names(&enabled_layers);
+
 
         let instance = unsafe {
             ENTRY
                 .create_instance(
-                    &vk::InstanceCreateInfo {
-                        p_application_info: &app_info,
-                        enabled_extension_count: enabled_extensions.len() as u32,
-                        pp_enabled_extension_names: enabled_extensions
-                            .iter()
-                            .map(|e| e.as_ptr())
-                            .collect::<Vec<_>>()
-                            .as_ptr(),
-                        enabled_layer_count: enabled_layers.len() as u32,
-                        pp_enabled_layer_names: enabled_layers
-                            .iter()
-                            .map(|e| e.as_ptr())
-                            .collect::<Vec<_>>()
-                            .as_ptr(),
-                        ..Default::default()
-                    },
+                    &info,
                     None,
                 )
                 .expect("Failed to init VkInstance")
@@ -332,7 +321,6 @@ lazy_static!(
     pub static ref RENDER_FINISHED_SEMAPHORE: vk::Semaphore = unsafe { DEVICE.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).unwrap() };
     pub static ref PREV_FRAME_FINISHED_FENCE: vk::Fence = unsafe { DEVICE.create_fence(&vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED), None).unwrap() };
 
-    pub static ref DYNAMIC_RENDERING: khr::dynamic_rendering::Device = khr::dynamic_rendering::Device::new(&INSTANCE, &DEVICE);
     pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
 
@@ -340,12 +328,10 @@ lazy_static!(
     pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
     pub static ref PIPELINE_LAYOUT_MANAGER: Mutex<PipelineLayoutManager> = Mutex::new(PipelineLayoutManager::new());
     pub static ref CMD_ALLOC: CmdAlloc = CmdAlloc::new();
-    pub static ref BUFFER_ALLOC: BufferAlloc = BufferAlloc::new();
+    pub static ref BUFFER_ALLOC: Mutex<BufferAlloc> = Mutex::new(BufferAlloc::new());
 
     // FIXME: this is temporary remove later
-    pub static ref UNIFORM: (vk::DeviceMemory, vk::Buffer) = BUFFER_ALLOC.alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
-    pub static ref UNIFORM_MEMORY: vk::DeviceMemory = UNIFORM.0;
-    pub static ref UNIFORM_BUFFER: vk::Buffer = UNIFORM.1;
+    pub static ref UNIFORM_BUFFER: vk::Buffer = BUFFER_ALLOC.lock().unwrap().alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
 );
 
 #[repr(C)]

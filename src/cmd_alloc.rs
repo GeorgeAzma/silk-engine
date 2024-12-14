@@ -22,4 +22,8 @@ impl CmdAlloc {
         let cmds = unsafe { DEVICE.allocate_command_buffers(&cmd_alloc_info).unwrap() };
         cmds[0]
     }
+
+    pub fn dealloc(&self, cmd: vk::CommandBuffer) {
+        unsafe { DEVICE.free_command_buffers(self.pool, &[cmd]) };
+    }
 }

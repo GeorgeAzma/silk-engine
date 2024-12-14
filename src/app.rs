@@ -29,7 +29,7 @@ impl MyApp {
     }
 
     pub fn update(&mut self) {
-        if self.app.frame % 256 == 0 {
+        if self.app.frame % 512 == 0 {
             println!(
                 "{:?} ({:.0} fps)",
                 Duration::from_secs_f32(self.app.dt),
