@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use std::io::{Read, Seek, Write};
 
 pub fn col(text: &str, col: [u8; 3]) -> String {
@@ -28,7 +29,7 @@ pub fn trace(text: &str) -> String {
     col(text, [150, 150, 150])
 }
 
-lazy_static::lazy_static! {
+lazy_static! {
     pub static ref INIT_LOG_FOLDER: () = {
         #[cfg(debug_assertions)]
         std::fs::remove_dir_all("logs").unwrap_or_default();

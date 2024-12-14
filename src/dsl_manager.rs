@@ -10,7 +10,7 @@ pub struct DSLBinding {
     pub stage_flags: vk::ShaderStageFlags,
 }
 
-impl<'a> From<&DSLBinding> for vk::DescriptorSetLayoutBinding<'a> {
+impl From<&DSLBinding> for vk::DescriptorSetLayoutBinding<'_> {
     fn from(value: &DSLBinding) -> Self {
         vk::DescriptorSetLayoutBinding {
             binding: value.binding,

@@ -1,4 +1,5 @@
 use dsl_manager::DSLBinding;
+use pipeline::PipelineStageInfo;
 
 use crate::*;
 
@@ -313,18 +314,15 @@ impl Shader {
         (binding_descs[0], attrib_descs)
     }
 
-    pub fn get_pipeline_stages(
-        &self,
-        module: vk::ShaderModule,
-    ) -> Vec<vk::PipelineShaderStageCreateInfo> {
+    pub fn get_pipeline_stages(&self, module: vk::ShaderModule) -> Vec<PipelineStageInfo> {
         self.entry_names
             .iter()
             .zip(self.ir_module.entry_points.iter().map(|ep| &ep.stage))
-            .map(|(entry_name, stage)| {
-                vk::PipelineShaderStageCreateInfo::default()
-                    .stage(stage_to_vk(stage))
-                    .module(module)
-                    .name(std::ffi::CStr::from_bytes_with_nul(entry_name.as_bytes()).unwrap())
+            .map(|(entry_name, stage)| PipelineStageInfo {
+                stage: stage_to_vk(stage),
+                module,
+                name: entry_name.clone(),
+                ..Default::default()
             })
             .collect()
     }

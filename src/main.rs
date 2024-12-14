@@ -1,5 +1,3 @@
-#![warn(clippy::perf, clippy::suspicious, clippy::complexity)]
-// Prelude
 pub use std::{
     collections::{HashMap, HashSet},
     ptr,
@@ -28,11 +26,28 @@ mod app;
 use app::MyApp;
 mod renderer;
 use renderer::*;
+mod buffer_alloc;
 mod cmd_alloc;
 mod desc_alloc;
 mod dsl_manager;
-mod gpu_alloc;
 mod pipeline_layout_manager;
+mod render_context;
+
+macro_rules! expose {
+    ($member:ident.$method:ident($($arg_name:ident : $arg_type:ty),*) -> $ret:ty) => {
+        pub fn $method(&self, $($arg_name: $arg_type),*) -> $ret {
+            self.$member.$method($($arg_name),*)
+        }
+    }
+}
+
+macro_rules! expose_methods {
+    ($member:ident.[$($method:ident),*]($arg_name:ident : $arg_type:ty) -> $ret:ty) => {
+        $(
+            expose!($member.$method($arg_name: $arg_type) -> $ret);
+        )*
+    }
+}
 
 pub struct App {
     my_app: Option<MyApp>,
@@ -160,45 +175,9 @@ impl App {
         self.my_app.as_mut().unwrap()
     }
 
-    pub fn mouse_pressed(&self, m: Mouse) -> bool {
-        self.input.mouse_pressed(m)
-    }
-
-    pub fn mouse_released(&self, m: Mouse) -> bool {
-        self.input.mouse_released(m)
-    }
-
-    pub fn mouse_down(&self, m: Mouse) -> bool {
-        self.input.mouse_down(m)
-    }
-
-    pub fn mouse_press_x(&self, m: Mouse) -> f32 {
-        self.input.mouse_press_x(m)
-    }
-
-    pub fn mouse_press_y(&self, m: Mouse) -> f32 {
-        self.input.mouse_press_y(m)
-    }
-
-    pub fn mouse_drag_x(&self, m: Mouse) -> f32 {
-        self.input.mouse_drag_x(m)
-    }
-
-    pub fn mouse_drag_y(&self, m: Mouse) -> f32 {
-        self.input.mouse_drag_y(m)
-    }
-
-    pub fn key_pressed(&self, k: Key) -> bool {
-        self.input.key_pressed(k)
-    }
-
-    pub fn key_released(&self, k: Key) -> bool {
-        self.input.key_released(k)
-    }
-
-    pub fn key_down(&self, k: Key) -> bool {
-        self.input.key_down(k)
-    }
+    expose_methods!(input.[mouse_press_x, mouse_press_y, mouse_drag_x, mouse_drag_y](m: Mouse) -> f32);
+    expose_methods!(input.[mouse_down, mouse_released, mouse_pressed](m: Mouse) -> bool);
+    expose_methods!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
 }
 
 #[derive(Default)]

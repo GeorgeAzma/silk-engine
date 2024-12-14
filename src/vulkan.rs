@@ -1,7 +1,6 @@
 use crate::{
-    cmd_alloc::CmdAlloc, desc_alloc::DescAlloc, dsl_manager::DSLManager, gpu_alloc::GPUAlloc,
-    pipeline::GraphicsPipelineInfo, pipeline_layout_manager::PipelineLayoutManager, print,
-    shader::Shader,
+    buffer_alloc::BufferAlloc, cmd_alloc::CmdAlloc, desc_alloc::DescAlloc, dsl_manager::DSLManager,
+    pipeline_layout_manager::PipelineLayoutManager, print,
 };
 pub use ash::vk;
 use ash::{ext, khr};
@@ -262,6 +261,9 @@ lazy_static!(
             .map(|e| e.extension_name_as_c_str().unwrap().to_owned())
             .collect()
     };
+    pub static ref GPU_MEMORY_PROPS: vk::PhysicalDeviceMemoryProperties = unsafe {
+        INSTANCE.get_physical_device_memory_properties(*GPU)
+    };
 
     pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe { INSTANCE.get_physical_device_queue_family_properties(*GPU) };
     pub static ref QUEUE_FAMILY_INDEX: u32 =
@@ -334,24 +336,16 @@ lazy_static!(
     pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
 
-    pub static ref DESC_ALLOCATOR: DescAlloc = DescAlloc::new();
+    pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
     pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
     pub static ref PIPELINE_LAYOUT_MANAGER: Mutex<PipelineLayoutManager> = Mutex::new(PipelineLayoutManager::new());
-    pub static ref CMD_ALLOCATOR: CmdAlloc = CmdAlloc::new();
+    pub static ref CMD_ALLOC: CmdAlloc = CmdAlloc::new();
+    pub static ref BUFFER_ALLOC: BufferAlloc = BufferAlloc::new();
 
     // FIXME: this is temporary remove later
-    pub static ref SHADER: Shader = Shader::new("screen");
-    pub static ref MODULE: vk::ShaderModule = SHADER.create_module();
-    pub static ref DSLS: Vec<vk::DescriptorSetLayout> = SHADER.create_dsls();
-    pub static ref PIPELINE_LAYOUT: vk::PipelineLayout = (*PIPELINE_LAYOUT_MANAGER).lock().unwrap().get(&DSLS, &[]);
-    pub static ref PIPELINE: vk::Pipeline = {
-        GraphicsPipelineInfo::new().dyn_size().layout(*PIPELINE_LAYOUT).stages(&SHADER.get_pipeline_stages(*MODULE)).vert_layout(&SHADER, &[]).build()
-    };
-    pub static ref VERTEX_BUFFER: vk::Buffer = GPUAlloc::alloc(1, vk::BufferUsageFlags::VERTEX_BUFFER, vk::MemoryPropertyFlags::DEVICE_LOCAL).1;
-    pub static ref UNIFORM: (vk::DeviceMemory, vk::Buffer) = GPUAlloc::alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
+    pub static ref UNIFORM: (vk::DeviceMemory, vk::Buffer) = BUFFER_ALLOC.alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
     pub static ref UNIFORM_MEMORY: vk::DeviceMemory = UNIFORM.0;
     pub static ref UNIFORM_BUFFER: vk::Buffer = UNIFORM.1;
-    pub static ref DESCRIPTORS: Vec<vk::DescriptorSet> = DESC_ALLOCATOR.alloc(&DSLS);
 );
 
 #[repr(C)]
