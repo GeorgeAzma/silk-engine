@@ -1,6 +1,6 @@
 use crate::*;
 pub use ash::vk;
-use ash::{ext, khr};
+use ash::{ext, khr, vk::Handle};
 use buffer_alloc::BufferAlloc;
 use cmd_alloc::CmdAlloc;
 use desc_alloc::DescAlloc;
@@ -58,10 +58,12 @@ pub fn required_vulkan_gpu_extensions() -> Vec<CString> {
 
 pub fn preferred_vulkan_gpu_extensions() -> Vec<CString> {
     [
-        // "VK_KHR_draw_indirect_count"
+        // khr::draw_indirect_count::NAME,
+        #[cfg(debug_assertions)]
+        khr::pipeline_executable_properties::NAME,
     ]
     .into_iter()
-    .map(|e: &str| CString::new(e).unwrap())
+    .map(|e: &CStr| e.to_owned())
     .collect()
 }
 
@@ -110,7 +112,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     };
 
     let backtrace = print::backtrace();
-    print::log(&format!("{full_message}\n|> {backtrace}\n"));
+    log!("{full_message}\n|> {backtrace}\n");
     let ansi_backtrace = print::trace(&["|> ", &backtrace].concat());
     let print_str = format!("{ansi_message}\n{ansi_backtrace}");
     match message_severity {
@@ -176,7 +178,6 @@ lazy_static!(
         let enabled_layers = enabled_layers.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
         let info = info.enabled_layer_names(&enabled_layers);
 
-
         let instance = unsafe {
             ENTRY
                 .create_instance(
@@ -186,10 +187,9 @@ lazy_static!(
                 .expect("Failed to init VkInstance")
         };
 
-
         #[cfg(debug_assertions)]
         unsafe {
-            ash::ext::debug_utils::Instance::new(&ENTRY, &instance)
+            ext::debug_utils::Instance::new(&ENTRY, &instance)
                 .create_debug_utils_messenger(
                     &vk::DebugUtilsMessengerCreateInfoEXT::default()
                         .message_severity(
@@ -220,21 +220,20 @@ lazy_static!(
                 .expect("No GPUs found")
         };
         // Selects first discrete GPU (non-integrated)
-        let (gpu, gpu_props, gpu_features) = gpus
+        let (gpu, gpu_props) = gpus
             .iter()
-            .find_map(|&gpu| {
+            .map(|&gpu| {
                 let props = unsafe { INSTANCE.get_physical_device_properties(gpu) };
-                (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU).then_some((
-                    gpu,
-                    props,
-                    unsafe { INSTANCE.get_physical_device_features(gpu) },
-                ))
-            })
-            .unwrap_or((
-                gpus[0],
-                unsafe { INSTANCE.get_physical_device_properties(gpus[0]) },
-                unsafe { INSTANCE.get_physical_device_features(gpus[0]) },
-            ));
+                let mut score = 0;
+                score += (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU) as u32 * 1_000_000;
+                score += props.limits.max_image_dimension2_d;
+                score += props.limits.max_uniform_buffer_range / 64;
+                score += props.limits.max_push_constants_size / 4;
+                score += props.limits.max_compute_shared_memory_size / 16;
+                score += props.limits.max_compute_work_group_invocations;
+                (gpu, props, score)
+            }).max_by_key(|(_, _, score)| *score).map(|(gpu, props, _)| (gpu, props)).unwrap();
+        let gpu_features = unsafe { INSTANCE.get_physical_device_features(gpu) };
         (gpu, gpu_props, gpu_features)
     };
 
@@ -253,6 +252,9 @@ lazy_static!(
     pub static ref GPU_MEMORY_PROPS: vk::PhysicalDeviceMemoryProperties = unsafe {
         INSTANCE.get_physical_device_memory_properties(*GPU)
     };
+    static ref SURFACE_FORMATS: Mutex<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> = Mutex::new(HashMap::new());
+    static ref SURFACE_CAPABILITIES: Mutex<HashMap<u64, vk::SurfaceCapabilitiesKHR>> = Mutex::new(HashMap::new());
+    static ref SURFACE_PRESENT_MODES: Mutex<HashMap<u64, Vec<vk::PresentModeKHR>>> = Mutex::new(HashMap::new());
 
     pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe { INSTANCE.get_physical_device_queue_family_properties(*GPU) };
     pub static ref QUEUE_FAMILY_INDEX: u32 =
@@ -269,13 +271,10 @@ lazy_static!(
 
     pub static ref DEVICE: ash::Device = unsafe {
             #[cfg(debug_assertions)]
-            {
-                *print::INIT_LOG_FOLDER;
-                std::fs::write(
-                    "logs/gpu.log",
-                    format!("//////////////////// Properties ////////////////////\n{:#?}\n\n//////////////////// Features ////////////////////\n{:#?}\n\n//////////////////// Extensions ////////////////////\n{:#?}", *GPU_PROPS, *GPU_FEATURES, *GPU_EXTENSIONS),
-                ).unwrap_or_default();
-            }
+            log_file!(
+                "logs/gpu.log",
+                "//////////////////// Properties ////////////////////\n{:#?}\n\n//////////////////// Features ////////////////////\n{:#?}\n\n//////////////////// Extensions ////////////////////\n{:#?}", *GPU_PROPS, *GPU_FEATURES, *GPU_EXTENSIONS
+            );
 
             let required_gpu_extensions = required_vulkan_gpu_extensions();
             required_gpu_extensions
@@ -293,6 +292,7 @@ lazy_static!(
                             false
                         })
                 });
+            let pipeline_exec_info_feature = if cfg!(debug_assertions) { true } else { false };
             INSTANCE
                 .create_device(
                     *GPU,
@@ -310,7 +310,8 @@ lazy_static!(
                             &vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true),
                         )
                         .push_next(&mut vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true))
-                        .push_next(&mut vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true)),
+                        .push_next(&mut vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true))
+                        .push_next(&mut vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default().pipeline_executable_info(pipeline_exec_info_feature)),
                     None,
                 )
                 .expect("Failed to create VkDevice")
@@ -323,6 +324,8 @@ lazy_static!(
 
     pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
+    #[cfg(debug_assertions)]
+    pub static ref PIPELINE_EXEC_PROPS_LOADER: khr::pipeline_executable_properties::Device = khr::pipeline_executable_properties::Device::new(&INSTANCE, &DEVICE);
 
     pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
     pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
@@ -333,6 +336,45 @@ lazy_static!(
     // FIXME: this is temporary remove later
     pub static ref UNIFORM_BUFFER: vk::Buffer = BUFFER_ALLOC.lock().unwrap().alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
 );
+
+pub fn surface_formats(surface: vk::SurfaceKHR) -> Vec<vk::SurfaceFormatKHR> {
+    SURFACE_FORMATS
+        .lock()
+        .unwrap()
+        .entry(surface.as_raw())
+        .or_insert(unsafe {
+            SURFACE_LOADER
+                .get_physical_device_surface_formats(*GPU, surface)
+                .unwrap()
+        })
+        .clone()
+}
+
+pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
+    SURFACE_CAPABILITIES
+        .lock()
+        .unwrap()
+        .entry(surface.as_raw())
+        .or_insert(unsafe {
+            SURFACE_LOADER
+                .get_physical_device_surface_capabilities(*GPU, surface)
+                .unwrap()
+        })
+        .clone()
+}
+
+pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR> {
+    SURFACE_PRESENT_MODES
+        .lock()
+        .unwrap()
+        .entry(surface.as_raw())
+        .or_insert(unsafe {
+            SURFACE_LOADER
+                .get_physical_device_surface_present_modes(*GPU, surface)
+                .unwrap()
+        })
+        .clone()
+}
 
 #[repr(C)]
 pub struct Uniform {

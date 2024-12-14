@@ -26,4 +26,12 @@ impl CmdAlloc {
     pub fn dealloc(&self, cmd: vk::CommandBuffer) {
         unsafe { DEVICE.free_command_buffers(self.pool, &[cmd]) };
     }
+
+    pub fn reset(&self, cmd: vk::CommandBuffer) {
+        unsafe {
+            DEVICE
+                .reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())
+                .unwrap()
+        };
+    }
 }

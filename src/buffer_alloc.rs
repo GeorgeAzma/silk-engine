@@ -94,10 +94,12 @@ impl BufferAlloc {
                 mapped_range: None,
             },
         );
-        print::log(&format!(
+        log!(
             "Alloc {:?} bytes, {:?}, {:?}",
-            mem_reqs.size, usage, mem_props
-        ));
+            mem_reqs.size,
+            usage,
+            mem_props
+        );
         buffer
     }
 

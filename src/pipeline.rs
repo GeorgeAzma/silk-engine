@@ -223,7 +223,12 @@ impl GraphicsPipelineInfo {
             .color_blend_state(&color_blend_state)
             .dynamic_state(&dynamic_state)
             .layout(self.layout)
-            .push_next(&mut rendering_info);
+            .push_next(&mut rendering_info)
+            .flags(if cfg!(debug_assertions) {
+                vk::PipelineCreateFlags::CAPTURE_STATISTICS_KHR
+            } else {
+                vk::PipelineCreateFlags::empty()
+            });
         let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
         let pipeline_cache = unsafe {
             DEVICE
@@ -247,7 +252,68 @@ impl GraphicsPipelineInfo {
         unsafe {
             DEVICE.destroy_pipeline_cache(pipeline_cache, None);
         }
-        graphics_pipelines[0]
+        let gp = graphics_pipelines[0];
+        #[cfg(debug_assertions)]
+        unsafe {
+            let exec_props = PIPELINE_EXEC_PROPS_LOADER
+                .get_pipeline_executable_properties(&vk::PipelineInfoKHR::default().pipeline(gp))
+                .unwrap();
+
+            for i in 0..exec_props.len() {
+                log!(
+                    "{}",
+                    exec_props[i]
+                        .description_as_c_str()
+                        .unwrap()
+                        .to_string_lossy()
+                );
+                let stats = PIPELINE_EXEC_PROPS_LOADER
+                    .get_pipeline_executable_statistics(
+                        &vk::PipelineExecutableInfoKHR::default()
+                            .pipeline(gp)
+                            .executable_index(i as u32),
+                    )
+                    .unwrap();
+                for stat in stats {
+                    let val = match stat.format {
+                        vk::PipelineExecutableStatisticFormatKHR::BOOL32 => {
+                            stat.value.b32.to_string()
+                        }
+                        vk::PipelineExecutableStatisticFormatKHR::INT64 => {
+                            stat.value.i64.to_string()
+                        }
+                        vk::PipelineExecutableStatisticFormatKHR::UINT64 => {
+                            stat.value.u64.to_string()
+                        }
+                        vk::PipelineExecutableStatisticFormatKHR::FLOAT64 => {
+                            stat.value.f64.to_string()
+                        }
+                        _ => "unknown".to_string(),
+                    };
+                    let name = stat
+                        .name_as_c_str()
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace("Memory", "Mem")
+                        .replace("Size", "")
+                        .replace("Register", "Reg")
+                        .replace(" Count", "s")
+                        .replace("Color", "Col")
+                        .replace("Output", "Out")
+                        .replace("Input", "In")
+                        .replace("Local", "Loc")
+                        .trim()
+                        .to_string();
+                    if name == "Loc Mem" || name == "Binary" {
+                        let val = Mem::str(&val);
+                        log!("    {name:<8} {val}");
+                    } else {
+                        log!("    {name:<8} {val}");
+                    }
+                }
+            }
+        }
+        gp
     }
 }
 

@@ -39,28 +39,28 @@ impl Swapchain {
         self.swapchain = unsafe {
             SWAPCHAIN_LOADER
                 .create_swapchain(
-                    &vk::SwapchainCreateInfoKHR {
-                        surface,
-                        min_image_count,
-                        image_color_space,
-                        image_format,
-                        image_extent,
-                        image_array_layers: 1,
-                        image_usage: vk::ImageUsageFlags::COLOR_ATTACHMENT,
-                        image_sharing_mode: vk::SharingMode::EXCLUSIVE,
-                        pre_transform,
-                        composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
-                        present_mode,
-                        old_swapchain,
-                        ..Default::default()
-                    },
+                    &vk::SwapchainCreateInfoKHR::default()
+                        .surface(surface)
+                        .min_image_count(min_image_count)
+                        .image_color_space(image_color_space)
+                        .image_format(image_format)
+                        .image_extent(image_extent)
+                        .image_array_layers(1)
+                        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                        .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                        .pre_transform(pre_transform)
+                        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+                        .present_mode(present_mode)
+                        .old_swapchain(old_swapchain),
                     None,
                 )
                 .unwrap()
         };
 
         // Destroy old swap chain
-        unsafe { SWAPCHAIN_LOADER.destroy_swapchain(old_swapchain, None) };
+        if old_swapchain != Default::default() {
+            unsafe { SWAPCHAIN_LOADER.destroy_swapchain(old_swapchain, None) };
+        }
 
         self.images = unsafe {
             SWAPCHAIN_LOADER
@@ -137,37 +137,23 @@ impl WindowData {
             )
             .unwrap()
         };
-        let mut slf = Self {
+
+        Self {
             window,
             surface,
             swapchain: Swapchain::default(),
-        };
-        slf.recreate_swapchain();
-        slf
+        }
     }
 
     pub fn recreate_swapchain(&mut self) {
-        // Update surface information
-        let surface_formats = unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_formats(*GPU, self.surface)
-                .unwrap()
-        };
+        let surface_formats = surface_formats(self.surface);
         let surface_format = surface_formats
             .iter()
             .copied()
             .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
             .unwrap_or(surface_formats[0]);
-        let surface_capabilities = unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_capabilities(*GPU, self.surface)
-                .unwrap()
-        };
-        let surface_present_modes = unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_present_modes(*GPU, self.surface)
-                .unwrap()
-        };
+        let surface_capabilities = surface_capabilities(self.surface);
+        let surface_present_modes = surface_present_modes(self.surface);
         let surface_resolution = match surface_capabilities.current_extent.width {
             u32::MAX => vk::Extent2D {
                 width: self.window.inner_size().width,

@@ -4,28 +4,32 @@ pub type Mouse = winit::event::MouseButton;
 
 pub struct Input {
     mouse: [bool; 5],
-    mouse_pressed: [bool; 5],
+    mouse_old: [bool; 5],
     mouse_x: f32,
     mouse_y: f32,
     mouse_scroll: f32,
     mouse_press_x: [f32; 5],
     mouse_press_y: [f32; 5],
     key: [bool; 194],
-    key_pressed: [bool; 194],
+    key_old: [bool; 194],
+    focus: bool,
+    focus_old: bool,
 }
 
 impl Input {
     pub fn new() -> Self {
         Self {
             mouse: [false; 5],
-            mouse_pressed: [false; 5],
+            mouse_old: [false; 5],
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_scroll: 0.0,
             mouse_press_x: [0.0; 5],
             mouse_press_y: [0.0; 5],
             key: [false; 194],
-            key_pressed: [false; 194],
+            key_old: [false; 194],
+            focus: true,
+            focus_old: false,
         }
     }
 
@@ -80,14 +84,21 @@ impl Input {
                     self.key[key as usize] = event.state.is_pressed();
                 }
             }
+            Event::Focused(focus) => {
+                self.focus = *focus;
+                if !self.focus {
+                    self.reset();
+                }
+            }
             _ => {}
         }
     }
 
     pub fn reset(&mut self) {
         self.mouse_scroll = 0.0;
-        self.mouse_pressed = self.mouse;
-        self.key_pressed = self.key;
+        self.mouse_old = self.mouse;
+        self.key_old = self.key;
+        self.focus_old = self.focus;
     }
 
     pub fn mouse_x(&self) -> f32 {
@@ -103,11 +114,11 @@ impl Input {
     }
 
     pub fn mouse_pressed(&self, m: Mouse) -> bool {
-        !self.mouse_pressed[Self::mouse_idx(m)] && self.mouse[Self::mouse_idx(m)]
+        !self.mouse_old[Self::mouse_idx(m)] && self.mouse[Self::mouse_idx(m)]
     }
 
     pub fn mouse_released(&self, m: Mouse) -> bool {
-        self.mouse_pressed[Self::mouse_idx(m)] && !self.mouse[Self::mouse_idx(m)]
+        self.mouse_old[Self::mouse_idx(m)] && !self.mouse[Self::mouse_idx(m)]
     }
 
     pub fn mouse_down(&self, m: Mouse) -> bool {
@@ -131,15 +142,19 @@ impl Input {
     }
 
     pub fn key_pressed(&self, k: Key) -> bool {
-        !self.key_pressed[k as usize] && self.key[k as usize]
+        !self.key_old[k as usize] && self.key[k as usize]
     }
 
     pub fn key_released(&self, k: Key) -> bool {
-        self.key_pressed[k as usize] && !self.key[k as usize]
+        self.key_old[k as usize] && !self.key[k as usize]
     }
 
     pub fn key_down(&self, k: Key) -> bool {
         self.key[k as usize]
+    }
+
+    pub fn focused(&self) -> bool {
+        !self.focus_old && self.focus
     }
 
     fn mouse_idx(mouse: Mouse) -> usize {

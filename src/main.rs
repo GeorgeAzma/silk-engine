@@ -15,6 +15,7 @@ mod input;
 pub mod print;
 use input::*;
 pub use input::{Event, Key, Mouse};
+pub use print::*;
 mod pipeline;
 mod shader;
 mod util;
@@ -53,6 +54,7 @@ pub struct App {
 
 impl App {
     pub fn new(event_loop: &ActiveEventLoop) -> *mut Self {
+        scope_time!("init");
         let window_data = WindowData::new(event_loop);
         let width = window_data.window.inner_size().width;
         let height = window_data.window.inner_size().height;
@@ -79,23 +81,21 @@ impl App {
     }
 
     fn update(&mut self) {
+        scope_time!("update {}", self.frame; self.frame < 4);
         let now = Instant::now().duration_since(self.start_time).as_secs_f32();
         self.dt = now - self.time;
         self.time = now;
-        self.frame += 1;
 
-        // TODO: simplify this
         let ubo_data = Uniform {
             resolution: [self.width, self.height],
             mouse_pos: [self.mouse_x, self.mouse_y],
             time: self.time,
             dt: self.dt,
         };
-        let mut buf_alloc = BUFFER_ALLOC.lock().unwrap();
-        for _ in 0..8192 {
-            buf_alloc.copy(*UNIFORM_BUFFER, &ubo_data);
-        }
-        drop(buf_alloc);
+        BUFFER_ALLOC
+            .lock()
+            .unwrap()
+            .copy(*UNIFORM_BUFFER, &ubo_data);
         self.my_app().update();
     }
 
@@ -103,6 +103,7 @@ impl App {
         if self.width == 0 || self.height == 0 {
             return;
         }
+        scope_time!("render {}", self.frame; self.frame < 4);
 
         self.renderer.begin_render(&self.windows[0]);
 
@@ -111,14 +112,16 @@ impl App {
         self.renderer.end_render(&self.windows[0]);
 
         self.input.reset();
+        self.frame += 1;
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        self.width = width;
-        self.height = height;
-        if width == 0 || height == 0 {
+        if width == 0 || height == 0 || width == self.width || height == self.height {
             return;
         }
+        scope_time!("resize {width}x{height}");
+        self.width = width;
+        self.height = height;
         self.windows[0].recreate_swapchain();
     }
 
@@ -136,6 +139,11 @@ impl App {
                     self.update();
                     self.render();
                 }
+                Event::Focused(focused) => {
+                    if !*focused {
+                        self.input.reset();
+                    }
+                }
                 Event::CloseRequested => event_loop.exit(),
                 _ => {}
             }
@@ -149,9 +157,10 @@ impl App {
         self.my_app.as_mut().unwrap()
     }
 
-    expose_methods!(input.[mouse_press_x, mouse_press_y, mouse_drag_x, mouse_drag_y](m: Mouse) -> f32);
-    expose_methods!(input.[mouse_down, mouse_released, mouse_pressed](m: Mouse) -> bool);
-    expose_methods!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
+    expose!(input.[mouse_press_x, mouse_press_y, mouse_drag_x, mouse_drag_y](m: Mouse) -> f32);
+    expose!(input.[mouse_down, mouse_released, mouse_pressed](m: Mouse) -> bool);
+    expose!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
+    expose!(input.focused() -> bool);
 }
 
 #[derive(Default)]

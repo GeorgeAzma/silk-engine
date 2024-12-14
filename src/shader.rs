@@ -32,10 +32,7 @@ impl Shader {
         // parse wgsl
         let source = std::fs::read_to_string(shader_path(name)).unwrap();
         let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| {
-            panic!(
-                "{}",
-                &print::err(&format!("WGSL Error:\n{}", e.emit_to_string(&source)))
-            );
+            fatal!("WGSL Error:\n{}", e.emit_to_string(&source));
         });
         let mut entry_names = Vec::new();
         for entry in module.entry_points.iter() {
@@ -46,8 +43,10 @@ impl Shader {
 
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
+            log!("shader cache loaded: \"{name}.spv\"");
             util::cast_slice_to(&spirv).to_owned()
         } else {
+            log!("shader loaded: \"{name}.wgsl\"");
             // validate wgsl
             let info = naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),

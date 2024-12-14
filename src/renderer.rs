@@ -10,7 +10,6 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new() -> Self {
-        ScopeTime::new("Renderer Init");
         let mut context = RenderContext::new();
         context.add_shader("screen");
         context.add_pipeline(
@@ -72,6 +71,7 @@ impl Renderer {
             let img_view = window.swapchain.image_views[image_index as usize];
 
             // record command buffer
+            // CMD_ALLOC.reset(ctx.get_cmd("render"));
             ctx.begin_cmd("render");
 
             // UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
@@ -80,7 +80,7 @@ impl Renderer {
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
                         .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
+                        .src_access_mask(vk::AccessFlags2::NONE)
                         .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
                         .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .old_layout(vk::ImageLayout::UNDEFINED)

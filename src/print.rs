@@ -1,5 +1,4 @@
 use lazy_static::lazy_static;
-use std::io::{Read, Seek, Write};
 
 pub fn col(text: &str, col: [u8; 3]) -> String {
     format!("\x1b[38;2;{};{};{}m{text}\x1b[0m", col[0], col[1], col[2])
@@ -7,6 +6,10 @@ pub fn col(text: &str, col: [u8; 3]) -> String {
 
 pub fn bg_col(text: &str, col: [u8; 3]) -> String {
     format!("\x1b[48;2;{};{};{}m{text}\x1b[0m", col[0], col[1], col[2])
+}
+
+pub fn dim(text: &str) -> String {
+    format!("\x1b[2m{text}\x1b[0m")
 }
 
 pub fn fatal(text: &str) -> String {
@@ -26,54 +29,52 @@ pub fn info(text: &str) -> String {
 }
 
 pub fn trace(text: &str) -> String {
-    col(text, [150, 150, 150])
+    dim(text)
 }
 
 #[macro_export]
 macro_rules! fatal {
-    ($($args:tt),*) => {
-        panic!("{}", print::fatal(&format!($($args),*)))
+    ($($args:tt)*) => {
+        panic!("\x1b[48;2;241;76;76m{}\x1b[0m", format_args!($($args)*))
     };
 }
 
 #[macro_export]
 macro_rules! err {
-    ($($args:tt),*) => {
-        println!("{}", print::err(&format!($($args),*)))
+    ($($args:tt)*) => {
+        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m", format_args!($($args)*))
     };
 }
 
 #[macro_export]
 macro_rules! warn {
-    ($($args:tt),*) => {
-        println!("{}", print::warn(&format!($($args),*)))
+    ($($args:tt)*) => {
+        println!("\x1b[38;2;240;230;80m{}\x1b[0m", format_args!($($args)*))
     };
 }
 
 #[macro_export]
 macro_rules! info {
-    ($($args:tt),*) => {
-        println!("{}", print::info(&format!($($args),*)))
+    ($($args:tt)*) => {
+        println!("\x1b[38;2;41;184;219m{}\x1b[0m", format_args!($($args)*))
     };
 }
 
 #[macro_export]
 macro_rules! trace {
-    ($($args:tt),*) => {
+    ($($args:tt)*) => {
         println!("{}", print::trace(&format!($($args),*)))
     };
 }
 
 lazy_static! {
     pub static ref INIT_LOG_FOLDER: () = {
-        #[cfg(debug_assertions)]
         std::fs::remove_dir_all("logs").unwrap_or_default();
-        #[cfg(debug_assertions)]
         std::fs::create_dir("logs").unwrap_or_default();
     };
 }
 
-pub fn backtrace() -> String {
+pub fn backtrace_callers() -> Vec<String> {
     *INIT_LOG_FOLDER;
     let mut backtrace = std::backtrace::Backtrace::force_capture()
         .to_string()
@@ -82,42 +83,113 @@ pub fn backtrace() -> String {
         .lines()
         .filter(|l| l.contains("at ./src/"))
         .collect();
-    backtrace = backtrace.trim().replace("at ./", "");
-    let mut callers = backtrace
+    let mut callers: Vec<String> = backtrace
+        .trim()
+        .replace("at ./", "")
         .split_whitespace()
-        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        })
         .rev()
-        .collect::<Vec<&str>>();
+        .collect();
     callers.pop();
     callers.pop();
     callers.dedup();
-    backtrace = callers.join(" > ");
-    backtrace
+    callers
 }
 
-const LOG_PATH: &str = "logs/debug.log";
-const LOG_SIZE: usize = 65536;
-pub fn log(text: &str) {
-    #[cfg(debug_assertions)]
-    {
-        *INIT_LOG_FOLDER;
-        if let Ok(mut log_file) = std::fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(true)
-            .open(LOG_PATH)
+pub fn backtrace() -> String {
+    backtrace_callers().join(" > ")
+}
+
+#[macro_export]
+macro_rules! log_file {
+    ($file:expr, $($args:tt)*) => {
+        #[cfg(debug_assertions)]
         {
-            log_file
-                .write_fmt(format_args!("{text}\n"))
-                .unwrap_or_default();
-            if log_file.metadata().unwrap().len() >= LOG_SIZE as u64 {
-                let mut buf = vec![0; LOG_SIZE / 2];
+            use crate::print::INIT_LOG_FOLDER;
+            use std::io::{Read, Seek, Write};
+            const LOG_SIZE: usize = 65536;
+            *INIT_LOG_FOLDER;
+            if let Ok(mut log_file) = std::fs::OpenOptions::new()
+                .read(true)
+                .append(true)
+                .create(true)
+                .open($file)
+            {
                 log_file
-                    .seek(std::io::SeekFrom::Start(LOG_SIZE as u64 / 2))
+                    .write_fmt(format_args!("{}\n", format_args!($($args)*)))
                     .unwrap_or_default();
-                log_file.read(&mut buf).unwrap_or_default();
-                std::fs::write(LOG_PATH, &buf).unwrap_or_default();
+                if log_file.metadata().unwrap().len() >= LOG_SIZE as u64 {
+                    let mut buf = vec![0; LOG_SIZE / 2];
+                    log_file
+                        .seek(std::io::SeekFrom::Start(LOG_SIZE as u64 / 2))
+                        .unwrap_or_default();
+                    log_file.read(&mut buf).unwrap_or_default();
+                    std::fs::write($file, &buf).unwrap_or_default();
+                }
             }
         }
+    };
+}
+
+#[macro_export]
+macro_rules! log {
+    ($($args:tt)*) => {
+        crate::log_file!("logs/debug.log", $($args)*);
+    }
+}
+
+#[macro_export]
+macro_rules! scope_time {
+    ($($args:expr),* ; $($cond:tt)+) => {
+        let _t = if $($cond)+ {
+            Some(ScopeTime::new(&format!($($args),*)))
+        } else {
+            None
+        };
+    };
+    ($($args:tt)*) => {
+        let _t = ScopeTime::new(&format!($($args)*));
+    };
+}
+
+#[cfg(not(debug_assertions))]
+pub struct ScopeTime;
+
+#[cfg(not(debug_assertions))]
+impl ScopeTime {
+    pub fn new(name: &str) -> Self {
+        Self
+    }
+}
+
+#[cfg(debug_assertions)]
+pub struct ScopeTime {
+    start: std::time::Instant,
+    name: String,
+}
+
+#[cfg(debug_assertions)]
+impl ScopeTime {
+    pub fn new(name: &str) -> Self {
+        Self {
+            start: std::time::Instant::now(),
+            name: name.to_string(),
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+impl Drop for ScopeTime {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        let callers = backtrace_callers();
+        let caller = &callers[callers.len() - 1];
+        crate::log!("[{}] {}: {:?}", caller, self.name, elapsed);
     }
 }
