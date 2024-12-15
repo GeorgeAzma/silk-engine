@@ -16,6 +16,7 @@ use std::{
 pub fn required_vulkan_instance_extensions() -> Vec<CString> {
     [
         khr::surface::NAME,
+        khr::get_surface_capabilities2::NAME,
         #[cfg(target_os = "windows")]
         khr::win32_surface::NAME,
         #[cfg(target_os = "linux")]
@@ -111,7 +112,9 @@ unsafe extern "system" fn vulkan_debug_callback(
         _ => message,
     };
 
-    let backtrace = print::backtrace();
+    let mut backtrace = print::backtrace_callers();
+    backtrace.pop();
+    let backtrace = backtrace.join(" > ");
     log!("{full_message}\n|> {backtrace}\n");
     let ansi_backtrace = print::trace(&["|> ", &backtrace].concat());
     let print_str = format!("{ansi_message}\n{ansi_backtrace}");

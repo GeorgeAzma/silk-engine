@@ -36,6 +36,9 @@ impl MyApp {
                 1.0 / self.app.dt
             );
         }
+        if self.app.frame > 8 {
+            abort();
+        }
     }
 
     pub fn render(&mut self) {}
