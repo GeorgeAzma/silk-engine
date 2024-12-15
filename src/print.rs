@@ -148,13 +148,13 @@ macro_rules! log {
 macro_rules! scope_time {
     ($($args:expr),* ; $($cond:tt)+) => {
         let _t = if $($cond)+ {
-            Some(ScopeTime::new(&format!($($args),*)))
+            Some($crate::ScopeTime::new(&format!($($args),*)))
         } else {
             None
         };
     };
     ($($args:tt)*) => {
-        let _t = ScopeTime::new(&format!($($args)*));
+        let _t = $crate::ScopeTime::new(&format!($($args)*));
     };
 }
 

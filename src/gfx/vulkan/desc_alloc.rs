@@ -5,9 +5,14 @@ use ash::vk;
 // TODO: track descriptor allocs and create new pools based on that
 // TODO: allocate descriptor sets together
 // For now it just uses single large descriptor pool
-#[derive(Default)]
 pub struct DescAlloc {
     pool: vk::DescriptorPool,
+}
+
+impl Default for DescAlloc {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 macro_rules! dps {
@@ -54,7 +59,7 @@ impl DescAlloc {
         }
     }
 
-    pub fn alloc_single(&self, dsl: vk::DescriptorSetLayout) -> vk::DescriptorSet {
+    pub fn alloc_one(&self, dsl: vk::DescriptorSetLayout) -> vk::DescriptorSet {
         self.alloc(&[dsl])[0]
     }
 }

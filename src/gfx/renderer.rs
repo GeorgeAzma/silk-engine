@@ -3,23 +3,101 @@ use super::render_context::RenderContext;
 
 use crate::*;
 
+lazy_static! {
+    pub static ref CTX: Mutex<RenderContext> = Mutex::new(RenderContext::new());
+}
+
+#[derive(Clone, Copy)]
+struct Frame {
+    img_available: vk::Semaphore,
+    render_done: vk::Semaphore,
+    prev_frame_done: vk::Fence,
+}
+
+impl Frame {
+    fn new() -> Self {
+        Self {
+            img_available: unsafe {
+                DEVICE
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .unwrap()
+            },
+            render_done: unsafe {
+                DEVICE
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .unwrap()
+            },
+            prev_frame_done: unsafe {
+                DEVICE
+                    .create_fence(
+                        &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
+                        None,
+                    )
+                    .unwrap()
+            },
+        }
+    }
+
+    fn wait(&self) {
+        unsafe {
+            DEVICE
+                .wait_for_fences(&[self.prev_frame_done], false, u64::MAX)
+                .unwrap();
+            DEVICE.reset_fences(&[self.prev_frame_done]).unwrap();
+        }
+    }
+
+    fn acquire_img(&self, window: &mut WindowData) -> u32 {
+        if window.swapchain.swapchain == vk::SwapchainKHR::null() {
+            window.recreate_swapchain();
+        }
+        let image_index = unsafe {
+            SWAPCHAIN_LOADER
+                .acquire_next_image(
+                    window.swapchain.swapchain,
+                    u64::MAX,
+                    self.img_available,
+                    vk::Fence::null(),
+                )
+                .unwrap()
+                .0
+        };
+        image_index
+    }
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Renderer {
-    context: RenderContext,
+    frames: [Frame; Self::FRAMES],
+    current_frame: usize,
     image_index: u32,
 }
 
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Renderer {
+    const FRAMES: usize = 1;
+
     pub fn new() -> Self {
-        let mut context = RenderContext::new();
-        context.add_shader("screen");
-        context.add_pipeline(
+        let ctx = &mut *CTX.lock().unwrap();
+        ctx.add_shader("screen");
+        ctx.add_pipeline(
             "main",
             "screen",
             GraphicsPipelineInfo::new().dyn_size(),
             &[],
         );
-        let desc_set = context.add_desc_set("global uniform", "screen", 0);
-        context.add_cmd("render");
+        let desc_set = ctx.add_desc_set("global uniform", "screen", 0);
+        ctx.add_cmds_numbered("render", Self::FRAMES);
 
         // TODO: figure out simpler way for this
         // TODO: have single ubo that is used to create all ubos, same with ssbo etc.
@@ -41,38 +119,25 @@ impl Renderer {
         };
 
         Self {
-            context,
+            frames: [Frame::default(); Self::FRAMES],
+            current_frame: 0,
             image_index: 0,
         }
     }
 
-    pub fn begin_render(&mut self, window: &WindowData) {
-        let ctx = &mut self.context;
+    pub fn begin_render(&mut self, window: &mut WindowData) {
+        let ctx = &mut *CTX.lock().unwrap();
         unsafe {
-            // wait prev frame
-            DEVICE
-                .wait_for_fences(&[*PREV_FRAME_FINISHED_FENCE], false, u64::MAX)
-                .unwrap();
-            DEVICE.reset_fences(&[*PREV_FRAME_FINISHED_FENCE]).unwrap();
+            let frame = &self.frames[self.current_frame];
+            frame.wait();
 
-            // acquire next image
-            let (image_index, suboptimal) = SWAPCHAIN_LOADER
-                .acquire_next_image(
-                    window.swapchain.swapchain,
-                    u64::MAX,
-                    *IMAGE_AVAILABLE_SEMAPHORE,
-                    vk::Fence::null(),
-                )
-                .unwrap();
-            if suboptimal {
-                warn!("suboptimal swapchain");
-            }
-            self.image_index = image_index;
-            let img_view = window.swapchain.image_views[image_index as usize];
+            self.image_index = frame.acquire_img(window);
+            let img_view = window.swapchain.image_views[self.image_index as usize];
 
             // record command buffer
-            // CMD_ALLOC.reset(ctx.get_cmd("render"));
-            ctx.begin_cmd("render");
+            let cmd_name = format!("render{}", self.current_frame);
+            ctx.reset_cmd(&cmd_name);
+            ctx.begin_cmd(&cmd_name);
 
             // UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
             DEVICE.cmd_pipeline_barrier2(
@@ -80,12 +145,12 @@ impl Renderer {
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
                         .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .src_access_mask(vk::AccessFlags2::NONE)
+                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
                         .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .old_layout(vk::ImageLayout::UNDEFINED)
                         .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image(window.swapchain.images[image_index as usize])
+                        .image(window.swapchain.images[self.image_index as usize])
                         .subresource_range(
                             vk::ImageSubresourceRange::default()
                                 .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -103,8 +168,9 @@ impl Renderer {
         }
     }
 
-    pub fn end_render(&mut self, window: &WindowData) {
-        let ctx = &mut self.context;
+    pub fn end_render(&mut self, window: &mut WindowData) {
+        let ctx = &mut *CTX.lock().unwrap();
+        let cmd_name = ctx.cmd_name().to_owned();
 
         ctx.end_render();
 
@@ -134,13 +200,14 @@ impl Renderer {
         ctx.end_cmd();
 
         // wait(image_available), submit cmd, signal(render_finished)
+        let frame = &self.frames[self.current_frame];
         ctx.submit_cmd(
-            "render",
+            &cmd_name,
             *QUEUE,
-            &[*IMAGE_AVAILABLE_SEMAPHORE],
-            &[*RENDER_FINISHED_SEMAPHORE],
+            &[frame.img_available],
+            &[frame.render_done],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            *PREV_FRAME_FINISHED_FENCE,
+            frame.prev_frame_done,
         );
 
         // wait(render_finished), present rendered image
@@ -149,11 +216,16 @@ impl Renderer {
                 .queue_present(
                     *QUEUE,
                     &vk::PresentInfoKHR::default()
-                        .wait_semaphores(&[*RENDER_FINISHED_SEMAPHORE])
+                        .wait_semaphores(&[frame.render_done])
                         .swapchains(&[window.swapchain.swapchain])
                         .image_indices(&[self.image_index]),
                 )
-                .unwrap()
+                .unwrap_or_else(|_| {
+                    window.recreate_swapchain();
+                    false
+                })
         };
+
+        self.current_frame = (self.current_frame + 1) % Self::FRAMES;
     }
 }

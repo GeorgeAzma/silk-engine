@@ -37,6 +37,10 @@ impl MappedRange {
     pub fn len(&self) -> u64 {
         self.range.end - self.range.start
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 struct MemBlock {
@@ -56,9 +60,7 @@ pub struct BufferAlloc {
 
 impl BufferAlloc {
     pub fn new() -> Self {
-        Self {
-            buf_mems: HashMap::new(),
-        }
+        Default::default()
     }
 
     pub fn alloc(

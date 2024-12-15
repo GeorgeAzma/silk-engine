@@ -1,3 +1,4 @@
+use super::config::*;
 use std::ffi::CString;
 
 use crate::*;
@@ -46,5 +47,59 @@ lazy_static! {
         let mut mem_props = vk::PhysicalDeviceMemoryProperties2::default();
         INSTANCE.get_physical_device_memory_properties2(*GPU, &mut mem_props);
         mem_props.memory_properties
+    };
+    pub static ref DEVICE: ash::Device = unsafe {
+        #[cfg(debug_assertions)]
+        log_file!(
+            "logs/gpu.log",
+            "//////////////////// Properties ////////////////////\n{:#?}\n\n//////////////////// Features ////////////////////\n{:#?}\n\n//////////////////// Extensions ////////////////////\n{:#?}", *GPU_PROPS, *GPU_FEATURES, *GPU_EXTENSIONS
+        );
+
+        let required_gpu_extensions = required_vulkan_gpu_extensions();
+        required_gpu_extensions
+            .iter()
+            .filter(|re| !GPU_EXTENSIONS.contains(re))
+            .for_each(|re| panic!("Required vulkan gpu extension not found: {re:?}"));
+        let mut preferred_gpu_extensions = preferred_vulkan_gpu_extensions();
+        preferred_gpu_extensions
+            .retain(|pe| {
+                GPU_EXTENSIONS
+                    .contains(pe)
+                    .then_some(true)
+                    .unwrap_or_else(|| {
+                        println!("Preferred vulkan gpu extension not found: {pe:?}");
+                        false
+                    })
+            });
+
+            let mut dyn_render = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+            let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
+            #[cfg(debug_assertions)]
+            let mut pipeline_exec_props = vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default()
+            .pipeline_executable_info(true);
+
+            let gpu_exts: Vec<*const i8> = required_gpu_extensions
+                .iter()
+                .chain(preferred_gpu_extensions.iter())
+                .filter(|ext| GPU_EXTENSIONS.contains(ext))
+                .map(|ext| ext.as_ptr())
+                .collect();
+            let queue_priorities = [1.0];
+            let queue_infos = [
+                vk::DeviceQueueCreateInfo::default()
+                    .queue_family_index(*QUEUE_FAMILY_INDEX)
+                    .queue_priorities(&queue_priorities)
+            ];
+            let sampler_anisotropy = vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true).shader_clip_distance(true);
+            let info = vk::DeviceCreateInfo::default()
+                .queue_create_infos(&queue_infos)
+                .enabled_extension_names(&gpu_exts)
+                .enabled_features(&sampler_anisotropy)
+                .push_next(&mut dyn_render)
+                .push_next(&mut sync2);
+            #[cfg(debug_assertions)]
+            let info = info.push_next(&mut pipeline_exec_props);
+            INSTANCE.create_device(*GPU, &info, None)
+            .expect("Failed to create VkDevice")
     };
 }

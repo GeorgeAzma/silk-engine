@@ -97,23 +97,25 @@ impl App {
         }
         scope_time!("render {}", self.frame; self.frame < 4);
 
-        self.renderer.begin_render(&self.windows[0]);
+        self.renderer.begin_render(&mut self.windows[0]);
 
         self.my_app().render();
 
-        self.renderer.end_render(&self.windows[0]);
+        self.renderer.end_render(&mut self.windows[0]);
 
         self.input.reset();
         self.frame += 1;
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 || width == self.width || height == self.height {
+        if width == self.width || height == self.height {
             return;
         }
-        scope_time!("resize {width}x{height}");
         self.width = width;
         self.height = height;
+        if width == 0 || height == 0 {
+            return;
+        }
         self.windows[0].recreate_swapchain();
     }
 

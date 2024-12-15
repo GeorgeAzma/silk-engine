@@ -18,13 +18,11 @@ use lazy_static::lazy_static;
 pub use pipeline_layout_manager::*;
 use std::sync::Mutex;
 mod config;
-use config::*;
 
 lazy_static!(
     pub static ref ENTRY: ash::Entry = unsafe { ash::Entry::load().expect("Failed to load Vulkan") };
 
     static ref SURFACE_FORMATS: Mutex<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> = Mutex::new(HashMap::new());
-    static ref SURFACE_CAPABILITIES: Mutex<HashMap<u64, vk::SurfaceCapabilitiesKHR>> = Mutex::new(HashMap::new());
     static ref SURFACE_PRESENT_MODES: Mutex<HashMap<u64, Vec<vk::PresentModeKHR>>> = Mutex::new(HashMap::new());
 
     pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe {
@@ -45,65 +43,7 @@ lazy_static!(
         })
         .unwrap_or_default() as u32;
 
-    pub static ref DEVICE: ash::Device = unsafe {
-            #[cfg(debug_assertions)]
-            log_file!(
-                "logs/gpu.log",
-                "//////////////////// Properties ////////////////////\n{:#?}\n\n//////////////////// Features ////////////////////\n{:#?}\n\n//////////////////// Extensions ////////////////////\n{:#?}", *GPU_PROPS, *GPU_FEATURES, *GPU_EXTENSIONS
-            );
-
-            let required_gpu_extensions = required_vulkan_gpu_extensions();
-            required_gpu_extensions
-                .iter()
-                .filter(|re| !GPU_EXTENSIONS.contains(re))
-                .for_each(|re| panic!("Required vulkan gpu extension not found: {re:?}"));
-            let mut preferred_gpu_extensions = preferred_vulkan_gpu_extensions();
-            preferred_gpu_extensions
-                .retain(|pe| {
-                    GPU_EXTENSIONS
-                        .contains(pe)
-                        .then_some(true)
-                        .unwrap_or_else(|| {
-                            println!("Preferred vulkan gpu extension not found: {pe:?}");
-                            false
-                        })
-                });
-
-                let mut dyn_render = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
-                let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
-                #[cfg(debug_assertions)]
-                let mut pipeline_exec_props = vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default()
-                .pipeline_executable_info(true);
-
-                let gpu_exts: Vec<*const i8> = required_gpu_extensions
-                    .iter()
-                    .chain(preferred_gpu_extensions.iter())
-                    .filter(|ext| GPU_EXTENSIONS.contains(ext))
-                    .map(|ext| ext.as_ptr())
-                    .collect();
-                let queue_priorities = [1.0];
-                let queue_infos = [
-                    vk::DeviceQueueCreateInfo::default()
-                        .queue_family_index(*QUEUE_FAMILY_INDEX)
-                        .queue_priorities(&queue_priorities)
-                ];
-                let sampler_anisotropy = vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true);
-                let info = vk::DeviceCreateInfo::default()
-                    .queue_create_infos(&queue_infos)
-                    .enabled_extension_names(&gpu_exts)
-                    .enabled_features(&sampler_anisotropy)
-                    .push_next(&mut dyn_render)
-                    .push_next(&mut sync2);
-                #[cfg(debug_assertions)]
-                let info = info.push_next(&mut pipeline_exec_props);
-                INSTANCE.create_device(*GPU, &info, None)
-                .expect("Failed to create VkDevice")
-        };
     pub static ref QUEUE: vk::Queue = unsafe { DEVICE.get_device_queue(*QUEUE_FAMILY_INDEX, 0) };
-
-    pub static ref IMAGE_AVAILABLE_SEMAPHORE: vk::Semaphore = unsafe { DEVICE.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).unwrap() };
-    pub static ref RENDER_FINISHED_SEMAPHORE: vk::Semaphore = unsafe { DEVICE.create_semaphore(&vk::SemaphoreCreateInfo::default(), None).unwrap() };
-    pub static ref PREV_FRAME_FINISHED_FENCE: vk::Fence = unsafe { DEVICE.create_fence(&vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED), None).unwrap() };
 
     pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
@@ -117,7 +57,6 @@ lazy_static!(
     pub static ref SURFACE_CAPS2: khr::get_surface_capabilities2::Instance = {
         khr::get_surface_capabilities2::Instance::new(&ENTRY, &INSTANCE)
     };
-
 
     pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
     pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
@@ -143,21 +82,17 @@ pub fn surface_formats(surface: vk::SurfaceKHR) -> Vec<vk::SurfaceFormatKHR> {
 }
 
 pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
-    *SURFACE_CAPABILITIES
-        .lock()
-        .unwrap()
-        .entry(surface.as_raw())
-        .or_insert(unsafe {
-            let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
-            SURFACE_CAPS2
-                .get_physical_device_surface_capabilities2(
-                    *GPU,
-                    &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface),
-                    &mut surface_caps,
-                )
-                .unwrap();
-            surface_caps.surface_capabilities
-        })
+    let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
+    unsafe {
+        SURFACE_CAPS2
+            .get_physical_device_surface_capabilities2(
+                *GPU,
+                &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface),
+                &mut surface_caps,
+            )
+            .unwrap()
+    };
+    surface_caps.surface_capabilities
 }
 
 pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR> {
@@ -171,6 +106,10 @@ pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR>
                 .unwrap()
         })
         .clone()
+}
+
+pub fn wait_idle() {
+    unsafe { DEVICE.device_wait_idle().unwrap() };
 }
 
 #[repr(C)]

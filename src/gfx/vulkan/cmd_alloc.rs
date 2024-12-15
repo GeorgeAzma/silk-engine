@@ -1,9 +1,14 @@
 use super::{DEVICE, QUEUE_FAMILY_INDEX};
 use ash::vk;
 
-#[derive(Default)]
 pub struct CmdAlloc {
     pool: vk::CommandPool,
+}
+
+impl Default for CmdAlloc {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CmdAlloc {
@@ -16,17 +21,24 @@ impl CmdAlloc {
         }
     }
 
-    pub fn alloc(&self) -> vk::CommandBuffer {
+    pub fn alloc(&self, count: u32) -> Vec<vk::CommandBuffer> {
         let cmd_alloc_info = vk::CommandBufferAllocateInfo::default()
-            .command_buffer_count(1)
+            .command_buffer_count(count)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_pool(self.pool);
-        let cmds = unsafe { DEVICE.allocate_command_buffers(&cmd_alloc_info).unwrap() };
-        cmds[0]
+        unsafe { DEVICE.allocate_command_buffers(&cmd_alloc_info).unwrap() }
     }
 
-    pub fn dealloc(&self, cmd: vk::CommandBuffer) {
-        unsafe { DEVICE.free_command_buffers(self.pool, &[cmd]) };
+    pub fn alloc_one(&self) -> vk::CommandBuffer {
+        self.alloc(1)[0]
+    }
+
+    pub fn dealloc(&self, cmds: &[vk::CommandBuffer]) {
+        unsafe { DEVICE.free_command_buffers(self.pool, cmds) };
+    }
+
+    pub fn dealloc_one(&self, cmd: vk::CommandBuffer) {
+        self.dealloc(&[cmd]);
     }
 
     pub fn reset(&self, cmd: vk::CommandBuffer) {

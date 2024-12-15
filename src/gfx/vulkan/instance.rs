@@ -1,3 +1,4 @@
+use std::ffi::CStr;
 use std::ffi::CString;
 
 use super::config::*;
@@ -87,7 +88,12 @@ lazy_static! {
             .collect()
     };
     pub static ref INSTANCE: ash::Instance = {
-        let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
+        let app_info = vk::ApplicationInfo::default()
+            .api_version(vk::API_VERSION_1_3)
+            .application_name(CStr::from_bytes_with_nul(b"silky\0").unwrap())
+            .engine_name(CStr::from_bytes_with_nul(b"silk-engine\0").unwrap())
+            .application_version(0)
+            .engine_version(0);
 
         let required_instance_extensions: Vec<CString> = required_vulkan_instance_extensions()
             .into_iter()

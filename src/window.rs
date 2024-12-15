@@ -1,4 +1,4 @@
-use crate::gfx::*;
+use crate::{gfx::*, scope_time};
 use ash::vk;
 use std::sync::Arc;
 use winit::{
@@ -27,15 +27,6 @@ impl Swapchain {
     ) {
         // Destroy old swap chain images
         let old_swapchain = self.swapchain;
-        if !self.images.is_empty() {
-            unsafe {
-                self.images.clear();
-                self.image_views
-                    .drain(..)
-                    .for_each(|image_view| DEVICE.destroy_image_view(image_view, None));
-            }
-        }
-
         self.swapchain = unsafe {
             SWAPCHAIN_LOADER
                 .create_swapchain(
@@ -51,14 +42,25 @@ impl Swapchain {
                         .pre_transform(pre_transform)
                         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
                         .present_mode(present_mode)
-                        .old_swapchain(old_swapchain),
+                        .old_swapchain(old_swapchain)
+                        .clipped(true),
                     None,
                 )
                 .unwrap()
         };
 
-        // Destroy old swap chain
         if old_swapchain != Default::default() {
+            assert!(
+                self.images.len() == self.image_views.len(),
+                "Mismatched images and image views"
+            );
+            assert!(self.images.len() > 0, "No images to destroy");
+            self.images.clear();
+            unsafe {
+                self.image_views
+                    .drain(..)
+                    .for_each(|image_view| DEVICE.destroy_image_view(image_view, None));
+            }
             unsafe { SWAPCHAIN_LOADER.destroy_swapchain(old_swapchain, None) };
         }
 
@@ -95,7 +97,7 @@ impl Swapchain {
             })
             .collect();
 
-        unsafe { DEVICE.device_wait_idle().unwrap() };
+        wait_idle();
     }
 }
 
@@ -117,6 +119,7 @@ pub struct WindowData {
     pub window: Arc<Window>,
     pub surface: vk::SurfaceKHR,
     pub swapchain: Swapchain,
+    pub size: vk::Extent2D,
 }
 
 impl WindowData {
@@ -142,25 +145,38 @@ impl WindowData {
             window,
             surface,
             swapchain: Swapchain::default(),
+            size: vk::Extent2D::default(),
         }
     }
 
     pub fn recreate_swapchain(&mut self) {
+        let surface_capabilities = surface_capabilities(self.surface);
+        let surface_resolution = match surface_capabilities.current_extent.width {
+            u32::MAX => vk::Extent2D {
+                width: self.width(),
+                height: self.height(),
+            },
+            _ => surface_capabilities.current_extent,
+        };
+        if surface_resolution.width == 0
+            || surface_resolution.height == 0
+            || surface_resolution == self.size
+        {
+            return;
+        }
+        self.size = surface_resolution;
         let surface_formats = surface_formats(self.surface);
         let surface_format = surface_formats
             .iter()
             .copied()
             .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
             .unwrap_or(surface_formats[0]);
-        let surface_capabilities = surface_capabilities(self.surface);
         let surface_present_modes = surface_present_modes(self.surface);
-        let surface_resolution = match surface_capabilities.current_extent.width {
-            u32::MAX => vk::Extent2D {
-                width: self.window.inner_size().width,
-                height: self.window.inner_size().height,
-            },
-            _ => surface_capabilities.current_extent,
-        };
+        scope_time!(
+            "resize {}x{}",
+            self.window.inner_size().width,
+            self.window.inner_size().height
+        );
         let pre_transform = if surface_capabilities
             .supported_transforms
             .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
@@ -193,10 +209,10 @@ impl WindowData {
     }
 
     pub fn width(&self) -> u32 {
-        self.window.inner_size().width
+        self.size.width
     }
 
     pub fn height(&self) -> u32 {
-        self.window.inner_size().height
+        self.size.height
     }
 }

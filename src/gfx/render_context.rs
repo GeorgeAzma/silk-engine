@@ -23,6 +23,7 @@ struct PipelineData {
 #[derive(Default)]
 struct CmdState {
     cmd: vk::CommandBuffer,
+    cmd_name: String,
     pipeline_data: PipelineData,
     desc_sets: Vec<vk::DescriptorSet>,
     render_area: vk::Rect2D,
@@ -117,7 +118,7 @@ impl RenderContext {
         group: usize,
     ) -> vk::DescriptorSet {
         let dsl = self.shaders[shader_name].dsls[group];
-        let desc_set = DESC_ALLOC.alloc_single(dsl);
+        let desc_set = DESC_ALLOC.alloc_one(dsl);
         let inserted = self
             .desc_sets
             .insert(desc_name.to_string(), desc_set)
@@ -147,11 +148,48 @@ impl RenderContext {
         self.desc_sets[name]
     }
 
+    pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
+        let cmds = CMD_ALLOC.alloc(names.len() as u32);
+        for (cmd, name) in cmds.iter().zip(names.iter()) {
+            let inserted = self.cmds.insert(name.to_string(), *cmd).is_none();
+            assert!(inserted, "cmd buf already exists");
+        }
+        cmds
+    }
+
+    pub fn add_cmds_numbered(&mut self, name: &str, count: usize) -> Vec<vk::CommandBuffer> {
+        let mut names = Vec::with_capacity(count);
+        for i in 0..count {
+            names.push(format!("{name}{i}"));
+        }
+        self.add_cmds(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+    }
+
     pub fn add_cmd(&mut self, name: &str) -> vk::CommandBuffer {
-        let cmd_buf = CMD_ALLOC.alloc();
-        let inserted = self.cmds.insert(name.to_string(), cmd_buf).is_none();
-        assert!(inserted, "cmd buf already exists");
-        cmd_buf
+        self.add_cmds(&[name])[0]
+    }
+
+    pub fn remove_cmds(&mut self, names: &[&str]) {
+        let mut cmds = Vec::with_capacity(names.len());
+        for name in names.iter() {
+            let cmd = self.cmds.remove(name.to_owned()).unwrap();
+            cmds.push(cmd);
+        }
+        CMD_ALLOC.dealloc(&cmds);
+    }
+
+    pub fn remove_cmd(&mut self, name: &str) {
+        self.remove_cmds(&[name])
+    }
+
+    pub fn reset_cmds(&mut self, names: &[&str]) {
+        for name in names.iter() {
+            CMD_ALLOC.reset(self.cmds[&name.to_string()]);
+        }
+    }
+
+    pub fn reset_cmd(&mut self, name: &str) {
+        self.reset_cmds(&[name])
     }
 
     pub fn add_buffer(
@@ -180,12 +218,17 @@ impl RenderContext {
         self.cmd_state.cmd
     }
 
+    pub fn cmd_name(&self) -> &str {
+        &self.cmd_state.cmd_name
+    }
+
     pub fn begin_cmd(&mut self, name: &str) -> vk::CommandBuffer {
         assert!(
             self.cmd_state.cmd == Default::default(),
             "cmd has already begun"
         );
         self.cmd_state.cmd = self.get_cmd(name);
+        self.cmd_state.cmd_name = name.to_string();
         unsafe {
             DEVICE
                 .begin_command_buffer(
@@ -207,7 +250,7 @@ impl RenderContext {
             self.end_render();
         }
         unsafe {
-            DEVICE.end_command_buffer(self.cmd_state.cmd).unwrap();
+            DEVICE.end_command_buffer(self.cmd()).unwrap();
         }
         self.cmd_state = Default::default();
     }
