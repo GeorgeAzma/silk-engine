@@ -1,5 +1,5 @@
-use dsl_manager::DSLBinding;
-use pipeline::PipelineStageInfo;
+use super::pipeline::PipelineStageInfo;
+use super::vulkan::DSLBinding;
 
 use crate::*;
 

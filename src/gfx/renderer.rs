@@ -1,5 +1,5 @@
-use pipeline::GraphicsPipelineInfo;
-use render_context::RenderContext;
+use super::pipeline::GraphicsPipelineInfo;
+use super::render_context::RenderContext;
 
 use crate::*;
 

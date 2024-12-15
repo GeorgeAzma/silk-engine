@@ -1,8 +1,12 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 
+use ash::vk;
 use vk::Handle;
 
-use crate::*;
+use super::DEVICE;
 
 #[derive(Default)]
 pub struct PipelineLayoutManager {

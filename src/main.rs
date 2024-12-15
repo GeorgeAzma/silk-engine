@@ -8,6 +8,7 @@ pub use std::{
     time::{Duration, Instant},
 };
 
+use lazy_static::lazy_static;
 use winit::error::EventLoopError;
 use winit::window::WindowId;
 use winit::{event_loop::ActiveEventLoop, window::Window};
@@ -17,24 +18,14 @@ pub mod print;
 use input::*;
 pub use input::{Event, Key, Mouse};
 pub use print::*;
-mod pipeline;
-mod shader;
+mod gfx;
+pub use gfx::*;
 mod util;
 pub use util::*;
-mod vulkan;
-pub use vulkan::*;
 mod window;
 use window::*;
 mod app;
 use app::MyApp;
-mod renderer;
-use renderer::*;
-mod buffer_alloc;
-mod cmd_alloc;
-mod desc_alloc;
-mod dsl_manager;
-mod pipeline_layout_manager;
-mod render_context;
 
 pub struct App {
     my_app: Option<MyApp>,

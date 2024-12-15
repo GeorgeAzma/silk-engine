@@ -14,4 +14,8 @@ lazy_static = "1.5.0"
 naga = { version = "23.0.0", features = ["spv-in", "spv-out", "wgsl-in"] }
 winit = { version = "0.30.5", features = ["rwh_06"] }
 
-[profile.release]
+[profile.relwithdeb]
+inherits = "release"
+debug = true
+debug-assertions = true
+lto = false

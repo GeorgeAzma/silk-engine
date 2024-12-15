@@ -1,6 +1,8 @@
+use super::DEVICE;
+use ash::vk;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
-
-use crate::*;
+use std::ptr::null;
 
 #[derive(Clone)]
 pub struct DSLBinding {

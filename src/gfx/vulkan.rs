@@ -1,265 +1,28 @@
 use crate::*;
 pub use ash::vk;
-use ash::{ext, khr, vk::Handle};
-use buffer_alloc::BufferAlloc;
-use cmd_alloc::CmdAlloc;
-use desc_alloc::DescAlloc;
-use dsl_manager::DSLManager;
+use ash::{khr, vk::Handle};
+mod buffer_alloc;
+pub use buffer_alloc::*;
+mod cmd_alloc;
+pub use cmd_alloc::*;
+mod desc_alloc;
+pub use desc_alloc::*;
+mod dsl_manager;
+pub use dsl_manager::*;
+mod gpu;
+pub use gpu::*;
+mod instance;
+mod pipeline_layout_manager;
+pub use instance::*;
 use lazy_static::lazy_static;
-use pipeline_layout_manager::PipelineLayoutManager;
-use std::{
-    ffi::{CStr, CString},
-    process::abort,
-    sync::Mutex,
-};
-
-pub fn required_vulkan_instance_extensions() -> Vec<CString> {
-    [
-        khr::surface::NAME,
-        khr::get_surface_capabilities2::NAME,
-        #[cfg(target_os = "windows")]
-        khr::win32_surface::NAME,
-        #[cfg(target_os = "linux")]
-        khr::wayland_surface::NAME,
-        #[cfg(target_os = "macos")]
-        mvk::macos_surface::NAME,
-    ]
-    .into_iter()
-    .map(|e| e.to_owned())
-    .collect()
-}
-
-pub fn preferred_vulkan_instance_extensions() -> Vec<CString> {
-    [
-        #[cfg(debug_assertions)]
-        ext::debug_utils::NAME,
-    ]
-    .into_iter()
-    .map(|e: &CStr| e.to_owned())
-    .collect()
-}
-
-pub fn enabled_layers() -> Vec<CString> {
-    [
-        // FOR SOME FUCKING REASON VALIDATION FIXES BLACK SCREEN BUT DOES NOT ERROR
-        // #[cfg(debug_assertions)]
-        "VK_LAYER_KHRONOS_validation",
-    ]
-    .into_iter()
-    .map(|e: &str| CString::new(e).unwrap())
-    .collect()
-}
-
-pub fn required_vulkan_gpu_extensions() -> Vec<CString> {
-    [khr::swapchain::NAME]
-        .into_iter()
-        .map(|e| e.to_owned())
-        .collect()
-}
-
-pub fn preferred_vulkan_gpu_extensions() -> Vec<CString> {
-    [
-        // khr::draw_indirect_count::NAME,
-        #[cfg(debug_assertions)]
-        khr::pipeline_executable_properties::NAME,
-    ]
-    .into_iter()
-    .map(|e: &CStr| e.to_owned())
-    .collect()
-}
-
-lazy_static! {
-    static ref ERROR_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-}
-
-#[cfg(debug_assertions)]
-unsafe extern "system" fn vulkan_debug_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
-    _user_data: *mut std::os::raw::c_void,
-) -> vk::Bool32 {
-    if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-        || (message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-            && message_type == vk::DebugUtilsMessageTypeFlagsEXT::GENERAL)
-    {
-        return vk::FALSE;
-    }
-    let callback_data = *p_callback_data;
-    let mut message = callback_data
-        .message_as_c_str()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let full_message = message.clone();
-    if let Some(i) = message.find(" (http") {
-        message.truncate(i);
-    }
-    let match_str = format!("MessageID = 0x{:x} | ", callback_data.message_id_number);
-    if let Some(i) = message.find(&match_str) {
-        message = message[i + match_str.len()..].to_string();
-    }
-    message = message
-        .replace("The Vulkan spec states: ", "")
-        .replace("VK_", "")
-        .replace("the ", "");
-
-    type Severity = vk::DebugUtilsMessageSeverityFlagsEXT;
-    let ansi_message = match message_severity {
-        Severity::ERROR => print::err(&message),
-        Severity::WARNING => print::warn(&message),
-        Severity::INFO => print::info(&message),
-        _ => message,
-    };
-
-    let mut backtrace = print::backtrace_callers();
-    backtrace.pop();
-    let backtrace = backtrace.join(" > ");
-    log!("{full_message}\n|> {backtrace}\n");
-    let ansi_backtrace = print::trace(&["|> ", &backtrace].concat());
-    let print_str = format!("{ansi_message}\n{ansi_backtrace}");
-    match message_severity {
-        Severity::ERROR => {
-            eprintln!("{print_str}");
-            let err_cnt = ERROR_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if err_cnt > 8 {
-                eprintln!("{}", print::fatal("too many vulkan errors"));
-                abort();
-            }
-        }
-        Severity::WARNING => {
-            println!("{print_str}");
-            ERROR_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
-        }
-        _ => ERROR_COUNT.store(0, std::sync::atomic::Ordering::SeqCst),
-    }
-
-    vk::FALSE
-}
+pub use pipeline_layout_manager::*;
+use std::sync::Mutex;
+mod config;
+use config::*;
 
 lazy_static!(
     pub static ref ENTRY: ash::Entry = unsafe { ash::Entry::load().expect("Failed to load Vulkan") };
-    pub static ref INSTANCE_EXTENSIONS: Vec<CString> = unsafe {
-        ENTRY
-            .enumerate_instance_extension_properties(None)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.extension_name_as_c_str().unwrap().to_owned())
-            .collect()
-    };
-    pub static ref INSTANCE: ash::Instance = {
-        let app_info = vk::ApplicationInfo::default().api_version(vk::API_VERSION_1_3);
 
-        let required_instance_extensions: Vec<CString> = required_vulkan_instance_extensions()
-            .into_iter()
-            .filter(|re| INSTANCE_EXTENSIONS.contains(re).then_some(true)
-            .unwrap_or_else(|| { fatal!("Unsupported vulkan instance extension: {re:?}") })).collect();
-
-        let preferred_instance_extensions: Vec<CString> = preferred_vulkan_instance_extensions()
-            .into_iter()
-            .filter(|pe| INSTANCE_EXTENSIONS.contains(pe).then_some(true)
-            .unwrap_or_else(|| { warn!("Unsupported vulkan instance extension: {pe:?}"); false })).collect();
-        let enabled_extensions =
-            [required_instance_extensions, preferred_instance_extensions].concat();
-
-        let enabled_exts = enabled_extensions.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
-        let info = vk::InstanceCreateInfo::default()
-                    .application_info(&app_info)
-                    .enabled_extension_names(&enabled_exts);
-
-
-        let layers: Vec<CString> = unsafe {
-            ENTRY
-                .enumerate_instance_layer_properties()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|e| e.layer_name_as_c_str().unwrap().to_owned())
-                .collect()
-        };
-        let mut enabled_layers = enabled_layers();
-        enabled_layers.retain(|e| layers.contains(e));
-        let enabled_layers = enabled_layers.iter().map(|e| e.as_ptr()).collect::<Vec<_>>();
-        let info = info.enabled_layer_names(&enabled_layers);
-
-        let instance = unsafe {
-            ENTRY
-                .create_instance(
-                    &info,
-                    None,
-                )
-                .expect("Failed to init VkInstance")
-        };
-
-        #[cfg(debug_assertions)]
-        unsafe {
-            ext::debug_utils::Instance::new(&ENTRY, &instance)
-                .create_debug_utils_messenger(
-                    &vk::DebugUtilsMessengerCreateInfoEXT::default()
-                        .message_severity(
-                            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
-                                | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                                | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                                | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE,
-                        )
-                        .message_type(
-                            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                                | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
-                        )
-                        .pfn_user_callback(Some(vulkan_debug_callback)),
-                    None,
-                )
-                .unwrap()
-        };
-
-        instance
-    };
-
-    static ref GPU_STUFF: (vk::PhysicalDevice, vk::PhysicalDeviceProperties, vk::PhysicalDeviceFeatures) = {
-        let gpus = unsafe {
-            INSTANCE
-                .enumerate_physical_devices()
-                .expect("No GPUs found")
-        };
-        // Selects first discrete GPU (non-integrated)
-        let (gpu, gpu_props) = gpus
-            .iter()
-            .map(|&gpu| {
-                let mut props = vk::PhysicalDeviceProperties2::default();
-                unsafe { INSTANCE.get_physical_device_properties2(gpu, &mut props) };
-                let props = props.properties;
-                let mut score = 0;
-                score += (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU) as u32 * 1_000_000;
-                score += props.limits.max_image_dimension2_d;
-                score += props.limits.max_uniform_buffer_range / 64;
-                score += props.limits.max_push_constants_size / 4;
-                score += props.limits.max_compute_shared_memory_size / 16;
-                score += props.limits.max_compute_work_group_invocations;
-                (gpu, props, score)
-            }).max_by_key(|(_, _, score)| *score).map(|(gpu, props, _)| (gpu, props)).unwrap();
-        let mut features = vk::PhysicalDeviceFeatures2::default();
-        unsafe { INSTANCE.get_physical_device_features2(gpu, &mut features) };
-        (gpu, gpu_props, features.features)
-    };
-
-    pub static ref GPU: vk::PhysicalDevice = GPU_STUFF.0;
-    pub static ref GPU_PROPS: vk::PhysicalDeviceProperties = GPU_STUFF.1;
-    pub static ref GPU_LIMITS: vk::PhysicalDeviceLimits = GPU_PROPS.limits;
-    pub static ref GPU_FEATURES: vk::PhysicalDeviceFeatures = GPU_STUFF.2;
-    pub static ref GPU_EXTENSIONS: Vec<CString> = unsafe {
-        INSTANCE
-            .enumerate_device_extension_properties(*GPU)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|e| e.extension_name_as_c_str().unwrap().to_owned())
-            .collect()
-    };
-    pub static ref GPU_MEMORY_PROPS: vk::PhysicalDeviceMemoryProperties = unsafe {
-        let mut mem_props = vk::PhysicalDeviceMemoryProperties2::default();
-        INSTANCE.get_physical_device_memory_properties2(*GPU, &mut mem_props);
-        mem_props.memory_properties
-    };
     static ref SURFACE_FORMATS: Mutex<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> = Mutex::new(HashMap::new());
     static ref SURFACE_CAPABILITIES: Mutex<HashMap<u64, vk::SurfaceCapabilitiesKHR>> = Mutex::new(HashMap::new());
     static ref SURFACE_PRESENT_MODES: Mutex<HashMap<u64, Vec<vk::PresentModeKHR>>> = Mutex::new(HashMap::new());

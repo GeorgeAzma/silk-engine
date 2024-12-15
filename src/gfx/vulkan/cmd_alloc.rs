@@ -1,4 +1,5 @@
-use crate::*;
+use super::{DEVICE, QUEUE_FAMILY_INDEX};
+use ash::vk;
 
 #[derive(Default)]
 pub struct CmdAlloc {

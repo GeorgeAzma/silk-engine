@@ -1,4 +1,4 @@
-use crate::shader::Shader;
+use super::shader::Shader;
 use crate::*;
 
 const fn pipeline_cache_path() -> &'static str {

@@ -1,6 +1,11 @@
-use vk::Handle;
+use std::collections::HashMap;
 
-use crate::*;
+use super::DEVICE;
+use super::QUEUE_FAMILY_INDEX;
+use crate::log;
+use crate::GPU_MEMORY_PROPS;
+use ash::vk;
+use vk::Handle;
 
 unsafe impl Send for MappedRange {}
 

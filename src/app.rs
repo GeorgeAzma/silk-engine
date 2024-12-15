@@ -37,7 +37,7 @@ impl MyApp {
             );
         }
         if self.app.frame > 8 {
-            abort();
+            // abort();
         }
     }
 

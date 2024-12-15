@@ -1,4 +1,5 @@
-use crate::*;
+use super::DEVICE;
+use ash::vk;
 
 // TODO: manage DSLs and descriptor pools, free them together
 // TODO: track descriptor allocs and create new pools based on that

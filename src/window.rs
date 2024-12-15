@@ -1,4 +1,4 @@
-use crate::vulkan::*;
+use crate::gfx::*;
 use ash::vk;
 use std::sync::Arc;
 use winit::{
