@@ -259,13 +259,10 @@ impl GraphicsPipelineInfo {
                 .get_pipeline_executable_properties(&vk::PipelineInfoKHR::default().pipeline(gp))
                 .unwrap();
 
-            for i in 0..exec_props.len() {
+            for (i, exec_prop) in exec_props.iter().enumerate() {
                 log!(
                     "{}",
-                    exec_props[i]
-                        .description_as_c_str()
-                        .unwrap()
-                        .to_string_lossy()
+                    exec_prop.description_as_c_str().unwrap().to_string_lossy()
                 );
                 let stats = PIPELINE_EXEC_PROPS_LOADER
                     .get_pipeline_executable_statistics(
@@ -304,7 +301,10 @@ impl GraphicsPipelineInfo {
                         .replace("Local", "Loc")
                         .trim()
                         .to_string();
-                    if name == "Loc Mem" || name == "Binary" {
+                    if name == "Loc Mem" {
+                        continue;
+                    }
+                    if name == "Binary" {
                         let val = Mem::str(&val);
                         log!("    {name:<8} {val}");
                     } else {

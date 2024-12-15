@@ -111,7 +111,7 @@ macro_rules! log_file {
     ($file:expr, $($args:tt)*) => {
         #[cfg(debug_assertions)]
         {
-            use crate::print::INIT_LOG_FOLDER;
+            use $crate::print::INIT_LOG_FOLDER;
             use std::io::{Read, Seek, Write};
             const LOG_SIZE: usize = 65536;
             *INIT_LOG_FOLDER;
@@ -140,7 +140,7 @@ macro_rules! log_file {
 #[macro_export]
 macro_rules! log {
     ($($args:tt)*) => {
-        crate::log_file!("logs/debug.log", $($args)*);
+        $crate::log_file!("logs/debug.log", $($args)*);
     }
 }
 

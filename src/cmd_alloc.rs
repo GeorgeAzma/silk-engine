@@ -1,5 +1,6 @@
 use crate::*;
 
+#[derive(Default)]
 pub struct CmdAlloc {
     pool: vk::CommandPool,
 }

@@ -44,6 +44,7 @@ struct MemBlock {
 // TODO: have different buffers for different properties of memory
 // TODO: allocate vertex/index/uniform buffers from single pre-allocated buffer with suitable memory properties
 // TODO: when buffer is full, allocate new buffer (maybe copy old data to new buffer)
+#[derive(Default)]
 pub struct BufferAlloc {
     buf_mems: HashMap<u64, MemBlock>,
 }
@@ -193,7 +194,7 @@ impl BufferAlloc {
             // try to use device local memory heap if requested, otherwise use any
             let mem_heap_flags = GPU_MEMORY_PROPS.memory_heaps[mem_type.heap_index as usize].flags;
             let is_device_local = mem_heap_flags.contains(vk::MemoryHeapFlags::DEVICE_LOCAL);
-            if !need_device_local || (need_device_local && is_device_local) {
+            if !need_device_local || is_device_local {
                 return i as u32;
             }
         }

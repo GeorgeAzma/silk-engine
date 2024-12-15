@@ -292,28 +292,35 @@ lazy_static!(
                             false
                         })
                 });
-            let pipeline_exec_info_feature = if cfg!(debug_assertions) { true } else { false };
-            INSTANCE
-                .create_device(
-                    *GPU,
-                    &vk::DeviceCreateInfo::default()
-                        .queue_create_infos(&[vk::DeviceQueueCreateInfo::default()
+
+                let mut dyn_render = vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+                let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
+                #[cfg(debug_assertions)]
+                let mut pipeline_exec_props = vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default()
+                .pipeline_executable_info(true);
+
+                let gpu_exts: Vec<*const i8> = required_gpu_extensions
+                    .iter()
+                    .chain(preferred_gpu_extensions.iter())
+                    .filter(|ext| GPU_EXTENSIONS.contains(ext))
+                    .map(|ext| ext.as_ptr())
+                    .collect();
+                let queue_priorities = [1.0];
+                let queue_infos = [
+                    vk::DeviceQueueCreateInfo::default()
                         .queue_family_index(*QUEUE_FAMILY_INDEX)
-                        .queue_priorities(&[1.0])])
-                        .enabled_extension_names(
-                            &[required_gpu_extensions, preferred_gpu_extensions].concat()
-                                .iter()
-                                .map(|e| e.as_ptr())
-                                .collect::<Vec<_>>(),
-                        )
-                        .enabled_features(
-                            &vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true),
-                        )
-                        .push_next(&mut vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true))
-                        .push_next(&mut vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true))
-                        .push_next(&mut vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default().pipeline_executable_info(pipeline_exec_info_feature)),
-                    None,
-                )
+                        .queue_priorities(&queue_priorities)
+                ];
+                let sampler_anisotropy = vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true);
+                let info = vk::DeviceCreateInfo::default()
+                    .queue_create_infos(&queue_infos)
+                    .enabled_extension_names(&gpu_exts)
+                    .enabled_features(&sampler_anisotropy)
+                    .push_next(&mut dyn_render)
+                    .push_next(&mut sync2);
+                #[cfg(debug_assertions)]
+                let info = info.push_next(&mut pipeline_exec_props);
+                INSTANCE.create_device(*GPU, &info, None)
                 .expect("Failed to create VkDevice")
         };
     pub static ref QUEUE: vk::Queue = unsafe { DEVICE.get_device_queue(*QUEUE_FAMILY_INDEX, 0) };
@@ -324,8 +331,14 @@ lazy_static!(
 
     pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
-    #[cfg(debug_assertions)]
-    pub static ref PIPELINE_EXEC_PROPS_LOADER: khr::pipeline_executable_properties::Device = khr::pipeline_executable_properties::Device::new(&INSTANCE, &DEVICE);
+    pub static ref PIPELINE_EXEC_PROPS_LOADER: khr::pipeline_executable_properties::Device =
+        if cfg!(debug_assertions) {
+            khr::pipeline_executable_properties::Device::new(&INSTANCE, &DEVICE)
+        } else {
+            #[allow(invalid_value)]
+            unsafe { std::mem::zeroed() }
+        };
+
 
     pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
     pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
@@ -351,7 +364,7 @@ pub fn surface_formats(surface: vk::SurfaceKHR) -> Vec<vk::SurfaceFormatKHR> {
 }
 
 pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
-    SURFACE_CAPABILITIES
+    *SURFACE_CAPABILITIES
         .lock()
         .unwrap()
         .entry(surface.as_raw())
@@ -360,7 +373,6 @@ pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesK
                 .get_physical_device_surface_capabilities(*GPU, surface)
                 .unwrap()
         })
-        .clone()
 }
 
 pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR> {

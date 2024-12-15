@@ -63,8 +63,9 @@ impl Shader {
                 .write(&module, &info, None, &None, &mut spirv)
                 .unwrap();
 
-            // write spirv cache // FIXME: uncomment later, maybe implement debug file watcher
-            // std::fs::write(&shader_cache_path(name), util::cast_slice(&spirv)).unwrap_or_default();
+            // write spirv cache
+            #[cfg(not(debug_assertions))]
+            std::fs::write(&shader_cache_path(name), util::cast_slice(&spirv)).unwrap_or_default();
 
             spirv
         };
@@ -149,7 +150,7 @@ impl Shader {
                     (_, _) => vk::DescriptorType::from_raw(-1),
                 };
                 let binding = DSLBinding {
-                    binding: binding,
+                    binding,
                     descriptor_type: desc_type,
                     descriptor_count: array_size,
                     stage_flags: *resource_access_stages

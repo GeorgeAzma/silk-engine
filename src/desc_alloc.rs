@@ -4,6 +4,7 @@ use crate::*;
 // TODO: track descriptor allocs and create new pools based on that
 // TODO: allocate descriptor sets together
 // For now it just uses single large descriptor pool
+#[derive(Default)]
 pub struct DescAlloc {
     pool: vk::DescriptorPool,
 }
@@ -39,10 +40,10 @@ impl DescAlloc {
     pub fn alloc(&self, dsls: &[vk::DescriptorSetLayout]) -> Vec<vk::DescriptorSet> {
         let alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
-            .set_layouts(&dsls);
+            .set_layouts(dsls);
         let desc = unsafe { DEVICE.allocate_descriptor_sets(&alloc_info) };
         match desc {
-            Ok(descs) => return descs,
+            Ok(descs) => descs,
             Err(e) => match e {
                 vk::Result::ERROR_OUT_OF_POOL_MEMORY | vk::Result::ERROR_FRAGMENTED_POOL => {
                     panic!("{e}")
