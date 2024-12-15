@@ -223,7 +223,9 @@ lazy_static!(
         let (gpu, gpu_props) = gpus
             .iter()
             .map(|&gpu| {
-                let props = unsafe { INSTANCE.get_physical_device_properties(gpu) };
+                let mut props = vk::PhysicalDeviceProperties2::default();
+                unsafe { INSTANCE.get_physical_device_properties2(gpu, &mut props) };
+                let props = props.properties;
                 let mut score = 0;
                 score += (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU) as u32 * 1_000_000;
                 score += props.limits.max_image_dimension2_d;
@@ -233,8 +235,9 @@ lazy_static!(
                 score += props.limits.max_compute_work_group_invocations;
                 (gpu, props, score)
             }).max_by_key(|(_, _, score)| *score).map(|(gpu, props, _)| (gpu, props)).unwrap();
-        let gpu_features = unsafe { INSTANCE.get_physical_device_features(gpu) };
-        (gpu, gpu_props, gpu_features)
+        let mut features = vk::PhysicalDeviceFeatures2::default();
+        unsafe { INSTANCE.get_physical_device_features2(gpu, &mut features) };
+        (gpu, gpu_props, features.features)
     };
 
     pub static ref GPU: vk::PhysicalDevice = GPU_STUFF.0;
@@ -250,13 +253,20 @@ lazy_static!(
             .collect()
     };
     pub static ref GPU_MEMORY_PROPS: vk::PhysicalDeviceMemoryProperties = unsafe {
-        INSTANCE.get_physical_device_memory_properties(*GPU)
+        let mut mem_props = vk::PhysicalDeviceMemoryProperties2::default();
+        INSTANCE.get_physical_device_memory_properties2(*GPU, &mut mem_props);
+        mem_props.memory_properties
     };
     static ref SURFACE_FORMATS: Mutex<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> = Mutex::new(HashMap::new());
     static ref SURFACE_CAPABILITIES: Mutex<HashMap<u64, vk::SurfaceCapabilitiesKHR>> = Mutex::new(HashMap::new());
     static ref SURFACE_PRESENT_MODES: Mutex<HashMap<u64, Vec<vk::PresentModeKHR>>> = Mutex::new(HashMap::new());
 
-    pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe { INSTANCE.get_physical_device_queue_family_properties(*GPU) };
+    pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe {
+        let queue_family_props_len = INSTANCE.get_physical_device_queue_family_properties2_len(*GPU);
+        let mut queue_family_props = vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
+        INSTANCE.get_physical_device_queue_family_properties2(*GPU, &mut queue_family_props);
+        queue_family_props.into_iter().map(|qfp| qfp.queue_family_properties).collect()
+    };
     pub static ref QUEUE_FAMILY_INDEX: u32 =
         QUEUE_FAMILIES
         .iter()
@@ -338,6 +348,9 @@ lazy_static!(
             #[allow(invalid_value)]
             unsafe { std::mem::zeroed() }
         };
+    pub static ref SURFACE_CAPS2: khr::get_surface_capabilities2::Instance = {
+        khr::get_surface_capabilities2::Instance::new(&ENTRY, &INSTANCE)
+    };
 
 
     pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
@@ -369,9 +382,15 @@ pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesK
         .unwrap()
         .entry(surface.as_raw())
         .or_insert(unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_capabilities(*GPU, surface)
-                .unwrap()
+            let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
+            SURFACE_CAPS2
+                .get_physical_device_surface_capabilities2(
+                    *GPU,
+                    &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface),
+                    &mut surface_caps,
+                )
+                .unwrap();
+            surface_caps.surface_capabilities
         })
 }
 
