@@ -160,6 +160,22 @@ impl GraphicsPipelineInfo {
         self
     }
 
+    pub fn blend_attachment(mut self) -> Self {
+        self.logic_op = vk::LogicOp::COPY;
+        self.attachments.push(
+            vk::PipelineColorBlendAttachmentState::default()
+                .alpha_blend_op(vk::BlendOp::ADD)
+                .color_blend_op(vk::BlendOp::ADD)
+                .blend_enable(false)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+                .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                .dst_color_blend_factor(vk::BlendFactor::ZERO)
+                .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                .src_color_blend_factor(vk::BlendFactor::ONE),
+        );
+        self
+    }
+
     pub fn build(&self) -> vk::Pipeline {
         let stages = self.stages.iter().map(|s| s.into()).collect::<Vec<_>>();
         let vertex_input_state_info = vk::PipelineVertexInputStateCreateInfo::default()

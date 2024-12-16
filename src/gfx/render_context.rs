@@ -89,6 +89,7 @@ impl RenderContext {
         pipeline_info: GraphicsPipelineInfo,
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
+        scope_time!("create pipeline: {pipeline_name}");
         self.get_shader(shader_name);
         let shader_data = &self.shaders[shader_name];
         let pipeline_info = pipeline_info

@@ -79,10 +79,10 @@ impl Swapchain {
                             .view_type(vk::ImageViewType::TYPE_2D)
                             .format(image_format)
                             .components(vk::ComponentMapping {
-                                r: vk::ComponentSwizzle::R,
-                                g: vk::ComponentSwizzle::G,
-                                b: vk::ComponentSwizzle::B,
-                                a: vk::ComponentSwizzle::A,
+                                r: vk::ComponentSwizzle::IDENTITY,
+                                g: vk::ComponentSwizzle::IDENTITY,
+                                b: vk::ComponentSwizzle::IDENTITY,
+                                a: vk::ComponentSwizzle::IDENTITY,
                             })
                             .subresource_range(
                                 vk::ImageSubresourceRange::default()
@@ -169,7 +169,10 @@ impl WindowData {
         let surface_format = surface_formats
             .iter()
             .copied()
-            .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
+            .find(|format| {
+                format.format == vk::Format::B8G8R8A8_SRGB
+                    && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            })
             .unwrap_or(surface_formats[0]);
         let surface_present_modes = surface_present_modes(self.surface);
         scope_time!(

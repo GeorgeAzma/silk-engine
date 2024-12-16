@@ -41,7 +41,7 @@ impl Frame {
     fn wait(&self) {
         unsafe {
             DEVICE
-                .wait_for_fences(&[self.prev_frame_done], false, u64::MAX)
+                .wait_for_fences(&[self.prev_frame_done], true, u64::MAX)
                 .unwrap();
             DEVICE.reset_fences(&[self.prev_frame_done]).unwrap();
         }
@@ -92,7 +92,7 @@ impl Renderer {
         ctx.add_pipeline(
             "main",
             "screen",
-            GraphicsPipelineInfo::new().dyn_size(),
+            GraphicsPipelineInfo::new().dyn_size().blend_attachment(),
             &[],
         );
         let desc_set = ctx.add_desc_set("global uniform", "screen", 0);
@@ -179,9 +179,9 @@ impl Renderer {
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
                         .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
-                        .dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE)
-                        .dst_access_mask(vk::AccessFlags2::empty())
+                        .src_access_mask(vk::AccessFlags2::NONE)
+                        .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
+                        .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
                         .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
                         .image(window.swapchain.images[self.image_index as usize])
@@ -225,5 +225,20 @@ impl Renderer {
         };
 
         // self.current_frame = (self.current_frame + 1) % Self::FRAMES;
+    }
+
+    pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
+        unsafe {
+            DEVICE.cmd_clear_color_image(
+                CTX.lock().unwrap().cmd(),
+                image,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                &vk::ClearColorValue { float32: color },
+                &[vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .level_count(1)],
+            );
+        }
     }
 }

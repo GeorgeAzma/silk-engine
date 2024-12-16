@@ -2,6 +2,13 @@ use super::vulkan::pipeline::PipelineStageInfo;
 use super::vulkan::DSLBinding;
 
 use crate::*;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref INIT_CACHE_PATH: () = {
+        std::fs::create_dir_all("res/cache/shaders").unwrap_or_default();
+    };
+}
 
 fn shader_path(name: &str) -> String {
     format!("res/shaders/{name}.wgsl")
@@ -57,13 +64,16 @@ impl Shader {
 
             // generate spirv
             let mut spirv = vec![];
-            let mut writer =
-                naga::back::spv::Writer::new(&naga::back::spv::Options::default()).unwrap();
+            let mut opts = naga::back::spv::Options::default();
+            opts.lang_version = (1, 3);
+            let mut writer = naga::back::spv::Writer::new(&opts).unwrap();
             writer
                 .write(&module, &info, None, &None, &mut spirv)
                 .unwrap();
 
             // write spirv cache
+            #[cfg(not(debug_assertions))]
+            *INIT_CACHE_PATH;
             #[cfg(not(debug_assertions))]
             std::fs::write(&shader_cache_path(name), util::cast_slice(&spirv)).unwrap_or_default();
 
