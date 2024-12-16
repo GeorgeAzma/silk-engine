@@ -32,7 +32,7 @@ pub fn enabled_layers() -> Vec<CString> {
     [
         // FOR SOME FUCKING REASON VALIDATION FIXES BLACK SCREEN BUT DOES NOT ERROR
         // #[cfg(debug_assertions)]
-        "VK_LAYER_KHRONOS_validation",
+        // "VK_LAYER_KHRONOS_validation",
     ]
     .into_iter()
     .map(|e: &str| CString::new(e).unwrap())

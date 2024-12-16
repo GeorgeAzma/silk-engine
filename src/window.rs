@@ -72,8 +72,9 @@ impl Swapchain {
         self.image_views = self
             .images
             .iter()
-            .map(|&swapchain_image| unsafe {
-                DEVICE
+            .enumerate()
+            .map(|(i, &swapchain_image)| unsafe {
+                let img_view = DEVICE
                     .create_image_view(
                         &vk::ImageViewCreateInfo::default()
                             .view_type(vk::ImageViewType::TYPE_2D)
@@ -93,7 +94,10 @@ impl Swapchain {
                             .image(swapchain_image),
                         None,
                     )
-                    .unwrap()
+                    .unwrap();
+                DebugMarker::name(&format!("swapchain img {i}"), swapchain_image);
+                DebugMarker::name(&format!("swapchain img view {i}"), img_view);
+                img_view
             })
             .collect();
 
@@ -169,10 +173,7 @@ impl WindowData {
         let surface_format = surface_formats
             .iter()
             .copied()
-            .find(|format| {
-                format.format == vk::Format::B8G8R8A8_SRGB
-                    && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-            })
+            .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
             .unwrap_or(surface_formats[0]);
         let surface_present_modes = surface_present_modes(self.surface);
         scope_time!(

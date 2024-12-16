@@ -22,6 +22,8 @@ mod debug_marker;
 pub use debug_marker::*;
 pub mod pipeline;
 pub use pipeline::*;
+pub mod render_pass;
+pub use render_pass::*;
 
 lazy_static!(
     pub static ref ENTRY: ash::Entry = unsafe { ash::Entry::load().expect("Failed to load Vulkan") };

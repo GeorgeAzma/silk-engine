@@ -88,7 +88,8 @@ impl BufferAlloc {
                 .allocate_memory(
                     &vk::MemoryAllocateInfo::default()
                         .allocation_size(mem_reqs.size)
-                        .memory_type_index(mem_type_idx),
+                        .memory_type_index(mem_type_idx)
+                        .push_next(&mut vk::MemoryPriorityAllocateInfoEXT::default().priority(0.5)),
                     None,
                 )
                 .unwrap()

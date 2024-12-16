@@ -97,7 +97,6 @@ pub fn backtrace_callers() -> Vec<String> {
         .rev()
         .collect();
     callers.pop();
-    callers.pop();
     callers.dedup();
     callers
 }
