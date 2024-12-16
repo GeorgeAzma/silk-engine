@@ -5,6 +5,7 @@ target/
 clippy.toml
 rustfmt.toml
 res/cache
+logs/
 
 *.lock
 *.cache
@@ -12,5 +13,6 @@ res/cache
 *.temp
 *.db
 *.log
+
 
 .env

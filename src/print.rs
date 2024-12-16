@@ -163,7 +163,7 @@ pub struct ScopeTime;
 
 #[cfg(not(debug_assertions))]
 impl ScopeTime {
-    pub fn new(name: &str) -> Self {
+    pub fn new(_name: &str) -> Self {
         Self
     }
 }

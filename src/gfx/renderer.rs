@@ -1,5 +1,5 @@
-use super::pipeline::GraphicsPipelineInfo;
 use super::render_context::RenderContext;
+use super::vulkan::pipeline::GraphicsPipelineInfo;
 
 use crate::*;
 
@@ -51,7 +51,7 @@ impl Frame {
         if window.swapchain.swapchain == vk::SwapchainKHR::null() {
             window.recreate_swapchain();
         }
-        let image_index = unsafe {
+        unsafe {
             SWAPCHAIN_LOADER
                 .acquire_next_image(
                     window.swapchain.swapchain,
@@ -61,8 +61,7 @@ impl Frame {
                 )
                 .unwrap()
                 .0
-        };
-        image_index
+        }
     }
 }
 
@@ -130,7 +129,6 @@ impl Renderer {
         unsafe {
             let frame = &self.frames[self.current_frame];
             frame.wait();
-
             self.image_index = frame.acquire_img(window);
             let img_view = window.swapchain.image_views[self.image_index as usize];
 
@@ -226,6 +224,6 @@ impl Renderer {
                 })
         };
 
-        self.current_frame = (self.current_frame + 1) % Self::FRAMES;
+        // self.current_frame = (self.current_frame + 1) % Self::FRAMES;
     }
 }

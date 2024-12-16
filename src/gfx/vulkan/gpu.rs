@@ -76,7 +76,7 @@ lazy_static! {
             let mut sync2 = vk::PhysicalDeviceSynchronization2Features::default().synchronization2(true);
             #[cfg(debug_assertions)]
             let mut pipeline_exec_props = vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR::default()
-            .pipeline_executable_info(true);
+                .pipeline_executable_info(true);
 
             let gpu_exts: Vec<*const i8> = required_gpu_extensions
                 .iter()

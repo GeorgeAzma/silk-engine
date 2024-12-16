@@ -1,6 +1,6 @@
 use std::ffi::{CStr, CString};
 
-use ash::{ext, khr};
+use ash::khr;
 
 pub fn required_vulkan_instance_extensions() -> Vec<CString> {
     [
@@ -21,7 +21,7 @@ pub fn required_vulkan_instance_extensions() -> Vec<CString> {
 pub fn preferred_vulkan_instance_extensions() -> Vec<CString> {
     [
         #[cfg(debug_assertions)]
-        ext::debug_utils::NAME,
+        ash::ext::debug_utils::NAME,
     ]
     .into_iter()
     .map(|e: &CStr| e.to_owned())

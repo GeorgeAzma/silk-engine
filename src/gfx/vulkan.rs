@@ -18,6 +18,10 @@ use lazy_static::lazy_static;
 pub use pipeline_layout_manager::*;
 use std::sync::Mutex;
 mod config;
+mod debug_marker;
+pub use debug_marker::*;
+pub mod pipeline;
+pub use pipeline::*;
 
 lazy_static!(
     pub static ref ENTRY: ash::Entry = unsafe { ash::Entry::load().expect("Failed to load Vulkan") };

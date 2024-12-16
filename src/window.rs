@@ -54,7 +54,7 @@ impl Swapchain {
                 self.images.len() == self.image_views.len(),
                 "Mismatched images and image views"
             );
-            assert!(self.images.len() > 0, "No images to destroy");
+            assert!(!self.images.is_empty(), "No images to destroy");
             self.images.clear();
             unsafe {
                 self.image_views

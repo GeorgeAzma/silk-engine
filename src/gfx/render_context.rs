@@ -1,5 +1,5 @@
-use super::pipeline::{GraphicsPipelineInfo, PipelineStageInfo};
 use super::shader::Shader;
+use super::vulkan::pipeline::{GraphicsPipelineInfo, PipelineStageInfo};
 
 use crate::*;
 
@@ -64,6 +64,7 @@ impl RenderContext {
                 let shader = Shader::new(shader_name);
                 let dsls = shader.create_dsls();
                 let module = shader.create_module();
+                DebugMarker::name(shader_name, module);
                 let pipeline_layout = PIPELINE_LAYOUT_MANAGER
                     .lock()
                     .unwrap()
@@ -108,6 +109,7 @@ impl RenderContext {
             )
             .is_none();
         assert!(inserted, "pipeline already exists");
+        DebugMarker::name(pipeline_name, pipeline);
         pipeline
     }
 
@@ -124,6 +126,7 @@ impl RenderContext {
             .insert(desc_name.to_string(), desc_set)
             .is_none();
         assert!(inserted, "desc set already exists");
+        DebugMarker::name(desc_name, desc_set);
         desc_set
     }
 
@@ -134,12 +137,13 @@ impl RenderContext {
     ) -> Vec<vk::DescriptorSet> {
         let dsls = &self.shaders[shader_name].dsls;
         let desc_sets = DESC_ALLOC.alloc(dsls);
-        for (desc_name, desc_set) in desc_names.iter().zip(desc_sets.iter()) {
+        for (desc_name, &desc_set) in desc_names.iter().zip(desc_sets.iter()) {
             let inserted = self
                 .desc_sets
-                .insert(desc_name.to_string(), *desc_set)
+                .insert(desc_name.to_string(), desc_set)
                 .is_none();
             assert!(inserted, "desc set already exists");
+            DebugMarker::name(desc_name, desc_set);
         }
         desc_sets
     }
@@ -150,18 +154,16 @@ impl RenderContext {
 
     pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
         let cmds = CMD_ALLOC.alloc(names.len() as u32);
-        for (cmd, name) in cmds.iter().zip(names.iter()) {
-            let inserted = self.cmds.insert(name.to_string(), *cmd).is_none();
+        for (&cmd, &name) in cmds.iter().zip(names.iter()) {
+            let inserted = self.cmds.insert(name.to_string(), cmd).is_none();
             assert!(inserted, "cmd buf already exists");
+            DebugMarker::name(name, cmd);
         }
         cmds
     }
 
     pub fn add_cmds_numbered(&mut self, name: &str, count: usize) -> Vec<vk::CommandBuffer> {
-        let mut names = Vec::with_capacity(count);
-        for i in 0..count {
-            names.push(format!("{name}{i}"));
-        }
+        let names: Vec<_> = (0..count).map(|i| format!("{name}{i}")).collect();
         self.add_cmds(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
     }
 
@@ -170,11 +172,10 @@ impl RenderContext {
     }
 
     pub fn remove_cmds(&mut self, names: &[&str]) {
-        let mut cmds = Vec::with_capacity(names.len());
-        for name in names.iter() {
-            let cmd = self.cmds.remove(name.to_owned()).unwrap();
-            cmds.push(cmd);
-        }
+        let cmds: Vec<_> = names
+            .iter()
+            .map(|name| self.cmds.remove(name.to_owned()).unwrap())
+            .collect();
         CMD_ALLOC.dealloc(&cmds);
     }
 
@@ -202,6 +203,7 @@ impl RenderContext {
         let buf = BUFFER_ALLOC.lock().unwrap().alloc(size, usage, mem_props); // TODO: free
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists");
+        DebugMarker::name(name, buf);
         buf
     }
 

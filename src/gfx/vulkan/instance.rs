@@ -3,7 +3,7 @@ use std::ffi::CString;
 
 use super::config::*;
 use super::ENTRY;
-use crate::{fatal, log, print, warn};
+use crate::{fatal, warn};
 use ash::vk;
 use lazy_static::lazy_static;
 
@@ -46,6 +46,7 @@ unsafe extern "system" fn vulkan_debug_callback(
         .replace("the ", "");
 
     type Severity = vk::DebugUtilsMessageSeverityFlagsEXT;
+    use crate::print;
     let ansi_message = match message_severity {
         Severity::ERROR => print::err(&message),
         Severity::WARNING => print::warn(&message),
@@ -56,7 +57,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     let mut backtrace = print::backtrace_callers();
     backtrace.pop();
     let backtrace = backtrace.join(" > ");
-    log!("{full_message}\n|> {backtrace}\n");
+    crate::log!("{full_message}\n|> {backtrace}\n");
     let ansi_backtrace = print::trace(&["|> ", &backtrace].concat());
     let print_str = format!("{ansi_message}\n{ansi_backtrace}");
     match message_severity {

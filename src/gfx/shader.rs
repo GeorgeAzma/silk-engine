@@ -1,4 +1,4 @@
-use super::pipeline::PipelineStageInfo;
+use super::vulkan::pipeline::PipelineStageInfo;
 use super::vulkan::DSLBinding;
 
 use crate::*;

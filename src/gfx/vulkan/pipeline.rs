@@ -1,5 +1,5 @@
-use super::shader::Shader;
 use crate::*;
+use gfx::shader::Shader;
 
 const fn pipeline_cache_path() -> &'static str {
     "res/cache/pipeline_cache"
