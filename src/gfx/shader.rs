@@ -64,8 +64,10 @@ impl Shader {
 
             // generate spirv
             let mut spirv = vec![];
-            let mut opts = naga::back::spv::Options::default();
-            opts.lang_version = (1, 3);
+            let opts = naga::back::spv::Options {
+                lang_version: (1, 3),
+                ..Default::default()
+            };
             let mut writer = naga::back::spv::Writer::new(&opts).unwrap();
             writer
                 .write(&module, &info, None, &None, &mut spirv)

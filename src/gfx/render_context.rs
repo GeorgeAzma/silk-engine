@@ -5,18 +5,15 @@ use crate::*;
 
 struct ShaderData {
     shader: Shader,
-    module: vk::ShaderModule,
     dsls: Vec<vk::DescriptorSetLayout>,
     pipeline_layout: vk::PipelineLayout,
     pipeline_stages: Vec<PipelineStageInfo>,
-    push_constant_ranges: Vec<vk::PushConstantRange>,
 }
 
 #[derive(Default, Clone)]
 struct PipelineData {
     pipeline: vk::Pipeline,
     info: GraphicsPipelineInfo,
-    shader_name: String,
     bind_point: vk::PipelineBindPoint,
 }
 
@@ -49,14 +46,6 @@ impl RenderContext {
     }
 
     pub fn add_shader(&mut self, shader_name: &str) -> &Shader {
-        self.add_shader_pcr(shader_name, &[])
-    }
-
-    pub fn add_shader_pcr(
-        &mut self,
-        shader_name: &str,
-        push_constant_ranges: &[vk::PushConstantRange],
-    ) -> &Shader {
         let shader_data = self
             .shaders
             .entry(shader_name.to_string())
@@ -65,18 +54,13 @@ impl RenderContext {
                 let dsls = shader.create_dsls();
                 let module = shader.create_module();
                 DebugMarker::name(shader_name, module);
-                let pipeline_layout = PIPELINE_LAYOUT_MANAGER
-                    .lock()
-                    .unwrap()
-                    .get(&dsls, push_constant_ranges);
+                let pipeline_layout = PIPELINE_LAYOUT_MANAGER.lock().unwrap().get(&dsls);
                 let pipeline_stages = shader.get_pipeline_stages(module);
                 ShaderData {
                     shader,
-                    module,
                     dsls,
                     pipeline_layout,
                     pipeline_stages,
-                    push_constant_ranges: push_constant_ranges.to_vec(),
                 }
             });
         &shader_data.shader
@@ -104,7 +88,6 @@ impl RenderContext {
                 PipelineData {
                     pipeline,
                     info: pipeline_info,
-                    shader_name: shader_name.to_string(),
                     bind_point: vk::PipelineBindPoint::GRAPHICS,
                 },
             )
