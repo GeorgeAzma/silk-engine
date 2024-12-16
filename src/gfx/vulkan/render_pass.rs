@@ -82,8 +82,8 @@ impl RenderPass {
                             vk::SubpassDependency::default()
                                 .src_subpass(vk::SUBPASS_EXTERNAL)
                                 .dst_subpass(0)
-                                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
-                                .src_access_mask(vk::AccessFlags::NONE)
+                                .src_stage_mask(vk::PipelineStageFlags::BOTTOM_OF_PIPE)
+                                .src_access_mask(vk::AccessFlags::MEMORY_READ)
                                 .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
                                 .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
                             vk::SubpassDependency::default()
@@ -92,7 +92,7 @@ impl RenderPass {
                                 .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
                                 .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
                                 .dst_stage_mask(vk::PipelineStageFlags::BOTTOM_OF_PIPE)
-                                .dst_access_mask(vk::AccessFlags::NONE),
+                                .dst_access_mask(vk::AccessFlags::MEMORY_READ),
                         ])
                         .subpasses(&[vk::SubpassDescription::default()
                             .color_attachments(&self.attachment_refs)

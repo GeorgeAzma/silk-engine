@@ -1,5 +1,6 @@
 use crate::*;
 use gfx::shader::Shader;
+use util::Mem;
 
 const fn pipeline_cache_path() -> &'static str {
     "res/cache/pipeline_cache"
@@ -164,8 +165,22 @@ impl GraphicsPipeline {
         self
     }
 
-    pub fn blend_attachment(mut self) -> Self {
-        self.logic_op = vk::LogicOp::COPY;
+    pub fn blend_attachment_standard(mut self) -> Self {
+        self.attachments.push(
+            vk::PipelineColorBlendAttachmentState::default()
+                .alpha_blend_op(vk::BlendOp::ADD)
+                .color_blend_op(vk::BlendOp::ADD)
+                .blend_enable(true)
+                .color_write_mask(vk::ColorComponentFlags::RGBA)
+                .dst_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .src_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA),
+        );
+        self
+    }
+
+    pub fn blend_attachment_empty(mut self) -> Self {
         self.attachments.push(
             vk::PipelineColorBlendAttachmentState::default()
                 .alpha_blend_op(vk::BlendOp::ADD)
@@ -177,6 +192,17 @@ impl GraphicsPipeline {
                 .src_alpha_blend_factor(vk::BlendFactor::ONE)
                 .src_color_blend_factor(vk::BlendFactor::ONE),
         );
+        self
+    }
+
+    pub fn color_attachment(mut self, format: vk::Format) -> Self {
+        // TODO: assert valid color format (same for depth)
+        self.color_attachment_formats.push(format);
+        self
+    }
+
+    pub fn depth_attachment(mut self, format: vk::Format) -> Self {
+        self.depth_attachment_format = format;
         self
     }
 
@@ -235,14 +261,14 @@ impl GraphicsPipeline {
             .logic_op_enable(self.logic_op_enable)
             .logic_op(self.logic_op)
             .blend_constants(self.blend_constants);
-        let dynamic_state =
-            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&self.dynamic_states);
         let mut rendering_info = vk::PipelineRenderingCreateInfo::default()
             .view_mask(self.view_mask)
             .color_attachment_formats(&self.color_attachment_formats)
             .depth_attachment_format(self.depth_attachment_format)
             .stencil_attachment_format(self.stencil_attachment_format);
-        let info = vk::GraphicsPipelineCreateInfo::default()
+        let dynamic_state =
+            vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&self.dynamic_states);
+        let mut info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&stages)
             .vertex_input_state(&vertex_input_state_info)
             .input_assembly_state(&input_assembly_state)
@@ -255,12 +281,14 @@ impl GraphicsPipeline {
             .layout(self.layout)
             .render_pass(self.render_pass)
             .subpass(self.subpass)
-            .push_next(&mut rendering_info)
             .flags(if cfg!(debug_assertions) {
                 vk::PipelineCreateFlags::CAPTURE_STATISTICS_KHR
             } else {
                 vk::PipelineCreateFlags::empty()
             });
+        if self.render_pass == Default::default() {
+            info = info.push_next(&mut rendering_info);
+        }
         let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
         let pipeline_cache = unsafe {
             DEVICE

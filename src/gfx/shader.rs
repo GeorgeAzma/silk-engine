@@ -1,7 +1,7 @@
 use super::vulkan::pipeline::PipelineStageInfo;
-use super::vulkan::DSLBinding;
 
 use crate::*;
+use gfx::DSLBinding;
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -189,7 +189,7 @@ impl Shader {
     pub fn create_dsls(&self) -> Vec<vk::DescriptorSetLayout> {
         self.get_dsl_bindings()
             .iter()
-            .map(|dslb| (*DSL_MANAGER).lock().unwrap().get(dslb))
+            .map(|dslb| DSL_MANAGER.write().unwrap().get(dslb))
             .collect()
     }
 

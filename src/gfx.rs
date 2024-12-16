@@ -5,4 +5,3 @@ pub use renderer::*;
 mod render_context;
 mod shader;
 pub use render_context::*;
-pub use shader::*;

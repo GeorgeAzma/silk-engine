@@ -68,6 +68,15 @@ impl Default for Frame {
     }
 }
 
+#[repr(C)]
+#[derive(Default, Clone)]
+pub struct GlobalUniform {
+    pub resolution: [u32; 2],
+    pub mouse_pos: [f32; 2],
+    pub time: f32,
+    pub dt: f32,
+}
+
 pub struct Renderer {
     frames: [Frame; Self::FRAMES],
     current_frame: usize,
@@ -83,27 +92,25 @@ impl Renderer {
     const FRAMES: usize = 1;
 
     pub fn new() -> Self {
-        ctx().add_shader("shader");
-        // let render_pass = ctx().add_render_pass(
-        //     "render pass",
-        //     RenderPass::new().add(
-        //         vk::Format::B8G8R8A8_UNORM,
-        //         vk::ImageLayout::UNDEFINED,
-        //         vk::ImageLayout::PRESENT_SRC_KHR,
-        //         vk::AttachmentLoadOp::CLEAR,
-        //         vk::AttachmentStoreOp::STORE,
-        //     ),
-        // );
-
-        ctx().add_pipeline(
+        let ctx = &mut *ctx();
+        ctx.add_shader("shader");
+        ctx.add_pipeline(
             "pipeline",
             "shader",
-            GraphicsPipeline::new().dyn_size().blend_attachment(),
-            // .render_pass(render_pass),
+            GraphicsPipeline::new()
+                .dyn_size()
+                .color_attachment(surf_format())
+                .blend_attachment_empty(),
             &[],
         );
-        let desc_set = ctx().add_desc_set("global uniform", "shader", 0);
-        ctx().add_cmds_numbered("render", Self::FRAMES);
+        let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
+        ctx.add_cmds_numbered("render", Self::FRAMES);
+        let uniform_buffer = ctx.add_buffer(
+            "global uniform",
+            size_of::<GlobalUniform>() as u64,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+        );
 
         // TODO: figure out simpler way for this
         // TODO: have single ubo that is used to create all ubos, same with ssbo etc.
@@ -113,7 +120,7 @@ impl Renderer {
             DEVICE.update_descriptor_sets(
                 &[vk::WriteDescriptorSet::default()
                     .buffer_info(&[vk::DescriptorBufferInfo::default()
-                        .buffer(*UNIFORM_BUFFER)
+                        .buffer(uniform_buffer)
                         .offset(0)
                         .range(vk::WHOLE_SIZE)])
                     .descriptor_count(1)
@@ -134,7 +141,7 @@ impl Renderer {
         let frame = &self.frames[self.current_frame];
         frame.wait();
         acquire_img(frame.img_available);
-        // record command buffer
+
         let cmd_name = format!("render{}", self.current_frame);
         ctx().reset_cmd(&cmd_name);
         ctx().begin_cmd(&cmd_name);
@@ -144,19 +151,11 @@ impl Renderer {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         );
 
-        // ctx().begin_rp(
-        //     "render pass",
-        //     size.width,
-        //     size.height,
-        //     &[cur_swap_img_view()],
-        // );
         ctx().begin_render(swap_size().width, swap_size().height, cur_swap_img_view());
 
         ctx().bind_pipeline("pipeline");
         ctx().bind_desc_set("global uniform");
-        unsafe {
-            DEVICE.cmd_draw(cur_cmd(), 3, 1, 0, 0);
-        }
+        ctx().draw(3, 1);
     }
 
     pub fn end_render(&mut self) {

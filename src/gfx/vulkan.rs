@@ -1,117 +1,71 @@
-use crate::*;
+use std::sync::RwLock;
+
+use ash::khr;
 pub use ash::vk;
-use ash::{khr, vk::Handle};
 mod buffer_alloc;
-pub use buffer_alloc::*;
+pub(super) use buffer_alloc::BufferAlloc;
 mod cmd_alloc;
-pub use cmd_alloc::*;
+pub(super) use cmd_alloc::CmdAlloc;
 mod desc_alloc;
-pub use desc_alloc::*;
+pub(super) use desc_alloc::DescAlloc;
 mod dsl_manager;
-pub use dsl_manager::*;
+pub(super) use dsl_manager::*;
 mod gpu;
 pub use gpu::*;
 mod instance;
 mod pipeline_layout_manager;
 pub use instance::*;
 use lazy_static::lazy_static;
-pub use pipeline_layout_manager::*;
-use std::sync::Mutex;
+pub(super) use pipeline_layout_manager::PipelineLayoutManager;
 mod config;
 mod debug_marker;
 pub use debug_marker::*;
 pub mod pipeline;
 pub use pipeline::*;
-pub mod render_pass;
-pub use render_pass::*;
+mod render_pass;
+pub(super) use render_pass::RenderPass;
 
-lazy_static!(
-    pub static ref ENTRY: ash::Entry = unsafe { ash::Entry::load().expect("Failed to load Vulkan") };
+use super::cur_cmd;
 
-    static ref SURFACE_FORMATS: Mutex<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> = Mutex::new(HashMap::new());
-    static ref SURFACE_PRESENT_MODES: Mutex<HashMap<u64, Vec<vk::PresentModeKHR>>> = Mutex::new(HashMap::new());
-
+lazy_static! {
+    pub static ref ENTRY: ash::Entry =
+        unsafe { ash::Entry::load().expect("Failed to load Vulkan") };
     pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe {
-        let queue_family_props_len = INSTANCE.get_physical_device_queue_family_properties2_len(*GPU);
-        let mut queue_family_props = vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
+        let queue_family_props_len =
+            INSTANCE.get_physical_device_queue_family_properties2_len(*GPU);
+        let mut queue_family_props =
+            vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
         INSTANCE.get_physical_device_queue_family_properties2(*GPU, &mut queue_family_props);
-        queue_family_props.into_iter().map(|qfp| qfp.queue_family_properties).collect()
+        queue_family_props
+            .into_iter()
+            .map(|qfp| qfp.queue_family_properties)
+            .collect()
     };
-    pub static ref QUEUE_FAMILY_INDEX: u32 =
-        QUEUE_FAMILIES
+    pub static ref QUEUE_FAMILY_INDEX: u32 = QUEUE_FAMILIES
         .iter()
         .position(|&queue_family_props| {
             queue_family_props.queue_flags.contains(
-                vk::QueueFlags::GRAPHICS
-                    | vk::QueueFlags::COMPUTE
-                    | vk::QueueFlags::TRANSFER,
+                vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
             )
         })
         .unwrap_or_default() as u32;
-
     pub static ref QUEUE: vk::Queue = unsafe { DEVICE.get_device_queue(*QUEUE_FAMILY_INDEX, 0) };
-
-    pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device = khr::swapchain::Device::new(&INSTANCE, &DEVICE);
-    pub static ref SURFACE_LOADER: khr::surface::Instance = khr::surface::Instance::new(&ENTRY, &INSTANCE);
     pub static ref PIPELINE_EXEC_PROPS_LOADER: khr::pipeline_executable_properties::Device =
         if cfg!(debug_assertions) {
             khr::pipeline_executable_properties::Device::new(&INSTANCE, &DEVICE)
         } else {
             #[allow(invalid_value)]
-            unsafe { std::mem::zeroed() }
+            unsafe {
+                std::mem::zeroed()
+            }
         };
-    pub static ref SURFACE_CAPS2: khr::get_surface_capabilities2::Instance = {
-        khr::get_surface_capabilities2::Instance::new(&ENTRY, &INSTANCE)
-    };
 
-    pub static ref DESC_ALLOC: DescAlloc = DescAlloc::new();
-    pub static ref DSL_MANAGER: Mutex<DSLManager> = Mutex::new(DSLManager::new());
-    pub static ref PIPELINE_LAYOUT_MANAGER: Mutex<PipelineLayoutManager> = Mutex::new(PipelineLayoutManager::new());
-    pub static ref CMD_ALLOC: CmdAlloc = CmdAlloc::new();
-    pub static ref BUFFER_ALLOC: Mutex<BufferAlloc> = Mutex::new(BufferAlloc::new());
-
-    // FIXME: this is temporary remove later
-    pub static ref UNIFORM_BUFFER: vk::Buffer = BUFFER_ALLOC.lock().unwrap().alloc(size_of::<Uniform>() as _, vk::BufferUsageFlags::UNIFORM_BUFFER, vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
-);
-
-pub fn surface_formats(surface: vk::SurfaceKHR) -> Vec<vk::SurfaceFormatKHR> {
-    SURFACE_FORMATS
-        .lock()
-        .unwrap()
-        .entry(surface.as_raw())
-        .or_insert(unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_formats(*GPU, surface)
-                .unwrap()
-        })
-        .clone()
-}
-
-pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
-    let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
-    unsafe {
-        SURFACE_CAPS2
-            .get_physical_device_surface_capabilities2(
-                *GPU,
-                &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface),
-                &mut surface_caps,
-            )
-            .unwrap()
-    };
-    surface_caps.surface_capabilities
-}
-
-pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR> {
-    SURFACE_PRESENT_MODES
-        .lock()
-        .unwrap()
-        .entry(surface.as_raw())
-        .or_insert(unsafe {
-            SURFACE_LOADER
-                .get_physical_device_surface_present_modes(*GPU, surface)
-                .unwrap()
-        })
-        .clone()
+    // allocators/managers (cached)
+    pub static ref DESC_ALLOC: RwLock<DescAlloc> = RwLock::new(DescAlloc::new());
+    pub static ref CMD_ALLOC: RwLock<CmdAlloc> = RwLock::new(CmdAlloc::new());
+    pub static ref BUFFER_ALLOC: RwLock<BufferAlloc> = RwLock::new(BufferAlloc::new());
+    pub static ref DSL_MANAGER: RwLock<DSLManager> = RwLock::new(DSLManager::new());
+    pub static ref PIPELINE_LAYOUT_MANAGER: RwLock<PipelineLayoutManager> = RwLock::new(PipelineLayoutManager::new());
 }
 
 pub fn gpu_idle() {
@@ -127,28 +81,21 @@ pub fn transition_image_layout(
     old_layout: vk::ImageLayout,
     new_layout: vk::ImageLayout,
 ) {
-    let src_access_mask;
-    let dst_access_mask;
-    let src_stage;
-    let dst_stage;
-
-    if old_layout == vk::ImageLayout::UNDEFINED
-        && new_layout == vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-    {
-        src_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
-        src_access_mask = vk::AccessFlags2::NONE;
-        dst_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
-        dst_access_mask = vk::AccessFlags2::COLOR_ATTACHMENT_WRITE;
-    } else if old_layout == vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
-        && new_layout == vk::ImageLayout::PRESENT_SRC_KHR
-    {
-        src_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
-        src_access_mask = vk::AccessFlags2::COLOR_ATTACHMENT_WRITE;
-        dst_stage = vk::PipelineStageFlags2::BOTTOM_OF_PIPE;
-        dst_access_mask = vk::AccessFlags2::NONE;
-    } else {
-        panic!("Unsupported layout transition!");
-    }
+    let (src_stage, src_access_mask, dst_stage, dst_access_mask) = match (old_layout, new_layout) {
+        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::NONE,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        ),
+        (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            vk::AccessFlags2::NONE,
+        ),
+        _ => panic!("Unsupported layout transition!"),
+    };
     unsafe {
         DEVICE.cmd_pipeline_barrier2(
             cur_cmd(),
@@ -170,14 +117,6 @@ pub fn transition_image_layout(
             ]),
         );
     }
-}
-
-#[repr(C)]
-pub struct Uniform {
-    pub resolution: [u32; 2],
-    pub mouse_pos: [f32; 2],
-    pub time: f32,
-    pub dt: f32,
 }
 
 pub fn format_size(format: vk::Format) -> u32 {

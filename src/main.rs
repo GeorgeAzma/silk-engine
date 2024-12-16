@@ -1,8 +1,7 @@
 pub use std::{
     collections::{HashMap, HashSet},
     process::abort,
-    ptr,
-    ptr::{null, null_mut},
+    ptr::{self, null, null_mut},
     rc::Rc,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -21,7 +20,6 @@ pub use print::*;
 mod gfx;
 pub use gfx::*;
 mod util;
-pub use util::*;
 mod window;
 pub use window::*;
 mod app;
@@ -76,16 +74,16 @@ impl App {
         self.dt = now - self.time;
         self.time = now;
 
-        let ubo_data = Uniform {
+        let uniform_data = GlobalUniform {
             resolution: [self.width, self.height],
             mouse_pos: [self.mouse_x, self.mouse_y],
             time: self.time,
             dt: self.dt,
         };
         BUFFER_ALLOC
-            .lock()
+            .write()
             .unwrap()
-            .copy(*UNIFORM_BUFFER, &ubo_data);
+            .copy(ctxr().buffer("global uniform"), &uniform_data);
         self.my_app().update();
     }
 

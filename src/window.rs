@@ -1,12 +1,41 @@
-use crate::{gfx::*, scope_time};
+use crate::gpu_idle;
+use crate::scope_time;
+use crate::DebugMarker;
+use crate::GPU;
+use crate::{DEVICE, ENTRY, INSTANCE};
+use ash::khr;
+use ash::vk;
 use lazy_static::lazy_static;
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
+use vk::Handle;
 use winit::{
     raw_window_handle::{HasDisplayHandle, HasWindowHandle},
     window::Window,
 };
 
 lazy_static! {
+    pub static ref SURFACE_LOADER: khr::surface::Instance =
+        khr::surface::Instance::new(&ENTRY, &INSTANCE);
+    pub static ref SURFACE_CAPS2: khr::get_surface_capabilities2::Instance =
+        khr::get_surface_capabilities2::Instance::new(&ENTRY, &INSTANCE);
+    static ref SURFACE_FORMATS: RwLock<HashMap<u64, Vec<vk::SurfaceFormatKHR>>> =
+        RwLock::new(HashMap::new());
+    pub static ref SURFACE_FORMAT: vk::SurfaceFormatKHR = {
+        surface_formats(*SURFACE)
+            .into_iter()
+            .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
+            .unwrap_or(vk::SurfaceFormatKHR {
+                format: vk::Format::B8G8R8A8_UNORM,
+                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            })
+    };
+    static ref SURFACE_PRESENT_MODES: RwLock<HashMap<u64, Vec<vk::PresentModeKHR>>> =
+        RwLock::new(HashMap::new());
+    pub static ref SWAPCHAIN_LOADER: khr::swapchain::Device =
+        khr::swapchain::Device::new(&INSTANCE, &DEVICE);
     pub static ref WINDOW: RwLock<Option<Arc<Window>>> = RwLock::new(None);
     pub static ref SURFACE: vk::SurfaceKHR = unsafe {
         let window = WINDOW.read().unwrap();
@@ -46,6 +75,10 @@ pub fn cur_swap_img() -> vk::Image {
 
 pub fn cur_swap_img_view() -> vk::ImageView {
     SWAPCHAIN_IMG_VIEWS.read().unwrap()[swap_img_idx()]
+}
+
+pub fn surf_format() -> vk::Format {
+    SURFACE_FORMAT.format
 }
 
 pub fn recreate_swapchain() {
@@ -88,13 +121,6 @@ pub fn recreate_swapchain() {
             .max_image_count
             .min(desired_image_count);
     }
-    let surface_format = surface_formats(*SURFACE)
-        .into_iter()
-        .find(|format| format.format == vk::Format::B8G8R8A8_UNORM)
-        .unwrap_or(vk::SurfaceFormatKHR {
-            format: vk::Format::B8G8R8A8_UNORM,
-            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-        });
     // Destroy old swap chain images
     let old_swapchain = *SWAPCHAIN.read().unwrap();
     *SWAPCHAIN.write().unwrap() = unsafe {
@@ -103,8 +129,8 @@ pub fn recreate_swapchain() {
                 &vk::SwapchainCreateInfoKHR::default()
                     .surface(*SURFACE)
                     .min_image_count(desired_image_count)
-                    .image_color_space(surface_format.color_space)
-                    .image_format(surface_format.format)
+                    .image_color_space(SURFACE_FORMAT.color_space)
+                    .image_format(SURFACE_FORMAT.format)
                     .image_extent(surface_resolution)
                     .image_array_layers(1)
                     .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
@@ -154,7 +180,7 @@ pub fn recreate_swapchain() {
                 .create_image_view(
                     &vk::ImageViewCreateInfo::default()
                         .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(surface_format.format)
+                        .format(surf_format())
                         .components(vk::ComponentMapping {
                             r: vk::ComponentSwizzle::IDENTITY,
                             g: vk::ComponentSwizzle::IDENTITY,
@@ -195,4 +221,44 @@ pub fn acquire_img(signal: vk::Semaphore) {
             .unwrap()
             .0 as usize;
     }
+}
+
+pub fn surface_formats(surface: vk::SurfaceKHR) -> Vec<vk::SurfaceFormatKHR> {
+    SURFACE_FORMATS
+        .write()
+        .unwrap()
+        .entry(surface.as_raw())
+        .or_insert(unsafe {
+            SURFACE_LOADER
+                .get_physical_device_surface_formats(*GPU, surface)
+                .unwrap()
+        })
+        .clone()
+}
+
+pub fn surface_capabilities(surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
+    let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
+    unsafe {
+        SURFACE_CAPS2
+            .get_physical_device_surface_capabilities2(
+                *GPU,
+                &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface),
+                &mut surface_caps,
+            )
+            .unwrap()
+    };
+    surface_caps.surface_capabilities
+}
+
+pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR> {
+    SURFACE_PRESENT_MODES
+        .write()
+        .unwrap()
+        .entry(surface.as_raw())
+        .or_insert(unsafe {
+            SURFACE_LOADER
+                .get_physical_device_surface_present_modes(*GPU, surface)
+                .unwrap()
+        })
+        .clone()
 }

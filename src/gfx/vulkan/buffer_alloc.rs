@@ -8,6 +8,7 @@ use ash::vk;
 use vk::Handle;
 
 unsafe impl Send for MappedRange {}
+unsafe impl Sync for MappedRange {}
 
 pub struct MappedRange {
     ptr: *mut u8,
@@ -53,14 +54,22 @@ struct MemBlock {
 // TODO: have different buffers for different properties of memory
 // TODO: allocate vertex/index/uniform buffers from single pre-allocated buffer with suitable memory properties
 // TODO: when buffer is full, allocate new buffer (maybe copy old data to new buffer)
-#[derive(Default)]
+
 pub struct BufferAlloc {
     buf_mems: HashMap<u64, MemBlock>,
 }
 
+impl Default for BufferAlloc {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BufferAlloc {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            buf_mems: Default::default(),
+        }
     }
 
     pub fn alloc(

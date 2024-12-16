@@ -1,7 +1,15 @@
+use std::collections::HashMap;
+
+use ash::vk;
+
+use crate::{
+    scope_time, swap_img_idx, DebugMarker, BUFFER_ALLOC, DESC_ALLOC, DEVICE, SWAPCHAIN_IMAGES,
+};
+
 use super::shader::Shader;
 use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
-
-use crate::*;
+use super::CMD_ALLOC;
+use super::{RenderPass, PIPELINE_LAYOUT_MANAGER};
 
 struct ShaderData {
     shader: Shader,
@@ -30,6 +38,7 @@ struct CmdState {
 #[derive(Default)]
 pub struct RenderContext {
     cmd_state: CmdState,
+    // named cached objects
     shaders: HashMap<String, ShaderData>,
     pipelines: HashMap<String, PipelineData>,
     desc_sets: HashMap<String, vk::DescriptorSet>,
@@ -53,7 +62,7 @@ impl RenderContext {
             let dsls = shader.create_dsls();
             let module = shader.create_module();
             DebugMarker::name(name, module);
-            let pipeline_layout = PIPELINE_LAYOUT_MANAGER.lock().unwrap().get(&dsls);
+            let pipeline_layout = PIPELINE_LAYOUT_MANAGER.write().unwrap().get(&dsls);
             let pipeline_stages = shader.get_pipeline_stages(module);
             ShaderData {
                 shader,
@@ -118,7 +127,7 @@ impl RenderContext {
         group: usize,
     ) -> vk::DescriptorSet {
         let dsl = self.shaders[shader_name].dsls[group];
-        let desc_set = DESC_ALLOC.alloc_one(dsl);
+        let desc_set = DESC_ALLOC.write().unwrap().alloc_one(dsl);
         let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
         assert!(inserted, "desc set already exists: {name}");
         DebugMarker::name(name, desc_set);
@@ -127,7 +136,7 @@ impl RenderContext {
 
     pub fn add_desc_sets(&mut self, names: &[&str], shader_name: &str) -> Vec<vk::DescriptorSet> {
         let dsls = &self.shaders[shader_name].dsls;
-        let desc_sets = DESC_ALLOC.alloc(dsls);
+        let desc_sets = DESC_ALLOC.write().unwrap().alloc(dsls);
         for (name, &desc_set) in names.iter().zip(desc_sets.iter()) {
             let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
             assert!(inserted, "desc set already exists: {name}");
@@ -141,7 +150,7 @@ impl RenderContext {
     }
 
     pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
-        let cmds = CMD_ALLOC.alloc(names.len() as u32);
+        let cmds = CMD_ALLOC.read().unwrap().alloc(names.len() as u32);
         for (&cmd, &name) in cmds.iter().zip(names.iter()) {
             let inserted = self.cmds.insert(name.to_string(), cmd).is_none();
             assert!(inserted, "cmd buf already exists: {name}");
@@ -164,7 +173,7 @@ impl RenderContext {
             .iter()
             .map(|name| self.cmds.remove(name.to_owned()).unwrap())
             .collect();
-        CMD_ALLOC.dealloc(&cmds);
+        CMD_ALLOC.read().unwrap().dealloc(&cmds);
     }
 
     pub fn remove_cmd(&mut self, name: &str) {
@@ -173,7 +182,10 @@ impl RenderContext {
 
     pub fn reset_cmds(&mut self, names: &[&str]) {
         for name in names.iter() {
-            CMD_ALLOC.reset(self.cmds[&name.to_string()]);
+            CMD_ALLOC
+                .read()
+                .unwrap()
+                .reset(self.cmds[&name.to_string()]);
         }
     }
 
@@ -188,7 +200,7 @@ impl RenderContext {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
-        let buf = BUFFER_ALLOC.lock().unwrap().alloc(size, usage, mem_props); // TODO: free
+        let buf = BUFFER_ALLOC.write().unwrap().alloc(size, usage, mem_props); // TODO: free
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists: {name}");
         DebugMarker::name(name, buf);
@@ -197,7 +209,11 @@ impl RenderContext {
 
     pub fn remove_buffer(&mut self, name: &str) {
         let buf = self.buffers.remove(name).unwrap();
-        BUFFER_ALLOC.lock().unwrap().dealloc(buf);
+        BUFFER_ALLOC.write().unwrap().dealloc(buf);
+    }
+
+    pub fn buffer(&self, name: &str) -> vk::Buffer {
+        self.buffers[name]
     }
 
     pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
@@ -425,7 +441,13 @@ impl RenderContext {
 
     pub fn bind_vert(&self, name: &str) {
         unsafe {
-            DEVICE.cmd_bind_vertex_buffers(self.cmd_state.cmd, 0, &[self.buffers[name]], &[0]);
+            DEVICE.cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
+        }
+    }
+
+    pub fn draw(&self, vertices: u32, instances: u32) {
+        unsafe {
+            DEVICE.cmd_draw(self.cmd(), vertices, instances, 0, 0);
         }
     }
 }

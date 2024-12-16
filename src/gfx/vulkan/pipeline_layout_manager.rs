@@ -8,14 +8,21 @@ use vk::Handle;
 
 use super::DEVICE;
 
-#[derive(Default)]
 pub struct PipelineLayoutManager {
     pipeline_layouts: HashMap<PipelineLayoutInfo, vk::PipelineLayout>,
 }
 
+impl Default for PipelineLayoutManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PipelineLayoutManager {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            pipeline_layouts: Default::default(),
+        }
     }
 
     pub fn get(&mut self, set_layouts: &[vk::DescriptorSetLayout]) -> vk::PipelineLayout {
