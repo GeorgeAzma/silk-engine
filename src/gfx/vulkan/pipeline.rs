@@ -24,7 +24,7 @@ impl<'a> From<&'a PipelineStageInfo> for vk::PipelineShaderStageCreateInfo<'a> {
 }
 
 #[derive(Clone)]
-pub struct GraphicsPipelineInfo {
+pub struct GraphicsPipeline {
     pub stages: Vec<PipelineStageInfo>,
     pub vertex_input_binding_descriptions: Vec<vk::VertexInputBindingDescription>,
     pub vertex_input_attribute_descriptions: Vec<vk::VertexInputAttributeDescription>,
@@ -66,9 +66,11 @@ pub struct GraphicsPipelineInfo {
     pub depth_attachment_format: vk::Format,
     pub stencil_attachment_format: vk::Format,
     pub layout: vk::PipelineLayout,
+    pub render_pass: vk::RenderPass,
+    pub subpass: u32,
 }
 
-impl Default for GraphicsPipelineInfo {
+impl Default for GraphicsPipeline {
     fn default() -> Self {
         Self {
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -112,11 +114,13 @@ impl Default for GraphicsPipelineInfo {
             depth_attachment_format: Default::default(),
             stencil_attachment_format: Default::default(),
             layout: Default::default(),
+            render_pass: Default::default(),
+            subpass: Default::default(),
         }
     }
 }
 
-impl GraphicsPipelineInfo {
+impl GraphicsPipeline {
     pub fn new() -> Self {
         Default::default()
     }
@@ -173,6 +177,16 @@ impl GraphicsPipelineInfo {
                 .src_alpha_blend_factor(vk::BlendFactor::ONE)
                 .src_color_blend_factor(vk::BlendFactor::ONE),
         );
+        self
+    }
+
+    pub fn render_pass(mut self, render_pass: vk::RenderPass) -> Self {
+        self.render_pass = render_pass;
+        self
+    }
+
+    pub fn subpass(mut self, subpass: u32) -> Self {
+        self.subpass = subpass;
         self
     }
 
@@ -239,6 +253,8 @@ impl GraphicsPipelineInfo {
             .color_blend_state(&color_blend_state)
             .dynamic_state(&dynamic_state)
             .layout(self.layout)
+            .render_pass(self.render_pass)
+            .subpass(self.subpass)
             .push_next(&mut rendering_info)
             .flags(if cfg!(debug_assertions) {
                 vk::PipelineCreateFlags::CAPTURE_STATISTICS_KHR

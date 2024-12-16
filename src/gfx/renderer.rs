@@ -1,10 +1,24 @@
+use std::sync::RwLock;
+
 use super::render_context::RenderContext;
-use super::vulkan::pipeline::GraphicsPipelineInfo;
+use super::vulkan::pipeline::GraphicsPipeline;
 
 use crate::*;
 
 lazy_static! {
-    pub static ref CTX: Mutex<RenderContext> = Mutex::new(RenderContext::new());
+    static ref CTX: RwLock<RenderContext> = RwLock::new(RenderContext::new());
+}
+
+pub fn ctx<'a>() -> std::sync::RwLockWriteGuard<'a, RenderContext> {
+    CTX.write().unwrap()
+}
+
+pub fn ctxr<'a>() -> std::sync::RwLockReadGuard<'a, RenderContext> {
+    CTX.read().unwrap()
+}
+
+pub fn cur_cmd() -> vk::CommandBuffer {
+    CTX.read().unwrap().cmd()
 }
 
 #[derive(Clone, Copy)]
@@ -46,23 +60,6 @@ impl Frame {
             DEVICE.reset_fences(&[self.prev_frame_done]).unwrap();
         }
     }
-
-    fn acquire_img(&self, window: &mut WindowData) -> u32 {
-        if window.swapchain.swapchain == vk::SwapchainKHR::null() {
-            window.recreate_swapchain();
-        }
-        unsafe {
-            SWAPCHAIN_LOADER
-                .acquire_next_image(
-                    window.swapchain.swapchain,
-                    u64::MAX,
-                    self.img_available,
-                    vk::Fence::null(),
-                )
-                .unwrap()
-                .0
-        }
-    }
 }
 
 impl Default for Frame {
@@ -74,7 +71,6 @@ impl Default for Frame {
 pub struct Renderer {
     frames: [Frame; Self::FRAMES],
     current_frame: usize,
-    image_index: u32,
 }
 
 impl Default for Renderer {
@@ -87,16 +83,27 @@ impl Renderer {
     const FRAMES: usize = 1;
 
     pub fn new() -> Self {
-        let ctx = &mut *CTX.lock().unwrap();
-        ctx.add_shader("screen");
-        ctx.add_pipeline(
-            "main",
-            "screen",
-            GraphicsPipelineInfo::new().dyn_size().blend_attachment(),
+        ctx().add_shader("shader");
+        // let render_pass = ctx().add_render_pass(
+        //     "render pass",
+        //     RenderPass::new().add(
+        //         vk::Format::B8G8R8A8_UNORM,
+        //         vk::ImageLayout::UNDEFINED,
+        //         vk::ImageLayout::PRESENT_SRC_KHR,
+        //         vk::AttachmentLoadOp::CLEAR,
+        //         vk::AttachmentStoreOp::STORE,
+        //     ),
+        // );
+
+        ctx().add_pipeline(
+            "pipeline",
+            "shader",
+            GraphicsPipeline::new().dyn_size().blend_attachment(),
+            // .render_pass(render_pass),
             &[],
         );
-        let desc_set = ctx.add_desc_set("global uniform", "screen", 0);
-        ctx.add_cmds_numbered("render", Self::FRAMES);
+        let desc_set = ctx().add_desc_set("global uniform", "shader", 0);
+        ctx().add_cmds_numbered("render", Self::FRAMES);
 
         // TODO: figure out simpler way for this
         // TODO: have single ubo that is used to create all ubos, same with ssbo etc.
@@ -120,86 +127,53 @@ impl Renderer {
         Self {
             frames: [Frame::default(); Self::FRAMES],
             current_frame: 0,
-            image_index: 0,
         }
     }
 
-    pub fn begin_render(&mut self, window: &mut WindowData) {
-        let ctx = &mut *CTX.lock().unwrap();
+    pub fn begin_render(&mut self) {
+        let frame = &self.frames[self.current_frame];
+        frame.wait();
+        acquire_img(frame.img_available);
+        // record command buffer
+        let cmd_name = format!("render{}", self.current_frame);
+        ctx().reset_cmd(&cmd_name);
+        ctx().begin_cmd(&cmd_name);
+        transition_image_layout(
+            cur_swap_img(),
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        );
+
+        // ctx().begin_rp(
+        //     "render pass",
+        //     size.width,
+        //     size.height,
+        //     &[cur_swap_img_view()],
+        // );
+        ctx().begin_render(swap_size().width, swap_size().height, cur_swap_img_view());
+
+        ctx().bind_pipeline("pipeline");
+        ctx().bind_desc_set("global uniform");
         unsafe {
-            let frame = &self.frames[self.current_frame];
-            frame.wait();
-            self.image_index = frame.acquire_img(window);
-            let img_view = window.swapchain.image_views[self.image_index as usize];
-
-            // record command buffer
-            let cmd_name = format!("render{}", self.current_frame);
-            ctx.reset_cmd(&cmd_name);
-            ctx.begin_cmd(&cmd_name);
-
-            // UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL
-            DEVICE.cmd_pipeline_barrier2(
-                ctx.cmd(),
-                &vk::DependencyInfo::default().image_memory_barriers(&[
-                    vk::ImageMemoryBarrier2::default()
-                        .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
-                        .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .dst_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
-                        .old_layout(vk::ImageLayout::UNDEFINED)
-                        .new_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image(window.swapchain.images[self.image_index as usize])
-                        .subresource_range(
-                            vk::ImageSubresourceRange::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .level_count(1)
-                                .layer_count(1),
-                        ),
-                ]),
-            );
-
-            ctx.begin_render(window.width(), window.height(), img_view);
-
-            ctx.bind_pipeline("main");
-            ctx.bind_desc_set("global uniform");
-            DEVICE.cmd_draw(ctx.cmd(), 3, 1, 0, 0);
+            DEVICE.cmd_draw(cur_cmd(), 3, 1, 0, 0);
         }
     }
 
-    pub fn end_render(&mut self, window: &mut WindowData) {
-        let ctx = &mut *CTX.lock().unwrap();
-        let cmd_name = ctx.cmd_name().to_owned();
+    pub fn end_render(&mut self) {
+        let cmd_name = ctxr().cmd_name().to_owned();
 
-        ctx.end_render();
+        ctx().end_render();
 
-        // COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR
-        unsafe {
-            DEVICE.cmd_pipeline_barrier2(
-                ctx.cmd(),
-                &vk::DependencyInfo::default().image_memory_barriers(&[
-                    vk::ImageMemoryBarrier2::default()
-                        .src_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .src_access_mask(vk::AccessFlags2::COLOR_ATTACHMENT_WRITE)
-                        .dst_stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT)
-                        .dst_access_mask(vk::AccessFlags2::NONE)
-                        .old_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-                        .image(window.swapchain.images[self.image_index as usize])
-                        .subresource_range(
-                            vk::ImageSubresourceRange::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .level_count(1)
-                                .layer_count(1),
-                        ),
-                ]),
-            )
-        };
-
-        ctx.end_cmd();
+        transition_image_layout(
+            cur_swap_img(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+        );
+        ctx().end_cmd();
 
         // wait(image_available), submit cmd, signal(render_finished)
         let frame = &self.frames[self.current_frame];
-        ctx.submit_cmd(
+        ctx().submit_cmd(
             &cmd_name,
             *QUEUE,
             &[frame.img_available],
@@ -215,11 +189,11 @@ impl Renderer {
                     *QUEUE,
                     &vk::PresentInfoKHR::default()
                         .wait_semaphores(&[frame.render_done])
-                        .swapchains(&[window.swapchain.swapchain])
-                        .image_indices(&[self.image_index]),
+                        .swapchains(&[*SWAPCHAIN.read().unwrap()])
+                        .image_indices(&[swap_img_idx() as u32]),
                 )
                 .unwrap_or_else(|_| {
-                    window.recreate_swapchain();
+                    recreate_swapchain();
                     false
                 })
         };
@@ -230,7 +204,7 @@ impl Renderer {
     pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
         unsafe {
             DEVICE.cmd_clear_color_image(
-                CTX.lock().unwrap().cmd(),
+                cur_cmd(),
                 image,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 &vk::ClearColorValue { float32: color },

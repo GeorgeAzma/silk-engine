@@ -9,8 +9,8 @@ pub use std::{
 };
 
 use lazy_static::lazy_static;
-use winit::error::EventLoopError;
 use winit::window::WindowId;
+use winit::{error::EventLoopError, window::WindowAttributes};
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 mod input;
@@ -23,16 +23,15 @@ pub use gfx::*;
 mod util;
 pub use util::*;
 mod window;
-use window::*;
+pub use window::*;
 mod app;
 use app::MyApp;
 
 pub struct App {
     my_app: Option<MyApp>,
     window: Arc<Window>,
-    windows: Vec<WindowData>, // windows[0] = window (main)
-    width: u32,               // main window width
-    height: u32,              // main window height
+    width: u32,
+    height: u32,
     start_time: std::time::Instant,
     time: f32,
     dt: f32,
@@ -45,16 +44,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(event_loop: &ActiveEventLoop) -> *mut Self {
+    pub fn new() -> *mut Self {
         scope_time!("init");
-        let window_data = WindowData::new(event_loop);
-        let width = window_data.window.inner_size().width;
-        let height = window_data.window.inner_size().height;
+        let window = WINDOW.read().unwrap().as_ref().unwrap().clone();
+        let width = window.inner_size().width;
+        let height = window.inner_size().height;
 
         let app = Arc::new(Self {
             my_app: None,
-            window: window_data.window.clone(),
-            windows: vec![window_data],
+            window: window.clone(),
             width,
             height,
             start_time: Instant::now(),
@@ -97,11 +95,11 @@ impl App {
         }
         scope_time!("render {}", self.frame; self.frame < 4);
 
-        self.renderer.begin_render(&mut self.windows[0]);
+        self.renderer.begin_render();
 
         self.my_app().render();
 
-        self.renderer.end_render(&mut self.windows[0]);
+        self.renderer.end_render();
 
         self.input.reset();
         self.frame += 1;
@@ -116,7 +114,7 @@ impl App {
         if width == 0 || height == 0 {
             return;
         }
-        self.windows[0].recreate_swapchain();
+        recreate_swapchain();
     }
 
     fn event(&mut self, event_loop: &ActiveEventLoop, event: Event, window_id: WindowId) {
@@ -161,10 +159,14 @@ impl App {
 struct AppBuilder {
     app: Option<*mut App>,
 }
-
 impl winit::application::ApplicationHandler for AppBuilder {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.app = Some(App::new(event_loop));
+        *WINDOW.write().unwrap() = Some(Arc::new(
+            event_loop
+                .create_window(WindowAttributes::default())
+                .unwrap(),
+        ));
+        self.app = Some(App::new());
     }
 
     fn window_event(

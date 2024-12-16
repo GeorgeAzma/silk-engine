@@ -114,8 +114,62 @@ pub fn surface_present_modes(surface: vk::SurfaceKHR) -> Vec<vk::PresentModeKHR>
         .clone()
 }
 
-pub fn wait_idle() {
+pub fn gpu_idle() {
     unsafe { DEVICE.device_wait_idle().unwrap() };
+}
+
+pub fn queue_idle() {
+    unsafe { DEVICE.queue_wait_idle(*QUEUE).unwrap() };
+}
+
+pub fn transition_image_layout(
+    image: vk::Image,
+    old_layout: vk::ImageLayout,
+    new_layout: vk::ImageLayout,
+) {
+    let src_access_mask;
+    let dst_access_mask;
+    let src_stage;
+    let dst_stage;
+
+    if old_layout == vk::ImageLayout::UNDEFINED
+        && new_layout == vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+    {
+        src_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
+        src_access_mask = vk::AccessFlags2::NONE;
+        dst_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
+        dst_access_mask = vk::AccessFlags2::COLOR_ATTACHMENT_WRITE;
+    } else if old_layout == vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        && new_layout == vk::ImageLayout::PRESENT_SRC_KHR
+    {
+        src_stage = vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT;
+        src_access_mask = vk::AccessFlags2::COLOR_ATTACHMENT_WRITE;
+        dst_stage = vk::PipelineStageFlags2::BOTTOM_OF_PIPE;
+        dst_access_mask = vk::AccessFlags2::NONE;
+    } else {
+        panic!("Unsupported layout transition!");
+    }
+    unsafe {
+        DEVICE.cmd_pipeline_barrier2(
+            cur_cmd(),
+            &vk::DependencyInfo::default().image_memory_barriers(&[
+                vk::ImageMemoryBarrier2::default()
+                    .dst_access_mask(dst_access_mask)
+                    .src_access_mask(src_access_mask)
+                    .src_stage_mask(src_stage)
+                    .dst_stage_mask(dst_stage)
+                    .image(image)
+                    .subresource_range(
+                        vk::ImageSubresourceRange::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1)
+                            .level_count(1),
+                    )
+                    .old_layout(old_layout)
+                    .new_layout(new_layout),
+            ]),
+        );
+    }
 }
 
 #[repr(C)]

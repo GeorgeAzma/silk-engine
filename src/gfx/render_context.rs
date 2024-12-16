@@ -1,5 +1,5 @@
 use super::shader::Shader;
-use super::vulkan::pipeline::{GraphicsPipelineInfo, PipelineStageInfo};
+use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
 
 use crate::*;
 
@@ -13,7 +13,7 @@ struct ShaderData {
 #[derive(Default, Clone)]
 struct PipelineData {
     pipeline: vk::Pipeline,
-    info: GraphicsPipelineInfo,
+    info: GraphicsPipeline,
     bind_point: vk::PipelineBindPoint,
 }
 
@@ -24,6 +24,7 @@ struct CmdState {
     pipeline_data: PipelineData,
     desc_sets: Vec<vk::DescriptorSet>,
     render_area: vk::Rect2D,
+    render_pass: RenderPass,
 }
 
 #[derive(Default)]
@@ -34,6 +35,7 @@ pub struct RenderContext {
     desc_sets: HashMap<String, vk::DescriptorSet>,
     cmds: HashMap<String, vk::CommandBuffer>,
     buffers: HashMap<String, vk::Buffer>,
+    render_passes: HashMap<String, RenderPass>,
 }
 
 impl RenderContext {
@@ -41,40 +43,52 @@ impl RenderContext {
         Default::default()
     }
 
-    pub fn get_shader(&self, name: &str) -> &Shader {
+    pub fn shader(&self, name: &str) -> &Shader {
         &self.shaders[name].shader
     }
 
-    pub fn add_shader(&mut self, shader_name: &str) -> &Shader {
-        let shader_data = self
-            .shaders
-            .entry(shader_name.to_string())
-            .or_insert_with(|| {
-                let shader = Shader::new(shader_name);
-                let dsls = shader.create_dsls();
-                let module = shader.create_module();
-                DebugMarker::name(shader_name, module);
-                let pipeline_layout = PIPELINE_LAYOUT_MANAGER.lock().unwrap().get(&dsls);
-                let pipeline_stages = shader.get_pipeline_stages(module);
-                ShaderData {
-                    shader,
-                    dsls,
-                    pipeline_layout,
-                    pipeline_stages,
-                }
-            });
+    pub fn add_shader(&mut self, name: &str) -> &Shader {
+        let shader_data = self.shaders.entry(name.to_string()).or_insert_with(|| {
+            let shader = Shader::new(name);
+            let dsls = shader.create_dsls();
+            let module = shader.create_module();
+            DebugMarker::name(name, module);
+            let pipeline_layout = PIPELINE_LAYOUT_MANAGER.lock().unwrap().get(&dsls);
+            let pipeline_stages = shader.get_pipeline_stages(module);
+            ShaderData {
+                shader,
+                dsls,
+                pipeline_layout,
+                pipeline_stages,
+            }
+        });
         &shader_data.shader
+    }
+
+    pub fn add_render_pass(&mut self, name: &str, mut render_pass: RenderPass) -> vk::RenderPass {
+        let rp = render_pass.build();
+        let inserted = self
+            .render_passes
+            .insert(name.to_string(), render_pass)
+            .is_none();
+        assert!(inserted, "render pass already exists: {name}");
+        DebugMarker::name(name, rp);
+        rp
+    }
+
+    pub fn render_pass(&mut self, name: &str) -> vk::RenderPass {
+        self.render_passes[name].render_pass
     }
 
     pub fn add_pipeline(
         &mut self,
-        pipeline_name: &str,
+        name: &str,
         shader_name: &str,
-        pipeline_info: GraphicsPipelineInfo,
+        pipeline_info: GraphicsPipeline,
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
-        scope_time!("create pipeline: {pipeline_name}");
-        self.get_shader(shader_name);
+        scope_time!("create pipeline: {name}");
+        self.shader(shader_name);
         let shader_data = &self.shaders[shader_name];
         let pipeline_info = pipeline_info
             .layout(shader_data.pipeline_layout)
@@ -84,7 +98,7 @@ impl RenderContext {
         let inserted = self
             .pipelines
             .insert(
-                pipeline_name.to_string(),
+                name.to_string(),
                 PipelineData {
                     pipeline,
                     info: pipeline_info,
@@ -92,47 +106,37 @@ impl RenderContext {
                 },
             )
             .is_none();
-        assert!(inserted, "pipeline already exists");
-        DebugMarker::name(pipeline_name, pipeline);
+        assert!(inserted, "pipeline already exists: {name}");
+        DebugMarker::name(name, pipeline);
         pipeline
     }
 
     pub fn add_desc_set(
         &mut self,
-        desc_name: &str,
+        name: &str,
         shader_name: &str,
         group: usize,
     ) -> vk::DescriptorSet {
         let dsl = self.shaders[shader_name].dsls[group];
         let desc_set = DESC_ALLOC.alloc_one(dsl);
-        let inserted = self
-            .desc_sets
-            .insert(desc_name.to_string(), desc_set)
-            .is_none();
-        assert!(inserted, "desc set already exists");
-        DebugMarker::name(desc_name, desc_set);
+        let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
+        assert!(inserted, "desc set already exists: {name}");
+        DebugMarker::name(name, desc_set);
         desc_set
     }
 
-    pub fn add_desc_sets(
-        &mut self,
-        desc_names: &[&str],
-        shader_name: &str,
-    ) -> Vec<vk::DescriptorSet> {
+    pub fn add_desc_sets(&mut self, names: &[&str], shader_name: &str) -> Vec<vk::DescriptorSet> {
         let dsls = &self.shaders[shader_name].dsls;
         let desc_sets = DESC_ALLOC.alloc(dsls);
-        for (desc_name, &desc_set) in desc_names.iter().zip(desc_sets.iter()) {
-            let inserted = self
-                .desc_sets
-                .insert(desc_name.to_string(), desc_set)
-                .is_none();
-            assert!(inserted, "desc set already exists");
-            DebugMarker::name(desc_name, desc_set);
+        for (name, &desc_set) in names.iter().zip(desc_sets.iter()) {
+            let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
+            assert!(inserted, "desc set already exists: {name}");
+            DebugMarker::name(name, desc_set);
         }
         desc_sets
     }
 
-    pub fn get_desc_set(&self, name: &str) -> vk::DescriptorSet {
+    pub fn desc_set(&self, name: &str) -> vk::DescriptorSet {
         self.desc_sets[name]
     }
 
@@ -140,7 +144,7 @@ impl RenderContext {
         let cmds = CMD_ALLOC.alloc(names.len() as u32);
         for (&cmd, &name) in cmds.iter().zip(names.iter()) {
             let inserted = self.cmds.insert(name.to_string(), cmd).is_none();
-            assert!(inserted, "cmd buf already exists");
+            assert!(inserted, "cmd buf already exists: {name}");
             DebugMarker::name(name, cmd);
         }
         cmds
@@ -186,7 +190,7 @@ impl RenderContext {
     ) -> vk::Buffer {
         let buf = BUFFER_ALLOC.lock().unwrap().alloc(size, usage, mem_props); // TODO: free
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
-        assert!(inserted, "buffer already exists");
+        assert!(inserted, "buffer already exists: {name}");
         DebugMarker::name(name, buf);
         buf
     }
@@ -201,7 +205,9 @@ impl RenderContext {
     }
 
     pub fn cmd(&self) -> vk::CommandBuffer {
-        self.cmd_state.cmd
+        let cmd = self.cmd_state.cmd;
+        assert_ne!(cmd, Default::default());
+        cmd
     }
 
     pub fn cmd_name(&self) -> &str {
@@ -211,7 +217,7 @@ impl RenderContext {
     pub fn begin_cmd(&mut self, name: &str) -> vk::CommandBuffer {
         assert!(
             self.cmd_state.cmd == Default::default(),
-            "cmd has already begun"
+            "cmd has already begun: {name}"
         );
         self.cmd_state.cmd = self.get_cmd(name);
         self.cmd_state.cmd_name = name.to_string();
@@ -230,7 +236,7 @@ impl RenderContext {
     pub fn end_cmd(&mut self) {
         assert!(
             self.cmd_state.cmd != Default::default(),
-            "cmd has not begun"
+            "can't end cmd that has not begun"
         );
         if self.cmd_state.render_area != Default::default() {
             self.end_render();
@@ -299,7 +305,7 @@ impl RenderContext {
         };
         unsafe {
             DEVICE.cmd_begin_rendering(
-                self.cmd_state.cmd,
+                self.cmd(),
                 &vk::RenderingInfo::default()
                     .render_area(self.cmd_state.render_area)
                     .layer_count(1)
@@ -308,7 +314,7 @@ impl RenderContext {
                         .store_op(vk::AttachmentStoreOp::STORE)
                         .clear_value(vk::ClearValue {
                             color: vk::ClearColorValue {
-                                float32: [1.0, 0.0, 1.0, 1.0],
+                                float32: [0.0, 0.0, 0.0, 0.0],
                             },
                         })
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
@@ -318,9 +324,49 @@ impl RenderContext {
     }
 
     pub fn end_render(&mut self) {
+        assert!(
+            self.cmd_state.render_area != Default::default(),
+            "can't end rendering that has not begun"
+        );
         self.cmd_state.render_area = Default::default();
         unsafe {
-            DEVICE.cmd_end_rendering(self.cmd_state.cmd);
+            if self.cmd_state.render_pass.render_pass == Default::default() {
+                DEVICE.cmd_end_rendering(self.cmd());
+            } else {
+                DEVICE.cmd_end_render_pass(self.cmd());
+                self.cmd_state.render_pass = Default::default();
+            }
+        }
+    }
+
+    pub fn begin_rp(&mut self, name: &str, width: u32, height: u32, img_views: &[vk::ImageView]) {
+        self.cmd_state.render_area = vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent: vk::Extent2D { width, height },
+        };
+        let img_cnt = SWAPCHAIN_IMAGES.read().unwrap().len();
+        let render_pass = self.render_passes.get_mut(name).unwrap();
+        if render_pass.framebuffer_size != self.cmd_state.render_area.extent
+            || render_pass.framebuffers.len() < img_cnt
+        {
+            render_pass.recreate_framebuffer(width, height, img_views, img_cnt);
+        }
+        self.cmd_state.render_pass = render_pass.clone();
+        let render_pass = &self.cmd_state.render_pass;
+        unsafe {
+            DEVICE.cmd_begin_render_pass(
+                self.cmd(),
+                &vk::RenderPassBeginInfo::default()
+                    .render_area(self.cmd_state.render_area)
+                    .clear_values(&[vk::ClearValue {
+                        color: vk::ClearColorValue {
+                            float32: [0.0, 0.0, 0.0, 0.0],
+                        },
+                    }])
+                    .render_pass(render_pass.render_pass)
+                    .framebuffer(render_pass.framebuffers[swap_img_idx()]),
+                vk::SubpassContents::INLINE,
+            );
         }
     }
 
@@ -333,7 +379,7 @@ impl RenderContext {
             let extent = self.cmd_state.render_area.extent;
             if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
                 DEVICE.cmd_set_viewport(
-                    self.cmd_state.cmd,
+                    self.cmd(),
                     0,
                     &[vk::Viewport {
                         x: 0.0,
@@ -347,7 +393,7 @@ impl RenderContext {
             }
             if dyn_states.contains(&vk::DynamicState::SCISSOR) {
                 DEVICE.cmd_set_scissor(
-                    self.cmd_state.cmd,
+                    self.cmd(),
                     0,
                     &[vk::Rect2D {
                         offset: vk::Offset2D { x: 0, y: 0 },
@@ -356,7 +402,7 @@ impl RenderContext {
                 );
             }
             DEVICE.cmd_bind_pipeline(
-                self.cmd_state.cmd,
+                self.cmd(),
                 self.cmd_state.pipeline_data.bind_point,
                 self.cmd_state.pipeline_data.pipeline,
             )
@@ -367,7 +413,7 @@ impl RenderContext {
         self.cmd_state.desc_sets = vec![self.desc_sets[name]];
         unsafe {
             DEVICE.cmd_bind_descriptor_sets(
-                self.cmd_state.cmd,
+                self.cmd(),
                 self.cmd_state.pipeline_data.bind_point,
                 self.cmd_state.pipeline_data.info.layout,
                 0,

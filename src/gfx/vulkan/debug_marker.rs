@@ -1,8 +1,37 @@
 #[cfg(debug_assertions)]
-use crate::CTX;
+use super::cur_cmd;
 use crate::{DEVICE, INSTANCE};
 use ash::vk;
 use lazy_static::lazy_static;
+
+pub struct DebugScope;
+
+impl DebugScope {
+    pub fn new(name: &str) -> Self {
+        DebugMarker::begin(name);
+        Self
+    }
+    pub fn new_colored(name: &str, color: [f32; 4]) -> Self {
+        DebugMarker::begin_colored(name, color);
+        Self
+    }
+}
+
+impl Drop for DebugScope {
+    fn drop(&mut self) {
+        DebugMarker::end();
+    }
+}
+
+#[macro_export]
+macro_rules! debug_scope {
+    ($name:expr) => {
+        let _d = DebugScope::new($name);
+    };
+    ($name:expr, [$r:literal, $g:literal, $b:literal, $a:literal]) => {
+        let _d = DebugScope::new($name, [r, g, b, a]);
+    };
+}
 
 lazy_static! {
     static ref DEBUG_UTILS_LOADER: ash::ext::debug_utils::Device =
@@ -41,7 +70,7 @@ impl DebugMarker {
     pub fn begin(label: &str) {
         unsafe {
             DEBUG_UTILS_LOADER.cmd_begin_debug_utils_label(
-                CTX.lock().unwrap().cmd(),
+                cur_cmd(),
                 &vk::DebugUtilsLabelEXT::default()
                     .label_name(&std::ffi::CString::new(label).unwrap())
                     .color([1.0, 1.0, 1.0, 1.0]),
@@ -52,7 +81,7 @@ impl DebugMarker {
     pub fn begin_colored(label: &str, color: [f32; 4]) {
         unsafe {
             DEBUG_UTILS_LOADER.cmd_begin_debug_utils_label(
-                CTX.lock().unwrap().cmd(),
+                cur_cmd(),
                 &vk::DebugUtilsLabelEXT::default()
                     .label_name(&std::ffi::CString::new(label).unwrap())
                     .color(color),
@@ -61,13 +90,13 @@ impl DebugMarker {
     }
 
     pub fn end() {
-        unsafe { DEBUG_UTILS_LOADER.cmd_end_debug_utils_label(CTX.lock().unwrap().cmd()) }
+        unsafe { DEBUG_UTILS_LOADER.cmd_end_debug_utils_label(cur_cmd()) }
     }
 
     pub fn insert(label: &str) {
         unsafe {
             DEBUG_UTILS_LOADER.cmd_insert_debug_utils_label(
-                CTX.lock().unwrap().cmd(),
+                cur_cmd(),
                 &vk::DebugUtilsLabelEXT::default()
                     .label_name(&std::ffi::CString::new(label).unwrap())
                     .color([1.0, 1.0, 1.0, 1.0]),
@@ -78,7 +107,7 @@ impl DebugMarker {
     pub fn insert_colored(label: &str, color: [f32; 4]) {
         unsafe {
             DEBUG_UTILS_LOADER.cmd_insert_debug_utils_label(
-                CTX.lock().unwrap().cmd(),
+                cur_cmd(),
                 &vk::DebugUtilsLabelEXT::default()
                     .label_name(&std::ffi::CString::new(label).unwrap())
                     .color(color),
