@@ -1,5 +1,3 @@
-use std::sync::RwLock;
-
 use ash::khr;
 pub use ash::vk;
 mod buffer_alloc;
@@ -59,13 +57,6 @@ lazy_static! {
                 std::mem::zeroed()
             }
         };
-
-    // allocators/managers (cached)
-    pub static ref DESC_ALLOC: RwLock<DescAlloc> = RwLock::new(DescAlloc::new());
-    pub static ref CMD_ALLOC: RwLock<CmdAlloc> = RwLock::new(CmdAlloc::new());
-    pub static ref BUFFER_ALLOC: RwLock<BufferAlloc> = RwLock::new(BufferAlloc::new());
-    pub static ref DSL_MANAGER: RwLock<DSLManager> = RwLock::new(DSLManager::new());
-    pub static ref PIPELINE_LAYOUT_MANAGER: RwLock<PipelineLayoutManager> = RwLock::new(PipelineLayoutManager::new());
 }
 
 pub fn gpu_idle() {

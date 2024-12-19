@@ -1,15 +1,52 @@
 use std::collections::HashMap;
+use std::sync::{RwLock, RwLockWriteGuard};
 
 use ash::vk;
 
-use crate::{
-    scope_time, swap_img_idx, DebugMarker, BUFFER_ALLOC, DESC_ALLOC, DEVICE, SWAPCHAIN_IMAGES,
-};
+use crate::{err_abort, scope_time, swap_img_idx, DebugMarker, DEVICE, SWAPCHAIN_IMAGES};
 
 use super::shader::Shader;
 use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
-use super::CMD_ALLOC;
-use super::{RenderPass, PIPELINE_LAYOUT_MANAGER};
+use super::{BufferAlloc, CmdAlloc, DSLManager, DescAlloc, PipelineLayoutManager, RenderPass};
+use lazy_static::lazy_static;
+
+lazy_static! {
+    pub static ref CTX: RwLock<RenderContext> = RwLock::new(RenderContext::new());
+
+    // allocators
+    static ref DESC_ALLOC: RwLock<DescAlloc> = RwLock::new(DescAlloc::new());
+    static ref CMD_ALLOC: RwLock<CmdAlloc> = RwLock::new(CmdAlloc::new());
+    static ref BUFFER_ALLOC: RwLock<BufferAlloc> = RwLock::new(BufferAlloc::new());
+    // managers (hashmap cached)
+    pub static ref DSL_MANAGER: RwLock<DSLManager> = RwLock::new(DSLManager::new());
+    pub static ref PIPELINE_LAYOUT_MANAGER: RwLock<PipelineLayoutManager> = RwLock::new(PipelineLayoutManager::new());
+}
+
+pub fn ctx<'a>() -> std::sync::RwLockWriteGuard<'a, RenderContext> {
+    CTX.try_write()
+        .unwrap_or_else(|_| err_abort!("ctx borrowed mut more than once"))
+}
+
+pub fn ctxr<'a>() -> std::sync::RwLockReadGuard<'a, RenderContext> {
+    CTX.try_read()
+        .unwrap_or_else(|_| err_abort!("ctx read when it was borrowed mut"))
+}
+
+pub fn cur_cmd() -> vk::CommandBuffer {
+    ctxr().cmd()
+}
+
+pub fn desc_alloc<'a>() -> RwLockWriteGuard<'a, DescAlloc> {
+    DESC_ALLOC.write().unwrap()
+}
+
+pub fn cmd_alloc<'a>() -> RwLockWriteGuard<'a, CmdAlloc> {
+    CMD_ALLOC.write().unwrap()
+}
+
+pub fn buffer_alloc<'a>() -> RwLockWriteGuard<'a, BufferAlloc> {
+    BUFFER_ALLOC.write().unwrap()
+}
 
 struct ShaderData {
     shader: Shader,
@@ -450,4 +487,77 @@ impl RenderContext {
             DEVICE.cmd_draw(self.cmd(), vertices, instances, 0, 0);
         }
     }
+}
+
+pub fn write_desc_set(
+    desc_set: vk::DescriptorSet,
+    desc_type: vk::DescriptorType,
+    buffer: vk::Buffer,
+    range: std::ops::Range<vk::DeviceSize>,
+    binding: u32,
+) {
+    unsafe {
+        DEVICE.update_descriptor_sets(
+            &[vk::WriteDescriptorSet::default()
+                .buffer_info(&[vk::DescriptorBufferInfo::default()
+                    .buffer(buffer)
+                    .offset(range.start)
+                    .range(if range.end == vk::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        range.end - range.start
+                    })])
+                .descriptor_count(1)
+                .descriptor_type(desc_type)
+                .dst_binding(binding)
+                .dst_set(desc_set)],
+            &[],
+        )
+    }
+}
+
+pub fn write_desc_set_uniform_buffer(
+    desc_set: vk::DescriptorSet,
+    buffer: vk::Buffer,
+    range: std::ops::Range<vk::DeviceSize>,
+    binding: u32,
+) {
+    write_desc_set(
+        desc_set,
+        vk::DescriptorType::UNIFORM_BUFFER,
+        buffer,
+        range,
+        binding,
+    )
+}
+
+pub fn write_desc_set_uniform_buffer_whole(
+    desc_set: vk::DescriptorSet,
+    buffer: vk::Buffer,
+    binding: u32,
+) {
+    write_desc_set_uniform_buffer(desc_set, buffer, 0..vk::WHOLE_SIZE, binding)
+}
+
+pub fn write_desc_set_storage_buffer(
+    desc_set: vk::DescriptorSet,
+    buffer: vk::Buffer,
+    range: std::ops::Range<vk::DeviceSize>,
+    binding: u32,
+) {
+    write_desc_set(
+        desc_set,
+        vk::DescriptorType::STORAGE_BUFFER,
+        buffer,
+        range,
+        binding,
+    )
+}
+
+pub fn write_desc_set_storage_buffer_whole(
+    desc_set: vk::DescriptorSet,
+    buffer: vk::Buffer,
+    binding: u32,
+) {
+    write_desc_set_storage_buffer(desc_set, buffer, 0..vk::WHOLE_SIZE, binding)
 }

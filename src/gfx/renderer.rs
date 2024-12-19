@@ -1,25 +1,14 @@
-use std::sync::RwLock;
+use ash::vk;
 
-use super::render_context::RenderContext;
-use super::vulkan::pipeline::GraphicsPipeline;
+use crate::{
+    acquire_img, cur_swap_img, cur_swap_img_view, recreate_swapchain, surf_format, swap_img_idx,
+    swap_size, SWAPCHAIN, SWAPCHAIN_LOADER,
+};
 
-use crate::*;
-
-lazy_static! {
-    static ref CTX: RwLock<RenderContext> = RwLock::new(RenderContext::new());
-}
-
-pub fn ctx<'a>() -> std::sync::RwLockWriteGuard<'a, RenderContext> {
-    CTX.write().unwrap()
-}
-
-pub fn ctxr<'a>() -> std::sync::RwLockReadGuard<'a, RenderContext> {
-    CTX.read().unwrap()
-}
-
-pub fn cur_cmd() -> vk::CommandBuffer {
-    CTX.read().unwrap().cmd()
-}
+use super::{
+    ctx, ctxr, cur_cmd, transition_image_layout, vulkan::pipeline::GraphicsPipeline,
+    write_desc_set_uniform_buffer_whole, DEVICE, QUEUE,
+};
 
 #[derive(Clone, Copy)]
 struct Frame {
@@ -112,24 +101,7 @@ impl Renderer {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         );
 
-        // TODO: figure out simpler way for this
-        // TODO: have single ubo that is used to create all ubos, same with ssbo etc.
-        // which buffer, it's range, which binding, what desc type
-        // desc type can be figured out from desc index and binding
-        unsafe {
-            DEVICE.update_descriptor_sets(
-                &[vk::WriteDescriptorSet::default()
-                    .buffer_info(&[vk::DescriptorBufferInfo::default()
-                        .buffer(uniform_buffer)
-                        .offset(0)
-                        .range(vk::WHOLE_SIZE)])
-                    .descriptor_count(1)
-                    .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                    .dst_binding(0)
-                    .dst_set(desc_set)],
-                &[],
-            )
-        };
+        write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
 
         Self {
             frames: [Frame::default(); Self::FRAMES],

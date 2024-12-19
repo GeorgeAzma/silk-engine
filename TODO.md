@@ -1,8 +1,11 @@
-- better descriptor allocator
-- better memory allocator
-- command allocator
-- queue manager
+# Functionality
 - image loading
-- render graph
-- model loading
 - simple scene
+- render graph
+
+# Large Scene Problems
+- model loading
+- better memory allocator
+- better descriptor allocator
+- better command allocator
+- queue manager

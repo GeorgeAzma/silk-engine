@@ -130,18 +130,21 @@ impl BufferAlloc {
     }
 
     pub fn map(&mut self, buffer: vk::Buffer) -> *mut u8 {
-        self.map_range(buffer, 0..0)
+        self.map_range(buffer, 0, vk::WHOLE_SIZE)
     }
 
-    pub fn map_range(&mut self, buffer: vk::Buffer, mut range: std::ops::Range<u64>) -> *mut u8 {
+    pub fn map_range(
+        &mut self,
+        buffer: vk::Buffer,
+        off: vk::DeviceSize,
+        size: vk::DeviceSize,
+    ) -> *mut u8 {
         let MemBlock {
             mem,
-            size,
+            size: _,
             mapped_range,
         } = self.buf_mems.get_mut(&buffer.as_raw()).unwrap();
-        if range.end == 0 {
-            range.end = *size;
-        }
+        let range = off..off + size;
         if let Some(mr) = mapped_range {
             if mr.contains(&range) {
                 return mr.subrange_ptr(&range);
@@ -152,12 +155,7 @@ impl BufferAlloc {
         *mapped_range = Some(MappedRange::new(
             unsafe {
                 DEVICE
-                    .map_memory(
-                        *mem,
-                        range.start,
-                        range.end - range.start,
-                        vk::MemoryMapFlags::empty(),
-                    )
+                    .map_memory(*mem, off, size, vk::MemoryMapFlags::empty())
                     .unwrap() as *mut u8
             },
             &range,

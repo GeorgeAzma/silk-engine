@@ -80,10 +80,7 @@ impl App {
             time: self.time,
             dt: self.dt,
         };
-        BUFFER_ALLOC
-            .write()
-            .unwrap()
-            .copy(ctxr().buffer("global uniform"), &uniform_data);
+        buffer_alloc().copy(ctx().buffer("global uniform"), &uniform_data);
         self.my_app().update();
     }
 

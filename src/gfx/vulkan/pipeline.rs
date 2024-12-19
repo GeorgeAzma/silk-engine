@@ -1,6 +1,5 @@
 use crate::*;
 use gfx::shader::Shader;
-use util::Mem;
 
 const fn pipeline_cache_path() -> &'static str {
     "res/cache/pipeline_cache"
@@ -365,7 +364,7 @@ impl GraphicsPipeline {
                         continue;
                     }
                     if name == "Binary" {
-                        let val = Mem::str(&val);
+                        let val = util::Mem::str(&val);
                         log!("    {name:<8} {val}");
                     } else {
                         log!("    {name:<8} {val}");

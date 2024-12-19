@@ -1,7 +1,7 @@
 use super::vulkan::pipeline::PipelineStageInfo;
+use super::vulkan::DSLBinding;
 
 use crate::*;
-use gfx::DSLBinding;
 use lazy_static::lazy_static;
 
 lazy_static! {
