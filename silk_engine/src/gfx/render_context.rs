@@ -10,7 +10,7 @@ use super::{BufferAlloc, CmdAlloc, DSLManager, DescAlloc, PipelineLayoutManager,
 
 #[cfg(debug_assertions)]
 static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
-    std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(&crate::INSTANCE, &gpu()));
+    std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(&crate::INSTANCE, gpu()));
 
 struct ShaderData {
     shader: Shader,

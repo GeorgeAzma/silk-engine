@@ -115,7 +115,7 @@ pub fn gpu_features() -> vk::PhysicalDeviceFeatures {
 }
 
 pub fn gpu_extensions() -> &'static [CString] {
-    &*GPU_EXTENSIONS
+    &GPU_EXTENSIONS
 }
 
 pub fn gpu_mem_props() -> vk::PhysicalDeviceMemoryProperties {
@@ -123,5 +123,5 @@ pub fn gpu_mem_props() -> vk::PhysicalDeviceMemoryProperties {
 }
 
 pub fn gpu() -> &'static ash::Device {
-    &*GPU
+    &GPU
 }

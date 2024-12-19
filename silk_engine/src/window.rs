@@ -56,7 +56,7 @@ impl WindowContext {
                 .get_physical_device_surface_present_modes(physical_gpu(), surface)
                 .unwrap()
         };
-        let swapchain_loader = khr::swapchain::Device::new(&INSTANCE, &gpu());
+        let swapchain_loader = khr::swapchain::Device::new(&INSTANCE, gpu());
         Self {
             surface_caps2_loader: surface_caps2,
             surface,

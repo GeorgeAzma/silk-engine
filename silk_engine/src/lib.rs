@@ -9,8 +9,8 @@ pub use std::{
 };
 
 use window::WindowContext;
-use winit::window::WindowId;
 use winit::{event_loop::ActiveEventLoop, window::Window};
+use winit::{event_loop::ControlFlow, window::WindowId};
 use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
 mod input;
@@ -177,12 +177,7 @@ impl<A: App> AppContext<A> {
 
 pub struct Engine<T: App> {
     app: Option<*mut AppContext<T>>,
-}
-
-impl<T: App> Default for Engine<T> {
-    fn default() -> Self {
-        Self::new()
-    }
+    window_attribs: WindowAttributes,
 }
 
 struct UnsafeEventLoop(winit::event_loop::EventLoop<()>);
@@ -211,25 +206,37 @@ static EVENT_LOOP: LazyLock<Mutex<UnsafeEventLoop>> = LazyLock::new(|| {
 });
 
 impl<T: App> Engine<T> {
-    pub fn new() -> Engine<T> {
-        EVENT_LOOP
-            .lock()
-            .unwrap()
-            .set_control_flow(winit::event_loop::ControlFlow::Poll);
-        let mut engine = Self { app: None };
+    pub fn window(title: &str, width: u32, height: u32) {
+        Self::run_with(
+            WindowAttributes::default()
+                .with_title(title)
+                .with_inner_size(winit::dpi::LogicalSize::new(width, height)),
+            ControlFlow::Poll,
+        );
+    }
+
+    pub fn default() {
+        Self::run_with(WindowAttributes::default(), ControlFlow::Poll);
+    }
+
+    pub fn run_with(window_attribs: WindowAttributes, control_flow: ControlFlow) {
+        EVENT_LOOP.lock().unwrap().set_control_flow(control_flow);
+        let mut engine = Self {
+            app: None,
+            window_attribs,
+        };
         EVENT_LOOP
             .lock()
             .unwrap()
             .run_app_on_demand(&mut engine)
             .unwrap();
-        Self { app: None }
     }
 }
 
 impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window = event_loop
-            .create_window(WindowAttributes::default())
+            .create_window(self.window_attribs.clone())
             .unwrap();
         self.app = Some(AppContext::new(window));
     }

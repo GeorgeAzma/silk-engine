@@ -50,7 +50,7 @@ pub static QUEUE: LazyLock<vk::Queue> =
 pub static PIPELINE_EXEC_PROPS_LOADER: LazyLock<khr::pipeline_executable_properties::Device> =
     LazyLock::new(|| {
         if cfg!(debug_assertions) {
-            khr::pipeline_executable_properties::Device::new(&INSTANCE, &gpu())
+            khr::pipeline_executable_properties::Device::new(&INSTANCE, gpu())
         } else {
             #[allow(invalid_value)]
             unsafe {
