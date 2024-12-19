@@ -9,7 +9,9 @@ pub use std::{
 };
 
 use window::WindowContext;
-use winit::{event_loop::ActiveEventLoop, window::Window};
+use winit::{
+    event_loop::ActiveEventLoop, platform::windows::EventLoopBuilderExtWindows, window::Window,
+};
 use winit::{event_loop::ControlFlow, window::WindowId};
 use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
@@ -107,7 +109,7 @@ impl<A: App> AppContext<A> {
 
         self.my_app().render();
 
-        self.renderer.end_render();
+        self.renderer.end_render(&self.window);
 
         self.input.reset();
         self.frame += 1;
@@ -144,7 +146,9 @@ impl<A: App> AppContext<A> {
                         self.input.reset();
                     }
                 }
-                Event::CloseRequested => event_loop.exit(),
+                Event::CloseRequested => {
+                    event_loop.exit();
+                }
                 _ => {}
             }
         }
@@ -207,7 +211,7 @@ static EVENT_LOOP: LazyLock<Mutex<UnsafeEventLoop>> = LazyLock::new(|| {
 
 impl<T: App> Engine<T> {
     pub fn window(title: &str, width: u32, height: u32) {
-        Self::run_with(
+        Self::with(
             WindowAttributes::default()
                 .with_title(title)
                 .with_inner_size(winit::dpi::LogicalSize::new(width, height)),
@@ -216,15 +220,15 @@ impl<T: App> Engine<T> {
     }
 
     pub fn default() {
-        Self::run_with(WindowAttributes::default(), ControlFlow::Poll);
+        Self::with(WindowAttributes::default(), ControlFlow::Poll);
     }
 
-    pub fn run_with(window_attribs: WindowAttributes, control_flow: ControlFlow) {
-        EVENT_LOOP.lock().unwrap().set_control_flow(control_flow);
+    pub fn with(window_attribs: WindowAttributes, control_flow: ControlFlow) {
         let mut engine = Self {
             app: None,
             window_attribs,
         };
+        EVENT_LOOP.lock().unwrap().set_control_flow(control_flow);
         EVENT_LOOP
             .lock()
             .unwrap()

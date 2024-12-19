@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
+use winit::window::Window;
 
 use crate::{err, window::WindowContext};
 
@@ -148,7 +149,7 @@ impl Renderer {
         ctx.draw(3, 1);
     }
 
-    pub(crate) fn end_render(&mut self) {
+    pub(crate) fn end_render(&mut self, window: &Window) {
         let mut ctx = self.render_ctx.lock().unwrap();
         ctx.end_render();
 
@@ -172,6 +173,7 @@ impl Renderer {
             frame.prev_frame_done,
         );
 
+        window.pre_present_notify();
         window_ctx.present(&[frame.render_done]);
 
         // self.current_frame = (self.current_frame + 1) % Self::FRAMES;

@@ -29,5 +29,4 @@ impl App for MyApp {
 
 fn main() {
     Engine::<MyApp>::window("App", 800, 600);
-    Engine::<MyApp>::window("Another App", 400, 300);
 }
