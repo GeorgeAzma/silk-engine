@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use ash::khr;
 pub use ash::vk;
 mod buffer_alloc;
@@ -13,101 +15,56 @@ pub use gpu::*;
 mod instance;
 mod pipeline_layout_manager;
 pub use instance::*;
-use lazy_static::lazy_static;
 pub(super) use pipeline_layout_manager::PipelineLayoutManager;
 mod config;
-mod debug_marker;
-pub use debug_marker::*;
 pub mod pipeline;
 pub use pipeline::*;
 mod render_pass;
 pub(super) use render_pass::RenderPass;
 
-use super::cur_cmd;
-
-lazy_static! {
-    pub static ref ENTRY: ash::Entry =
-        unsafe { ash::Entry::load().expect("Failed to load Vulkan") };
-    pub static ref QUEUE_FAMILIES: Vec<vk::QueueFamilyProperties> = unsafe {
-        let queue_family_props_len =
-            INSTANCE.get_physical_device_queue_family_properties2_len(*GPU);
-        let mut queue_family_props =
-            vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
-        INSTANCE.get_physical_device_queue_family_properties2(*GPU, &mut queue_family_props);
-        queue_family_props
-            .into_iter()
-            .map(|qfp| qfp.queue_family_properties)
-            .collect()
-    };
-    pub static ref QUEUE_FAMILY_INDEX: u32 = QUEUE_FAMILIES
+pub static ENTRY: LazyLock<ash::Entry> =
+    LazyLock::new(|| unsafe { ash::Entry::load().expect("Failed to load Vulkan") });
+pub static QUEUE_FAMILIES: LazyLock<Vec<vk::QueueFamilyProperties>> = LazyLock::new(|| unsafe {
+    let queue_family_props_len =
+        INSTANCE.get_physical_device_queue_family_properties2_len(physical_gpu());
+    let mut queue_family_props =
+        vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
+    INSTANCE.get_physical_device_queue_family_properties2(physical_gpu(), &mut queue_family_props);
+    queue_family_props
+        .into_iter()
+        .map(|qfp| qfp.queue_family_properties)
+        .collect()
+});
+pub static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
+    QUEUE_FAMILIES
         .iter()
         .position(|&queue_family_props| {
             queue_family_props.queue_flags.contains(
                 vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
             )
         })
-        .unwrap_or_default() as u32;
-    pub static ref QUEUE: vk::Queue = unsafe { DEVICE.get_device_queue(*QUEUE_FAMILY_INDEX, 0) };
-    pub static ref PIPELINE_EXEC_PROPS_LOADER: khr::pipeline_executable_properties::Device =
+        .unwrap_or_default() as u32
+});
+pub static QUEUE: LazyLock<vk::Queue> =
+    LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
+pub static PIPELINE_EXEC_PROPS_LOADER: LazyLock<khr::pipeline_executable_properties::Device> =
+    LazyLock::new(|| {
         if cfg!(debug_assertions) {
-            khr::pipeline_executable_properties::Device::new(&INSTANCE, &DEVICE)
+            khr::pipeline_executable_properties::Device::new(&INSTANCE, &gpu())
         } else {
             #[allow(invalid_value)]
             unsafe {
                 std::mem::zeroed()
             }
-        };
-}
+        }
+    });
 
 pub fn gpu_idle() {
-    unsafe { DEVICE.device_wait_idle().unwrap() };
+    unsafe { gpu().device_wait_idle().unwrap() };
 }
 
 pub fn queue_idle() {
-    unsafe { DEVICE.queue_wait_idle(*QUEUE).unwrap() };
-}
-
-pub fn transition_image_layout(
-    image: vk::Image,
-    old_layout: vk::ImageLayout,
-    new_layout: vk::ImageLayout,
-) {
-    let (src_stage, src_access_mask, dst_stage, dst_access_mask) = match (old_layout, new_layout) {
-        (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::AccessFlags2::NONE,
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-        ),
-        (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
-            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
-            vk::AccessFlags2::NONE,
-        ),
-        _ => panic!("Unsupported layout transition!"),
-    };
-    unsafe {
-        DEVICE.cmd_pipeline_barrier2(
-            cur_cmd(),
-            &vk::DependencyInfo::default().image_memory_barriers(&[
-                vk::ImageMemoryBarrier2::default()
-                    .dst_access_mask(dst_access_mask)
-                    .src_access_mask(src_access_mask)
-                    .src_stage_mask(src_stage)
-                    .dst_stage_mask(dst_stage)
-                    .image(image)
-                    .subresource_range(
-                        vk::ImageSubresourceRange::default()
-                            .aspect_mask(vk::ImageAspectFlags::COLOR)
-                            .layer_count(1)
-                            .level_count(1),
-                    )
-                    .old_layout(old_layout)
-                    .new_layout(new_layout),
-            ]),
-        );
-    }
+    unsafe { gpu().queue_wait_idle(*QUEUE).unwrap() };
 }
 
 pub fn format_size(format: vk::Format) -> u32 {

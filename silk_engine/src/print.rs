@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 
 pub fn col(text: &str, col: [u8; 3]) -> String {
     format!("\x1b[38;2;{};{};{}m{text}\x1b[0m", col[0], col[1], col[2])
@@ -35,21 +35,21 @@ pub fn trace(text: &str) -> String {
 #[macro_export]
 macro_rules! fatal {
     ($($args:tt)*) => {
-        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n{}", format_args!($($args)*), $crate::backtrace_skip(2))
+        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
     };
 }
 
 #[macro_export]
 macro_rules! err {
     ($($args:tt)*) => {
-        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n{}", format_args!($($args)*), $crate::backtrace_skip(2))
+        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
     };
 }
 
 #[macro_export]
 macro_rules! err_abort {
     ($($args:tt)*) => {
-        panic!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(2))
+        panic!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
     };
 }
 
@@ -74,12 +74,10 @@ macro_rules! trace {
     };
 }
 
-lazy_static! {
-    pub static ref INIT_LOG_FOLDER: () = {
-        std::fs::remove_dir_all("logs").unwrap_or_default();
-        std::fs::create_dir("logs").unwrap_or_default();
-    };
-}
+pub static INIT_LOG_FOLDER: LazyLock<()> = LazyLock::new(|| {
+    std::fs::remove_dir_all("logs").unwrap_or_default();
+    std::fs::create_dir("logs").unwrap_or_default();
+});
 
 pub fn backtrace_callers() -> Vec<String> {
     *INIT_LOG_FOLDER;
@@ -93,7 +91,6 @@ pub fn backtrace_callers() -> Vec<String> {
     let mut callers: Vec<String> = backtrace
         .trim()
         .replace("at ./", "")
-        .replace("src/", "")
         .split_whitespace()
         .filter_map(|s| {
             if s.is_empty() {

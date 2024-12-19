@@ -1,4 +1,4 @@
-use super::DEVICE;
+use super::gpu;
 use ash::vk;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -49,14 +49,14 @@ impl DSLManager {
         *self
             .dsls
             .entry(dslbs)
-            .or_insert(unsafe { DEVICE.create_descriptor_set_layout(&info, None).unwrap() })
+            .or_insert(unsafe { gpu().create_descriptor_set_layout(&info, None).unwrap() })
     }
 }
 
 impl Drop for DSLManager {
     fn drop(&mut self) {
         for dsl in self.dsls.values() {
-            unsafe { DEVICE.destroy_descriptor_set_layout(*dsl, None) };
+            unsafe { gpu().destroy_descriptor_set_layout(*dsl, None) };
         }
     }
 }

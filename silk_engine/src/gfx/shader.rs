@@ -1,14 +1,13 @@
-use super::vulkan::pipeline::PipelineStageInfo;
-use super::vulkan::DSLBinding;
+use std::collections::HashMap;
 
-use crate::*;
-use lazy_static::lazy_static;
+use super::vulkan::{pipeline::PipelineStageInfo, DSLBinding};
+use crate::{fatal, format_size, gpu, log};
+use ash::vk;
 
-lazy_static! {
-    pub static ref INIT_CACHE_PATH: () = {
-        std::fs::create_dir_all("res/cache/shaders").unwrap_or_default();
-    };
-}
+#[cfg(not(debug_assertions))]
+pub static INIT_CACHE_PATH: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
+    std::fs::create_dir_all("res/cache/shaders").unwrap_or_default();
+});
 
 fn shader_path(name: &str) -> String {
     format!("res/shaders/{name}.wgsl")
@@ -51,7 +50,7 @@ impl Shader {
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
             log!("shader cache loaded: \"{name}.spv\"");
-            util::cast_slice_to(&spirv).to_owned()
+            crate::util::cast_slice_to(&spirv).to_owned()
         } else {
             log!("shader loaded: \"{name}.wgsl\"");
             // validate wgsl
@@ -77,7 +76,8 @@ impl Shader {
             #[cfg(not(debug_assertions))]
             *INIT_CACHE_PATH;
             #[cfg(not(debug_assertions))]
-            std::fs::write(&shader_cache_path(name), util::cast_slice(&spirv)).unwrap_or_default();
+            std::fs::write(&shader_cache_path(name), crate::util::cast_slice(&spirv))
+                .unwrap_or_default();
 
             spirv
         };
@@ -91,7 +91,7 @@ impl Shader {
 
     pub fn create_module(&self) -> vk::ShaderModule {
         unsafe {
-            DEVICE
+            gpu()
                 .create_shader_module(
                     &vk::ShaderModuleCreateInfo::default().code(&self.spirv),
                     None,
@@ -184,13 +184,6 @@ impl Shader {
             bindings_vec[group as usize] = binding;
         }
         bindings_vec
-    }
-
-    pub fn create_dsls(&self) -> Vec<vk::DescriptorSetLayout> {
-        self.get_dsl_bindings()
-            .iter()
-            .map(|dslb| DSL_MANAGER.write().unwrap().get(dslb))
-            .collect()
     }
 
     /// Arguments:

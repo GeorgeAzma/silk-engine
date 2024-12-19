@@ -2,6 +2,20 @@ use core::fmt;
 
 #[macro_export]
 macro_rules! expose {
+    (($member:expr).$method:ident($($arg_name:ident : $arg_type:ty),*) -> $ret:ty) => {
+        #[inline]
+        pub fn $method(&self, $($arg_name: $arg_type),*) -> $ret {
+            self.$member.$method($($arg_name),*)
+        }
+    };
+    (($member:expr).[$($method:ident),*]($arg_name:ident : $arg_type:ty) -> $ret:ty) => {
+        $(
+            #[inline]
+            pub fn $method(&self, $arg_name: $arg_type) -> $ret {
+                self.$member.$method($arg_name)
+            }
+        )*
+    };
     ($member:ident.$method:ident($($arg_name:ident : $arg_type:ty),*) -> $ret:ty) => {
         #[inline]
         pub fn $method(&self, $($arg_name: $arg_type),*) -> $ret {
@@ -15,9 +29,10 @@ macro_rules! expose {
                 self.$member.$method($arg_name)
             }
         )*
-    }
+    };
 }
 
+#[allow(unused)]
 pub fn cast_slice<T>(slice: &[T]) -> &[u8] {
     assert!(size_of::<T>() > 0, "Cannot cast a zero-sized type");
     unsafe { std::slice::from_raw_parts(slice.as_ptr() as *const u8, size_of_val(slice)) }
@@ -38,6 +53,7 @@ pub struct Mem {
     bytes: u64,
 }
 
+#[allow(unused)]
 impl Mem {
     pub fn b(bytes: u64) -> Self {
         Self { bytes }
@@ -87,6 +103,14 @@ impl Mem {
 
     pub fn as_tb(&self) -> u64 {
         self.bytes >> 40
+    }
+}
+
+impl std::ops::Deref for Mem {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bytes
     }
 }
 

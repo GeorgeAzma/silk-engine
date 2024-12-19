@@ -29,4 +29,5 @@ impl App for MyApp {
 
 fn main() {
     Engine::<MyApp>::new();
+    Engine::<MyApp>::new();
 }

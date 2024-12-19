@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 pub use std::{
     collections::{HashMap, HashSet},
     process::abort,
@@ -7,10 +8,10 @@ pub use std::{
     time::{Duration, Instant},
 };
 
-use lazy_static::lazy_static;
-use winit::window::WindowAttributes;
+use window::WindowContext;
 use winit::window::WindowId;
 use winit::{event_loop::ActiveEventLoop, window::Window};
+use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
 mod input;
 pub mod print;
@@ -21,7 +22,6 @@ mod gfx;
 pub use gfx::*;
 mod util;
 mod window;
-pub use window::*;
 
 pub trait App: Sized {
     fn new(app: Arc<AppContext<Self>>) -> Self;
@@ -30,9 +30,9 @@ pub trait App: Sized {
     fn event(&mut self, _e: Event) {}
 }
 
-pub struct AppContext<T: App> {
-    my_app: Option<T>,
-    pub window: Arc<Window>,
+pub struct AppContext<A: App> {
+    my_app: Option<A>,
+    pub window: Window,
     pub width: u32,
     pub height: u32,
     pub start_time: std::time::Instant,
@@ -43,19 +43,22 @@ pub struct AppContext<T: App> {
     pub mouse_x: f32,
     pub mouse_y: f32,
     pub mouse_scroll: f32,
+    window_ctx: Arc<Mutex<WindowContext>>,
+    render_ctx: Arc<Mutex<RenderContext>>,
     renderer: Renderer,
 }
 
-impl<T: App> AppContext<T> {
-    pub fn new() -> *mut Self {
+impl<A: App> AppContext<A> {
+    pub fn new(window: Window) -> *mut Self {
         scope_time!("init");
-        let window = WINDOW.read().unwrap().as_ref().unwrap().clone();
         let width = window.inner_size().width;
         let height = window.inner_size().height;
+        let render_ctx = Arc::new(Mutex::new(RenderContext::new()));
+        let window_ctx = Arc::new(Mutex::new(WindowContext::new(&window)));
 
         let app = Arc::new(Self {
             my_app: None,
-            window: window.clone(),
+            window,
             width,
             height,
             start_time: Instant::now(),
@@ -66,10 +69,12 @@ impl<T: App> AppContext<T> {
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_scroll: 0.0,
-            renderer: Renderer::new(),
+            window_ctx: window_ctx.clone(),
+            render_ctx: render_ctx.clone(),
+            renderer: Renderer::new(render_ctx, window_ctx),
         });
         let app_mut = ptr::from_ref(app.as_ref()).cast_mut();
-        unsafe { app_mut.as_mut() }.unwrap().my_app = Some(T::new(app.clone()));
+        unsafe { app_mut.as_mut() }.unwrap().my_app = Some(A::new(app.clone()));
         app_mut
     }
 
@@ -85,7 +90,10 @@ impl<T: App> AppContext<T> {
             time: self.time,
             dt: self.dt,
         };
-        buffer_alloc().copy(ctx().buffer("global uniform"), &uniform_data);
+        {
+            let buf = self.ctx().buffer("global uniform");
+            self.ctx().write_buffer(buf, &uniform_data);
+        }
         self.my_app().update();
     }
 
@@ -114,7 +122,7 @@ impl<T: App> AppContext<T> {
         if width == 0 || height == 0 {
             return;
         }
-        recreate_swapchain();
+        self.window_ctx.lock().unwrap().recreate_swapchain();
     }
 
     fn event(&mut self, event_loop: &ActiveEventLoop, event: Event, window_id: WindowId) {
@@ -145,7 +153,7 @@ impl<T: App> AppContext<T> {
         self.window.request_redraw();
     }
 
-    fn my_app(&mut self) -> &mut T {
+    fn my_app(&mut self) -> &mut A {
         self.my_app.as_mut().unwrap()
     }
 
@@ -153,30 +161,77 @@ impl<T: App> AppContext<T> {
     expose!(input.[mouse_down, mouse_released, mouse_pressed](m: Mouse) -> bool);
     expose!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
     expose!(input.focused() -> bool);
+
+    pub fn ctx(&mut self) -> std::sync::MutexGuard<'_, RenderContext> {
+        self.render_ctx.lock().unwrap()
+    }
+
+    pub fn write_buffer<T>(&mut self, buffer: vk::Buffer, data: &T) {
+        self.ctx().write_buffer(buffer, data);
+    }
+
+    pub fn read_buffer<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
+        self.ctx().read_buffer(buffer, data);
+    }
 }
 
 pub struct Engine<T: App> {
     app: Option<*mut AppContext<T>>,
 }
 
+impl<T: App> Default for Engine<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct UnsafeEventLoop(winit::event_loop::EventLoop<()>);
+
+impl std::ops::Deref for UnsafeEventLoop {
+    type Target = winit::event_loop::EventLoop<()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for UnsafeEventLoop {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+unsafe impl Send for UnsafeEventLoop {}
+unsafe impl Sync for UnsafeEventLoop {}
+
+static EVENT_LOOP: LazyLock<Mutex<UnsafeEventLoop>> = LazyLock::new(|| {
+    Mutex::new(UnsafeEventLoop(
+        winit::event_loop::EventLoop::builder().build().unwrap(),
+    ))
+});
+
 impl<T: App> Engine<T> {
     pub fn new() -> Engine<T> {
-        let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
-        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        EVENT_LOOP
+            .lock()
+            .unwrap()
+            .set_control_flow(winit::event_loop::ControlFlow::Poll);
         let mut engine = Self { app: None };
-        event_loop.run_app(&mut engine).unwrap();
+        EVENT_LOOP
+            .lock()
+            .unwrap()
+            .run_app_on_demand(&mut engine)
+            .unwrap();
         Self { app: None }
     }
 }
 
 impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        *WINDOW.write().unwrap() = Some(Arc::new(
-            event_loop
-                .create_window(WindowAttributes::default())
-                .unwrap(),
-        ));
-        self.app = Some(AppContext::new());
+        let window = event_loop
+            .create_window(WindowAttributes::default())
+            .unwrap();
+        self.app = Some(AppContext::new(window));
     }
 
     fn window_event(

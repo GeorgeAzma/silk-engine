@@ -6,7 +6,7 @@ use std::{
 use ash::vk;
 use vk::Handle;
 
-use super::DEVICE;
+use super::gpu;
 
 pub struct PipelineLayoutManager {
     pipeline_layouts: HashMap<PipelineLayoutInfo, vk::PipelineLayout>,
@@ -32,7 +32,7 @@ impl PipelineLayoutManager {
                 set_layouts: set_layouts.to_vec(),
             })
             .or_insert(unsafe {
-                DEVICE
+                gpu()
                     .create_pipeline_layout(
                         &vk::PipelineLayoutCreateInfo::default().set_layouts(set_layouts),
                         None,

@@ -1,52 +1,16 @@
 use std::collections::HashMap;
-use std::sync::{RwLock, RwLockWriteGuard};
 
 use ash::vk;
 
-use crate::{err_abort, scope_time, swap_img_idx, DebugMarker, DEVICE, SWAPCHAIN_IMAGES};
+use crate::{gpu, scope_time};
 
 use super::shader::Shader;
 use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
 use super::{BufferAlloc, CmdAlloc, DSLManager, DescAlloc, PipelineLayoutManager, RenderPass};
-use lazy_static::lazy_static;
 
-lazy_static! {
-    pub static ref CTX: RwLock<RenderContext> = RwLock::new(RenderContext::new());
-
-    // allocators
-    static ref DESC_ALLOC: RwLock<DescAlloc> = RwLock::new(DescAlloc::new());
-    static ref CMD_ALLOC: RwLock<CmdAlloc> = RwLock::new(CmdAlloc::new());
-    static ref BUFFER_ALLOC: RwLock<BufferAlloc> = RwLock::new(BufferAlloc::new());
-    // managers (hashmap cached)
-    pub static ref DSL_MANAGER: RwLock<DSLManager> = RwLock::new(DSLManager::new());
-    pub static ref PIPELINE_LAYOUT_MANAGER: RwLock<PipelineLayoutManager> = RwLock::new(PipelineLayoutManager::new());
-}
-
-pub fn ctx<'a>() -> std::sync::RwLockWriteGuard<'a, RenderContext> {
-    CTX.try_write()
-        .unwrap_or_else(|_| err_abort!("ctx borrowed mut more than once"))
-}
-
-pub fn ctxr<'a>() -> std::sync::RwLockReadGuard<'a, RenderContext> {
-    CTX.try_read()
-        .unwrap_or_else(|_| err_abort!("ctx read when it was borrowed mut"))
-}
-
-pub fn cur_cmd() -> vk::CommandBuffer {
-    ctxr().cmd()
-}
-
-pub fn desc_alloc<'a>() -> RwLockWriteGuard<'a, DescAlloc> {
-    DESC_ALLOC.write().unwrap()
-}
-
-pub fn cmd_alloc<'a>() -> RwLockWriteGuard<'a, CmdAlloc> {
-    CMD_ALLOC.write().unwrap()
-}
-
-pub fn buffer_alloc<'a>() -> RwLockWriteGuard<'a, BufferAlloc> {
-    BUFFER_ALLOC.write().unwrap()
-}
+#[cfg(debug_assertions)]
+static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
+    std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(&crate::INSTANCE, &gpu()));
 
 struct ShaderData {
     shader: Shader,
@@ -75,6 +39,13 @@ struct CmdState {
 #[derive(Default)]
 pub struct RenderContext {
     cmd_state: CmdState,
+    // allocators
+    desc_alloc: DescAlloc,
+    cmd_alloc: CmdAlloc,
+    pub buffer_alloc: BufferAlloc,
+    // managers (hashmap cached)
+    dsl_manager: DSLManager,
+    pipeline_layout_manager: PipelineLayoutManager,
     // named cached objects
     shaders: HashMap<String, ShaderData>,
     pipelines: HashMap<String, PipelineData>,
@@ -94,12 +65,16 @@ impl RenderContext {
     }
 
     pub fn add_shader(&mut self, name: &str) -> &Shader {
-        let shader_data = self.shaders.entry(name.to_string()).or_insert_with(|| {
+        let shader_data = {
             let shader = Shader::new(name);
-            let dsls = shader.create_dsls();
+            let dsls = shader
+                .get_dsl_bindings()
+                .iter()
+                .map(|dslb| self.dsl_manager.get(dslb))
+                .collect::<Vec<_>>();
             let module = shader.create_module();
-            DebugMarker::name(name, module);
-            let pipeline_layout = PIPELINE_LAYOUT_MANAGER.write().unwrap().get(&dsls);
+            debug_name(name, module);
+            let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
             let pipeline_stages = shader.get_pipeline_stages(module);
             ShaderData {
                 shader,
@@ -107,7 +82,8 @@ impl RenderContext {
                 pipeline_layout,
                 pipeline_stages,
             }
-        });
+        };
+        let shader_data = self.shaders.entry(name.to_string()).or_insert(shader_data);
         &shader_data.shader
     }
 
@@ -118,7 +94,7 @@ impl RenderContext {
             .insert(name.to_string(), render_pass)
             .is_none();
         assert!(inserted, "render pass already exists: {name}");
-        DebugMarker::name(name, rp);
+        debug_name(name, rp);
         rp
     }
 
@@ -153,7 +129,7 @@ impl RenderContext {
             )
             .is_none();
         assert!(inserted, "pipeline already exists: {name}");
-        DebugMarker::name(name, pipeline);
+        debug_name(name, pipeline);
         pipeline
     }
 
@@ -164,20 +140,20 @@ impl RenderContext {
         group: usize,
     ) -> vk::DescriptorSet {
         let dsl = self.shaders[shader_name].dsls[group];
-        let desc_set = DESC_ALLOC.write().unwrap().alloc_one(dsl);
+        let desc_set = self.desc_alloc.alloc_one(dsl);
         let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
         assert!(inserted, "desc set already exists: {name}");
-        DebugMarker::name(name, desc_set);
+        debug_name(name, desc_set);
         desc_set
     }
 
     pub fn add_desc_sets(&mut self, names: &[&str], shader_name: &str) -> Vec<vk::DescriptorSet> {
         let dsls = &self.shaders[shader_name].dsls;
-        let desc_sets = DESC_ALLOC.write().unwrap().alloc(dsls);
+        let desc_sets = self.desc_alloc.alloc(dsls);
         for (name, &desc_set) in names.iter().zip(desc_sets.iter()) {
             let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
             assert!(inserted, "desc set already exists: {name}");
-            DebugMarker::name(name, desc_set);
+            debug_name(name, desc_set);
         }
         desc_sets
     }
@@ -187,11 +163,11 @@ impl RenderContext {
     }
 
     pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
-        let cmds = CMD_ALLOC.read().unwrap().alloc(names.len() as u32);
+        let cmds = self.cmd_alloc.alloc(names.len() as u32);
         for (&cmd, &name) in cmds.iter().zip(names.iter()) {
             let inserted = self.cmds.insert(name.to_string(), cmd).is_none();
             assert!(inserted, "cmd buf already exists: {name}");
-            DebugMarker::name(name, cmd);
+            debug_name(name, cmd);
         }
         cmds
     }
@@ -210,7 +186,7 @@ impl RenderContext {
             .iter()
             .map(|name| self.cmds.remove(name.to_owned()).unwrap())
             .collect();
-        CMD_ALLOC.read().unwrap().dealloc(&cmds);
+        self.cmd_alloc.dealloc(&cmds);
     }
 
     pub fn remove_cmd(&mut self, name: &str) {
@@ -219,10 +195,7 @@ impl RenderContext {
 
     pub fn reset_cmds(&mut self, names: &[&str]) {
         for name in names.iter() {
-            CMD_ALLOC
-                .read()
-                .unwrap()
-                .reset(self.cmds[&name.to_string()]);
+            self.cmd_alloc.reset(self.cmds[&name.to_string()]);
         }
     }
 
@@ -237,16 +210,16 @@ impl RenderContext {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
-        let buf = BUFFER_ALLOC.write().unwrap().alloc(size, usage, mem_props); // TODO: free
+        let buf = self.buffer_alloc.alloc(size, usage, mem_props); // TODO: free
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists: {name}");
-        DebugMarker::name(name, buf);
+        debug_name(name, buf);
         buf
     }
 
     pub fn remove_buffer(&mut self, name: &str) {
         let buf = self.buffers.remove(name).unwrap();
-        BUFFER_ALLOC.write().unwrap().dealloc(buf);
+        self.buffer_alloc.dealloc(buf);
     }
 
     pub fn buffer(&self, name: &str) -> vk::Buffer {
@@ -268,14 +241,18 @@ impl RenderContext {
     }
 
     pub fn begin_cmd(&mut self, name: &str) -> vk::CommandBuffer {
+        let cmd = self.get_cmd(name);
+        if self.cmd_state.cmd == cmd {
+            return cmd;
+        }
         assert!(
             self.cmd_state.cmd == Default::default(),
-            "cmd has already begun: {name}"
+            "failed to begin cmd, other cmd is already begun: {name}"
         );
-        self.cmd_state.cmd = self.get_cmd(name);
+        self.cmd_state.cmd = cmd;
         self.cmd_state.cmd_name = name.to_string();
         unsafe {
-            DEVICE
+            gpu()
                 .begin_command_buffer(
                     self.cmd_state.cmd,
                     &vk::CommandBufferBeginInfo::default()
@@ -287,15 +264,14 @@ impl RenderContext {
     }
 
     pub fn end_cmd(&mut self) {
-        assert!(
-            self.cmd_state.cmd != Default::default(),
-            "can't end cmd that has not begun"
-        );
+        if self.cmd_state.cmd == Default::default() {
+            return;
+        }
         if self.cmd_state.render_area != Default::default() {
             self.end_render();
         }
         unsafe {
-            DEVICE.end_command_buffer(self.cmd()).unwrap();
+            gpu().end_command_buffer(self.cmd()).unwrap();
         }
         self.cmd_state = Default::default();
     }
@@ -337,7 +313,7 @@ impl RenderContext {
             self.end_cmd();
         }
         unsafe {
-            DEVICE
+            gpu()
                 .queue_submit(
                     queue,
                     &[vk::SubmitInfo::default()
@@ -357,7 +333,7 @@ impl RenderContext {
             extent: vk::Extent2D { width, height },
         };
         unsafe {
-            DEVICE.cmd_begin_rendering(
+            gpu().cmd_begin_rendering(
                 self.cmd(),
                 &vk::RenderingInfo::default()
                     .render_area(self.cmd_state.render_area)
@@ -384,44 +360,45 @@ impl RenderContext {
         self.cmd_state.render_area = Default::default();
         unsafe {
             if self.cmd_state.render_pass.render_pass == Default::default() {
-                DEVICE.cmd_end_rendering(self.cmd());
+                gpu().cmd_end_rendering(self.cmd());
             } else {
-                DEVICE.cmd_end_render_pass(self.cmd());
+                gpu().cmd_end_render_pass(self.cmd());
                 self.cmd_state.render_pass = Default::default();
             }
         }
     }
 
-    pub fn begin_rp(&mut self, name: &str, width: u32, height: u32, img_views: &[vk::ImageView]) {
-        self.cmd_state.render_area = vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0 },
-            extent: vk::Extent2D { width, height },
-        };
-        let img_cnt = SWAPCHAIN_IMAGES.read().unwrap().len();
-        let render_pass = self.render_passes.get_mut(name).unwrap();
-        if render_pass.framebuffer_size != self.cmd_state.render_area.extent
-            || render_pass.framebuffers.len() < img_cnt
-        {
-            render_pass.recreate_framebuffer(width, height, img_views, img_cnt);
-        }
-        self.cmd_state.render_pass = render_pass.clone();
-        let render_pass = &self.cmd_state.render_pass;
-        unsafe {
-            DEVICE.cmd_begin_render_pass(
-                self.cmd(),
-                &vk::RenderPassBeginInfo::default()
-                    .render_area(self.cmd_state.render_area)
-                    .clear_values(&[vk::ClearValue {
-                        color: vk::ClearColorValue {
-                            float32: [0.0, 0.0, 0.0, 0.0],
-                        },
-                    }])
-                    .render_pass(render_pass.render_pass)
-                    .framebuffer(render_pass.framebuffers[swap_img_idx()]),
-                vk::SubpassContents::INLINE,
-            );
-        }
-    }
+    // TODO:
+    // pub fn begin_rp(&mut self, name: &str, width: u32, height: u32, img_views: &[vk::ImageView]) {
+    //     self.cmd_state.render_area = vk::Rect2D {
+    //         offset: vk::Offset2D { x: 0, y: 0 },
+    //         extent: vk::Extent2D { width, height },
+    //     };
+    //     let img_cnt = SWAPCHAIN_IMAGES.read().unwrap().len();
+    //     let render_pass = self.render_passes.get_mut(name).unwrap();
+    //     if render_pass.framebuffer_size != self.cmd_state.render_area.extent
+    //         || render_pass.framebuffers.len() < img_cnt
+    //     {
+    //         render_pass.recreate_framebuffer(width, height, img_views, img_cnt);
+    //     }
+    //     self.cmd_state.render_pass = render_pass.clone();
+    //     let render_pass = &self.cmd_state.render_pass;
+    //     unsafe {
+    //         gpu().cmd_begin_render_pass(
+    //             self.cmd(),
+    //             &vk::RenderPassBeginInfo::default()
+    //                 .render_area(self.cmd_state.render_area)
+    //                 .clear_values(&[vk::ClearValue {
+    //                     color: vk::ClearColorValue {
+    //                         float32: [0.0, 0.0, 0.0, 0.0],
+    //                     },
+    //                 }])
+    //                 .render_pass(render_pass.render_pass)
+    //                 .framebuffer(render_pass.framebuffers[swap_img_idx()]),
+    //             vk::SubpassContents::INLINE,
+    //         );
+    //     }
+    // }
 
     pub fn bind_pipeline(&mut self, name: &str) {
         let pipeline_data = self.pipelines[name].clone();
@@ -431,7 +408,7 @@ impl RenderContext {
             let dyn_states = &self.cmd_state.pipeline_data.info.dynamic_states;
             let extent = self.cmd_state.render_area.extent;
             if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
-                DEVICE.cmd_set_viewport(
+                gpu().cmd_set_viewport(
                     self.cmd(),
                     0,
                     &[vk::Viewport {
@@ -445,7 +422,7 @@ impl RenderContext {
                 );
             }
             if dyn_states.contains(&vk::DynamicState::SCISSOR) {
-                DEVICE.cmd_set_scissor(
+                gpu().cmd_set_scissor(
                     self.cmd(),
                     0,
                     &[vk::Rect2D {
@@ -454,7 +431,7 @@ impl RenderContext {
                     }],
                 );
             }
-            DEVICE.cmd_bind_pipeline(
+            gpu().cmd_bind_pipeline(
                 self.cmd(),
                 self.cmd_state.pipeline_data.bind_point,
                 self.cmd_state.pipeline_data.pipeline,
@@ -465,7 +442,7 @@ impl RenderContext {
     pub fn bind_desc_set(&mut self, name: &str) {
         self.cmd_state.desc_sets = vec![self.desc_sets[name]];
         unsafe {
-            DEVICE.cmd_bind_descriptor_sets(
+            gpu().cmd_bind_descriptor_sets(
                 self.cmd(),
                 self.cmd_state.pipeline_data.bind_point,
                 self.cmd_state.pipeline_data.info.layout,
@@ -478,16 +455,237 @@ impl RenderContext {
 
     pub fn bind_vert(&self, name: &str) {
         unsafe {
-            DEVICE.cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
         }
     }
 
     pub fn draw(&self, vertices: u32, instances: u32) {
         unsafe {
-            DEVICE.cmd_draw(self.cmd(), vertices, instances, 0, 0);
+            gpu().cmd_draw(self.cmd(), vertices, instances, 0, 0);
+        }
+    }
+
+    pub fn transition_image_layout(
+        &self,
+        image: vk::Image,
+        old_layout: vk::ImageLayout,
+        new_layout: vk::ImageLayout,
+    ) {
+        let (src_stage, src_access_mask, dst_stage, dst_access_mask) =
+            match (old_layout, new_layout) {
+                (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    vk::AccessFlags2::NONE,
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                ),
+                (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
+                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                    vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                    vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                    vk::AccessFlags2::NONE,
+                ),
+                _ => panic!("Unsupported layout transition!"),
+            };
+        unsafe {
+            gpu().cmd_pipeline_barrier2(
+                self.cmd(),
+                &vk::DependencyInfo::default().image_memory_barriers(&[
+                    vk::ImageMemoryBarrier2::default()
+                        .dst_access_mask(dst_access_mask)
+                        .src_access_mask(src_access_mask)
+                        .src_stage_mask(src_stage)
+                        .dst_stage_mask(dst_stage)
+                        .image(image)
+                        .subresource_range(
+                            vk::ImageSubresourceRange::default()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .layer_count(1)
+                                .level_count(1),
+                        )
+                        .old_layout(old_layout)
+                        .new_layout(new_layout),
+                ]),
+            );
+        }
+    }
+
+    pub fn copy_buffer(&mut self, src_buffer: vk::Buffer, dst_buffer: vk::Buffer) {
+        let cmd = self.begin_cmd("init");
+        let buf_size = self.buffer_alloc.get_size(src_buffer) as usize;
+        assert_eq!(
+            self.buffer_alloc.get_size(src_buffer),
+            self.buffer_alloc.get_size(dst_buffer)
+        );
+        unsafe {
+            let copy_region = vk::BufferCopy::default().size(buf_size as u64);
+            gpu().cmd_copy_buffer(cmd, src_buffer, dst_buffer, &[copy_region]);
+        }
+        self.end_cmd();
+    }
+
+    pub fn write_buffer<T>(&mut self, buffer: vk::Buffer, data: &T) {
+        let buf_size = self.buffer_alloc.get_size(buffer) as usize;
+        assert_eq!(buf_size, size_of_val(data));
+        if self.buffer_alloc.is_mappable(buffer) {
+            self.buffer_alloc.write_mapped(buffer, data);
+        } else {
+            let staging_buffer = self.buffer_alloc.alloc_staging_src(data);
+            self.copy_buffer(staging_buffer, buffer);
+            self.buffer_alloc.dealloc(staging_buffer);
+        }
+    }
+
+    pub fn read_buffer<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
+        let buf_size = self.buffer_alloc.get_size(buffer) as usize;
+        assert_eq!(buf_size, size_of_val(data));
+        if self.buffer_alloc.is_mappable(buffer) {
+            self.buffer_alloc.read_mapped(buffer, data);
+        } else {
+            let staging_buffer = self.buffer_alloc.alloc_staging_dst(data);
+            self.copy_buffer(buffer, staging_buffer);
+            self.buffer_alloc.read_mapped(staging_buffer, data);
+            self.buffer_alloc.dealloc(staging_buffer);
         }
     }
 }
+
+pub struct DebugScope<'a> {
+    render_ctx: &'a RenderContext,
+}
+
+impl<'a> DebugScope<'a> {
+    fn new(render_ctx: &'a RenderContext, name: &str) -> Self {
+        render_ctx.debug_begin(name);
+        Self { render_ctx }
+    }
+    fn new_colored(render_ctx: &'a RenderContext, name: &str, color: [f32; 4]) -> Self {
+        render_ctx.debug_begin_colored(name, color);
+        Self { render_ctx }
+    }
+}
+
+impl Drop for DebugScope<'_> {
+    fn drop(&mut self) {
+        self.render_ctx.debug_end();
+    }
+}
+
+#[macro_export]
+macro_rules! debug_scope {
+    ($name:expr) => {
+        let _d = DebugScope::new($name);
+    };
+    ($name:expr, [$r:literal, $g:literal, $b:literal, $a:literal]) => {
+        let _d = DebugScope::new($name, [r, g, b, a]);
+    };
+}
+
+#[cfg(debug_assertions)]
+impl RenderContext {
+    pub fn debug_begin(&self, label: &str) {
+        unsafe {
+            DEBUG_UTILS_LOADER.cmd_begin_debug_utils_label(
+                self.cmd(),
+                &vk::DebugUtilsLabelEXT::default()
+                    .label_name(&std::ffi::CString::new(label).unwrap())
+                    .color([1.0, 1.0, 1.0, 1.0]),
+            )
+        }
+    }
+
+    pub fn debug_begin_colored(&self, label: &str, color: [f32; 4]) {
+        unsafe {
+            DEBUG_UTILS_LOADER.cmd_begin_debug_utils_label(
+                self.cmd(),
+                &vk::DebugUtilsLabelEXT::default()
+                    .label_name(&std::ffi::CString::new(label).unwrap())
+                    .color(color),
+            )
+        }
+    }
+
+    pub fn debug_end(&self) {
+        unsafe { DEBUG_UTILS_LOADER.cmd_end_debug_utils_label(self.cmd()) }
+    }
+
+    pub fn debug_insert(&self, label: &str) {
+        unsafe {
+            DEBUG_UTILS_LOADER.cmd_insert_debug_utils_label(
+                self.cmd(),
+                &vk::DebugUtilsLabelEXT::default()
+                    .label_name(&std::ffi::CString::new(label).unwrap())
+                    .color([1.0, 1.0, 1.0, 1.0]),
+            )
+        }
+    }
+
+    pub fn debug_insert_colored(&self, label: &str, color: [f32; 4]) {
+        unsafe {
+            DEBUG_UTILS_LOADER.cmd_insert_debug_utils_label(
+                self.cmd(),
+                &vk::DebugUtilsLabelEXT::default()
+                    .label_name(&std::ffi::CString::new(label).unwrap())
+                    .color(color),
+            )
+        }
+    }
+
+    pub fn debug_scope<'a>(&'a self, name: &str) -> DebugScope<'a> {
+        DebugScope::new(self, name)
+    }
+
+    pub fn debug_scope_colored<'a>(&'a self, name: &str, color: [f32; 4]) -> DebugScope<'a> {
+        DebugScope::new_colored(self, name, color)
+    }
+}
+
+#[cfg(not(debug_assertions))]
+impl RenderContext {
+    pub fn debug_begin_colored(&self, _label: &str, _color: [f32; 4]) {}
+    pub fn debug_begin(&self, _label: &str) {}
+    pub fn debug_end(&self) {}
+    pub fn debug_insert(&self, _label: &str) {}
+    pub fn debug_insert_colored(&self, _label: &str, _color: [f32; 4]) {}
+    pub fn debug_scope<'a>(&'a self, name: &str) -> DebugScope<'a> {
+        DebugScope::new(self, name)
+    }
+    pub fn debug_scope_colored<'a>(&'a self, name: &str, color: [f32; 4]) -> DebugScope<'a> {
+        DebugScope::new_colored(self, name, color)
+    }
+}
+
+#[cfg(debug_assertions)]
+pub fn debug_name<T: vk::Handle>(name: &str, obj: T) {
+    unsafe {
+        DEBUG_UTILS_LOADER
+            .set_debug_utils_object_name(
+                &vk::DebugUtilsObjectNameInfoEXT::default()
+                    .object_name(&std::ffi::CString::new(name).unwrap())
+                    .object_handle(obj),
+            )
+            .unwrap()
+    }
+}
+
+#[cfg(debug_assertions)]
+pub fn debug_tag<T: vk::Handle>(name: u64, tag: &[u8], obj: T) {
+    unsafe {
+        DEBUG_UTILS_LOADER
+            .set_debug_utils_object_tag(
+                &vk::DebugUtilsObjectTagInfoEXT::default()
+                    .tag_name(name)
+                    .tag(tag)
+                    .object_handle(obj),
+            )
+            .unwrap()
+    }
+}
+
+#[cfg(not(debug_assertions))]
+pub fn debug_name<T: vk::Handle>(_name: &str, _obj: T) {}
+#[cfg(not(debug_assertions))]
+pub fn debug_tag<T: vk::Handle>(_name: u64, _tag: &[u8], _obj: T) {}
 
 pub fn write_desc_set(
     desc_set: vk::DescriptorSet,
@@ -497,7 +695,7 @@ pub fn write_desc_set(
     binding: u32,
 ) {
     unsafe {
-        DEVICE.update_descriptor_sets(
+        gpu().update_descriptor_sets(
             &[vk::WriteDescriptorSet::default()
                 .buffer_info(&[vk::DescriptorBufferInfo::default()
                     .buffer(buffer)

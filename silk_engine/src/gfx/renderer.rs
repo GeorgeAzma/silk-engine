@@ -1,13 +1,12 @@
+use std::sync::{Arc, Mutex};
+
 use ash::vk;
 
-use crate::{
-    acquire_img, cur_swap_img, cur_swap_img_view, recreate_swapchain, surf_format, swap_img_idx,
-    swap_size, SWAPCHAIN, SWAPCHAIN_LOADER,
-};
+use crate::{err, window::WindowContext};
 
 use super::{
-    ctx, ctxr, cur_cmd, transition_image_layout, vulkan::pipeline::GraphicsPipeline,
-    write_desc_set_uniform_buffer_whole, DEVICE, QUEUE,
+    gpu, vulkan::pipeline::GraphicsPipeline, write_desc_set_uniform_buffer_whole, RenderContext,
+    QUEUE,
 };
 
 #[derive(Clone, Copy)]
@@ -21,17 +20,17 @@ impl Frame {
     fn new() -> Self {
         Self {
             img_available: unsafe {
-                DEVICE
+                gpu()
                     .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                     .unwrap()
             },
             render_done: unsafe {
-                DEVICE
+                gpu()
                     .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                     .unwrap()
             },
             prev_frame_done: unsafe {
-                DEVICE
+                gpu()
                     .create_fence(
                         &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
                         None,
@@ -43,10 +42,10 @@ impl Frame {
 
     fn wait(&self) {
         unsafe {
-            DEVICE
+            gpu()
                 .wait_for_fences(&[self.prev_frame_done], true, u64::MAX)
                 .unwrap();
-            DEVICE.reset_fences(&[self.prev_frame_done]).unwrap();
+            gpu().reset_fences(&[self.prev_frame_done]).unwrap();
         }
     }
 }
@@ -67,43 +66,56 @@ pub struct GlobalUniform {
 }
 
 pub struct Renderer {
+    render_ctx: Arc<Mutex<RenderContext>>,
+    window_ctx: Arc<Mutex<WindowContext>>,
     frames: [Frame; Self::FRAMES],
     current_frame: usize,
-}
-
-impl Default for Renderer {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl Renderer {
     const FRAMES: usize = 1;
 
-    pub(crate) fn new() -> Self {
-        let ctx = &mut *ctx();
-        ctx.add_shader("shader");
-        ctx.add_pipeline(
-            "pipeline",
-            "shader",
-            GraphicsPipeline::new()
-                .dyn_size()
-                .color_attachment(surf_format())
-                .blend_attachment_empty(),
-            &[],
-        );
-        let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
-        ctx.add_cmds_numbered("render", Self::FRAMES);
-        let uniform_buffer = ctx.add_buffer(
-            "global uniform",
-            size_of::<GlobalUniform>() as u64,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        );
+    pub(crate) fn new(
+        render_ctx: Arc<Mutex<RenderContext>>,
+        window_ctx: Arc<Mutex<WindowContext>>,
+    ) -> Self {
+        {
+            std::panic::set_hook(Box::new(|panic_info| {
+                if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+                    err!("panic occurred: {s:?}");
+                } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+                    err!("panic occurred: {s:?}");
+                } else {
+                    err!("panicked");
+                }
+            }));
+            let mut ctx = render_ctx.lock().unwrap();
+            ctx.add_shader("shader");
+            ctx.add_pipeline(
+                "pipeline",
+                "shader",
+                GraphicsPipeline::new()
+                    .dyn_size()
+                    .color_attachment(window_ctx.lock().unwrap().surface_format.format)
+                    .blend_attachment_empty(),
+                &[],
+            );
+            let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
 
-        write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
+            ctx.add_cmds_numbered("render", Self::FRAMES);
+            ctx.add_cmd("init");
 
+            let uniform_buffer = ctx.add_buffer(
+                "global uniform",
+                size_of::<GlobalUniform>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
+            write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
+        }
         Self {
+            render_ctx,
+            window_ctx,
             frames: [Frame::default(); Self::FRAMES],
             current_frame: 0,
         }
@@ -112,39 +124,46 @@ impl Renderer {
     pub(crate) fn begin_render(&mut self) {
         let frame = &self.frames[self.current_frame];
         frame.wait();
-        acquire_img(frame.img_available);
+        let mut window_ctx = self.window_ctx.lock().unwrap();
+        window_ctx.acquire_img(frame.img_available);
 
+        let mut ctx = self.render_ctx.lock().unwrap();
         let cmd_name = format!("render{}", self.current_frame);
-        ctx().reset_cmd(&cmd_name);
-        ctx().begin_cmd(&cmd_name);
-        transition_image_layout(
-            cur_swap_img(),
+        ctx.reset_cmd(&cmd_name);
+        ctx.begin_cmd(&cmd_name);
+        ctx.transition_image_layout(
+            window_ctx.cur_img(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         );
 
-        ctx().begin_render(swap_size().width, swap_size().height, cur_swap_img_view());
+        ctx.begin_render(
+            window_ctx.swapchain_size.width,
+            window_ctx.swapchain_size.height,
+            window_ctx.cur_img_view(),
+        );
 
-        ctx().bind_pipeline("pipeline");
-        ctx().bind_desc_set("global uniform");
-        ctx().draw(3, 1);
+        ctx.bind_pipeline("pipeline");
+        ctx.bind_desc_set("global uniform");
+        ctx.draw(3, 1);
     }
 
     pub(crate) fn end_render(&mut self) {
-        let cmd_name = ctxr().cmd_name().to_owned();
+        let mut ctx = self.render_ctx.lock().unwrap();
+        ctx.end_render();
 
-        ctx().end_render();
-
-        transition_image_layout(
-            cur_swap_img(),
+        let mut window_ctx = self.window_ctx.lock().unwrap();
+        ctx.transition_image_layout(
+            window_ctx.cur_img(),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
         );
-        ctx().end_cmd();
+        let cmd_name = ctx.cmd_name().to_owned();
+        ctx.end_cmd();
 
         // wait(image_available), submit cmd, signal(render_finished)
         let frame = &self.frames[self.current_frame];
-        ctx().submit_cmd(
+        ctx.submit_cmd(
             &cmd_name,
             *QUEUE,
             &[frame.img_available],
@@ -153,29 +172,15 @@ impl Renderer {
             frame.prev_frame_done,
         );
 
-        // wait(render_finished), present rendered image
-        unsafe {
-            SWAPCHAIN_LOADER
-                .queue_present(
-                    *QUEUE,
-                    &vk::PresentInfoKHR::default()
-                        .wait_semaphores(&[frame.render_done])
-                        .swapchains(&[*SWAPCHAIN.read().unwrap()])
-                        .image_indices(&[swap_img_idx() as u32]),
-                )
-                .unwrap_or_else(|_| {
-                    recreate_swapchain();
-                    false
-                })
-        };
+        window_ctx.present(&[frame.render_done]);
 
         // self.current_frame = (self.current_frame + 1) % Self::FRAMES;
     }
 
     pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
         unsafe {
-            DEVICE.cmd_clear_color_image(
-                cur_cmd(),
+            gpu().cmd_clear_color_image(
+                self.render_ctx.lock().unwrap().cmd(),
                 image,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 &vk::ClearColorValue { float32: color },

@@ -1,4 +1,4 @@
-use super::DEVICE;
+use super::gpu;
 use ash::vk;
 
 // TODO: manage DSLs and descriptor pools, free them together
@@ -31,7 +31,7 @@ impl DescAlloc {
             [dps!(UNIFORM_BUFFER, 32), dps!(STORAGE_BUFFER, 16)];
         Self {
             pool: unsafe {
-                DEVICE
+                gpu()
                     .create_descriptor_pool(
                         &vk::DescriptorPoolCreateInfo::default()
                             .max_sets(MAX_SETS)
@@ -47,7 +47,7 @@ impl DescAlloc {
         let alloc_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(self.pool)
             .set_layouts(dsls);
-        let desc = unsafe { DEVICE.allocate_descriptor_sets(&alloc_info) };
+        let desc = unsafe { gpu().allocate_descriptor_sets(&alloc_info) };
         match desc {
             Ok(descs) => descs,
             Err(e) => match e {

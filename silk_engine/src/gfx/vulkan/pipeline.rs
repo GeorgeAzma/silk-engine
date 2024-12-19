@@ -290,7 +290,7 @@ impl GraphicsPipeline {
         }
         let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
         let pipeline_cache = unsafe {
-            DEVICE
+            gpu()
                 .create_pipeline_cache(
                     &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
                     None,
@@ -298,18 +298,18 @@ impl GraphicsPipeline {
                 .unwrap_or_default()
         };
         let graphics_pipelines = unsafe {
-            DEVICE
+            gpu()
                 .create_graphics_pipelines(pipeline_cache, &[info], None)
                 .unwrap()
         };
         std::fs::write(pipeline_cache_path(), unsafe {
-            DEVICE
+            gpu()
                 .get_pipeline_cache_data(pipeline_cache)
                 .unwrap_or_default()
         })
         .unwrap_or_default();
         unsafe {
-            DEVICE.destroy_pipeline_cache(pipeline_cache, None);
+            gpu().destroy_pipeline_cache(pipeline_cache, None);
         }
         let gp = graphics_pipelines[0];
         #[cfg(debug_assertions)]
@@ -381,7 +381,7 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
     let module = shader.create_module(); // TODO: destroy
     let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
     let pipeline_cache = unsafe {
-        DEVICE
+        gpu()
             .create_pipeline_cache(
                 &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
                 None,
@@ -389,7 +389,7 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
             .unwrap_or_default()
     };
     let compute_pipeline = unsafe {
-        DEVICE
+        gpu()
             .create_compute_pipelines(
                 pipeline_cache,
                 &[vk::ComputePipelineCreateInfo::default().stage(
@@ -406,13 +406,13 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
             .unwrap_or_default()
     };
     std::fs::write(pipeline_cache_path(), unsafe {
-        DEVICE
+        gpu()
             .get_pipeline_cache_data(pipeline_cache)
             .unwrap_or_default()
     })
     .unwrap_or_default();
     unsafe {
-        DEVICE.destroy_pipeline_cache(pipeline_cache, None);
+        gpu().destroy_pipeline_cache(pipeline_cache, None);
     }
     compute_pipeline[0]
 }

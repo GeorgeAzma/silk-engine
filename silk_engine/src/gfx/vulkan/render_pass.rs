@@ -1,6 +1,6 @@
 use ash::vk;
 
-use super::DEVICE;
+use super::gpu;
 
 #[derive(Default, Clone)]
 pub struct RenderPass {
@@ -51,11 +51,11 @@ impl RenderPass {
     ) {
         unsafe {
             for &fb in self.framebuffers.iter() {
-                DEVICE.destroy_framebuffer(fb, None);
+                gpu().destroy_framebuffer(fb, None);
             }
             self.framebuffers.resize(count, vk::Framebuffer::null());
             for i in 0..count {
-                self.framebuffers[i] = DEVICE
+                self.framebuffers[i] = gpu()
                     .create_framebuffer(
                         &vk::FramebufferCreateInfo::default()
                             .attachment_count(self.attachment_descs.len() as u32)
@@ -74,7 +74,7 @@ impl RenderPass {
 
     pub fn build(&mut self) -> vk::RenderPass {
         unsafe {
-            self.render_pass = DEVICE
+            self.render_pass = gpu()
                 .create_render_pass(
                     &vk::RenderPassCreateInfo::default()
                         .attachments(&self.attachment_descs)
@@ -107,9 +107,9 @@ impl RenderPass {
     pub fn destroy(self) {
         unsafe {
             for fb in self.framebuffers {
-                DEVICE.destroy_framebuffer(fb, None);
+                gpu().destroy_framebuffer(fb, None);
             }
-            DEVICE.destroy_render_pass(self.render_pass, None);
+            gpu().destroy_render_pass(self.render_pass, None);
         }
     }
 }
