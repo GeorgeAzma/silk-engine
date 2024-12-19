@@ -1,23 +1,4 @@
-use crate::*;
-
-/*
-Renderer:
-- render graph ?? shader technique with passes
-
-Learn and write all rendering techniques
-Roadmap:
-- load and render 3D model
-- do simple BRDF lighting
-- 3D animation
-
-
-Render Graph:
-- Pass(resources, targets) -> modified_targets
-- pass may depend on other pass's output resource
-Resource:
-- image
-- buffer
-*/
+use silk_engine::*;
 
 pub struct MyApp {
     app: Arc<AppContext<Self>>,
@@ -44,4 +25,8 @@ impl App for MyApp {
     fn render(&mut self) {}
 
     fn event(&mut self, _e: Event) {}
+}
+
+fn main() {
+    Engine::<MyApp>::new();
 }

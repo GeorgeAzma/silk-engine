@@ -80,7 +80,7 @@ impl Default for Renderer {
 impl Renderer {
     const FRAMES: usize = 1;
 
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let ctx = &mut *ctx();
         ctx.add_shader("shader");
         ctx.add_pipeline(
@@ -109,7 +109,7 @@ impl Renderer {
         }
     }
 
-    pub fn begin_render(&mut self) {
+    pub(crate) fn begin_render(&mut self) {
         let frame = &self.frames[self.current_frame];
         frame.wait();
         acquire_img(frame.img_available);
@@ -130,7 +130,7 @@ impl Renderer {
         ctx().draw(3, 1);
     }
 
-    pub fn end_render(&mut self) {
+    pub(crate) fn end_render(&mut self) {
         let cmd_name = ctxr().cmd_name().to_owned();
 
         ctx().end_render();

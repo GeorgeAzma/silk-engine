@@ -8,8 +8,8 @@ pub use std::{
 };
 
 use lazy_static::lazy_static;
+use winit::window::WindowAttributes;
 use winit::window::WindowId;
-use winit::{error::EventLoopError, window::WindowAttributes};
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 mod input;
@@ -22,8 +22,6 @@ pub use gfx::*;
 mod util;
 mod window;
 pub use window::*;
-mod app;
-use app::MyApp;
 
 pub trait App: Sized {
     fn new(app: Arc<AppContext<Self>>) -> Self;
@@ -34,17 +32,17 @@ pub trait App: Sized {
 
 pub struct AppContext<T: App> {
     my_app: Option<T>,
-    window: Arc<Window>,
-    width: u32,
-    height: u32,
-    start_time: std::time::Instant,
-    time: f32,
-    dt: f32,
-    frame: u32,
+    pub window: Arc<Window>,
+    pub width: u32,
+    pub height: u32,
+    pub start_time: std::time::Instant,
+    pub time: f32,
+    pub dt: f32,
+    pub frame: u32,
     input: Input,
-    mouse_x: f32,
-    mouse_y: f32,
-    mouse_scroll: f32,
+    pub mouse_x: f32,
+    pub mouse_y: f32,
+    pub mouse_scroll: f32,
     renderer: Renderer,
 }
 
@@ -157,12 +155,12 @@ impl<T: App> AppContext<T> {
     expose!(input.focused() -> bool);
 }
 
-struct Engine<T: App> {
+pub struct Engine<T: App> {
     app: Option<*mut AppContext<T>>,
 }
 
 impl<T: App> Engine<T> {
-    fn new() -> Engine<T> {
+    pub fn new() -> Engine<T> {
         let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
         event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         let mut engine = Self { app: None };
@@ -191,8 +189,4 @@ impl<T: App> winit::application::ApplicationHandler for Engine<T> {
             app.event(event_loop, event, window_id);
         }
     }
-}
-
-fn main() {
-    Engine::<MyApp>::new();
 }

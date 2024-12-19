@@ -88,11 +88,12 @@ pub fn backtrace_callers() -> Vec<String> {
         .replace("\\", "/");
     backtrace = backtrace
         .lines()
-        .filter(|l| l.contains("at ./src/"))
+        .filter(|l| l.contains("at ./") && l.contains("/src/"))
         .collect();
     let mut callers: Vec<String> = backtrace
         .trim()
         .replace("at ./", "")
+        .replace("src/", "")
         .split_whitespace()
         .filter_map(|s| {
             if s.is_empty() {
