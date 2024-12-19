@@ -5,8 +5,8 @@ use ash::vk;
 use crate::{err, window::WindowContext};
 
 use super::{
-    gpu, vulkan::pipeline::GraphicsPipeline, write_desc_set_uniform_buffer_whole, RenderContext,
-    QUEUE,
+    gpu, queue, vulkan::pipeline::GraphicsPipeline, write_desc_set_uniform_buffer_whole,
+    RenderContext,
 };
 
 #[derive(Clone, Copy)]
@@ -165,7 +165,7 @@ impl Renderer {
         let frame = &self.frames[self.current_frame];
         ctx.submit_cmd(
             &cmd_name,
-            *QUEUE,
+            queue(),
             &[frame.img_available],
             &[frame.render_done],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],

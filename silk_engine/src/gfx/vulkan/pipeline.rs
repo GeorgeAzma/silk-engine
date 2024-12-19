@@ -5,6 +5,19 @@ const fn pipeline_cache_path() -> &'static str {
     "res/cache/pipeline_cache"
 }
 
+#[cfg(debug_assertions)]
+static PIPELINE_EXEC_PROPS_LOADER: LazyLock<ash::khr::pipeline_executable_properties::Device> =
+    LazyLock::new(|| {
+        if cfg!(debug_assertions) {
+            ash::khr::pipeline_executable_properties::Device::new(instance(), gpu())
+        } else {
+            #[allow(invalid_value)]
+            unsafe {
+                std::mem::zeroed()
+            }
+        }
+    });
+
 #[derive(Default, Clone)]
 pub struct PipelineStageInfo {
     pub stage: vk::ShaderStageFlags,

@@ -1,9 +1,9 @@
 use crate::debug_name;
 use crate::gpu_idle;
 use crate::physical_gpu;
+use crate::queue;
 use crate::scope_time;
-use crate::QUEUE;
-use crate::{gpu, ENTRY, INSTANCE};
+use crate::{entry, gpu, instance};
 use ash::khr;
 use ash::vk;
 use winit::{
@@ -26,12 +26,12 @@ pub struct WindowContext {
 
 impl WindowContext {
     pub fn new(window: &Window) -> Self {
-        let surface_loader = khr::surface::Instance::new(&ENTRY, &INSTANCE);
-        let surface_caps2 = khr::get_surface_capabilities2::Instance::new(&ENTRY, &INSTANCE);
+        let surface_loader = khr::surface::Instance::new(entry(), instance());
+        let surface_caps2 = khr::get_surface_capabilities2::Instance::new(entry(), instance());
         let surface = unsafe {
             ash_window::create_surface(
-                &ENTRY,
-                &INSTANCE,
+                entry(),
+                instance(),
                 window.display_handle().unwrap().as_raw(),
                 window.window_handle().unwrap().as_raw(),
                 None,
@@ -56,7 +56,7 @@ impl WindowContext {
                 .get_physical_device_surface_present_modes(physical_gpu(), surface)
                 .unwrap()
         };
-        let swapchain_loader = khr::swapchain::Device::new(&INSTANCE, gpu());
+        let swapchain_loader = khr::swapchain::Device::new(instance(), gpu());
         Self {
             surface_caps2_loader: surface_caps2,
             surface,
@@ -204,7 +204,7 @@ impl WindowContext {
         unsafe {
             self.swapchain_loader
                 .queue_present(
-                    *QUEUE,
+                    queue(),
                     &vk::PresentInfoKHR::default()
                         .wait_semaphores(wait)
                         .swapchains(&[self.swapchain])

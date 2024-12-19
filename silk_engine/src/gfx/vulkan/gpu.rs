@@ -1,5 +1,6 @@
-use super::config::*;
-use crate::{INSTANCE, QUEUE_FAMILY_INDEX};
+use crate::queue_family_index;
+
+use super::{config::*, instance};
 use ash::vk;
 use std::{ffi::CString, sync::LazyLock};
 
@@ -8,30 +9,34 @@ static GPU_STUFF: LazyLock<(
     vk::PhysicalDeviceProperties,
     vk::PhysicalDeviceFeatures,
 )> = LazyLock::new(|| {
-    let (gpu, gpu_props) = unsafe { INSTANCE.enumerate_physical_devices().expect("No GPU found") }
-        .iter()
-        .map(|&gpu| {
-            let mut props = vk::PhysicalDeviceProperties2::default();
-            unsafe { INSTANCE.get_physical_device_properties2(gpu, &mut props) };
-            let props = props.properties;
-            let mut score = 0;
-            score += (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU) as u32 * 1_000_000;
-            score += props.limits.max_image_dimension2_d;
-            score += props.limits.max_uniform_buffer_range / 64;
-            score += props.limits.max_push_constants_size / 4;
-            score += props.limits.max_compute_shared_memory_size / 16;
-            score += props.limits.max_compute_work_group_invocations;
-            (gpu, props, score)
-        })
-        .max_by_key(|(_, _, score)| *score)
-        .map(|(gpu, props, _)| (gpu, props))
-        .unwrap();
+    let (gpu, gpu_props) = unsafe {
+        instance()
+            .enumerate_physical_devices()
+            .expect("No GPU found")
+    }
+    .iter()
+    .map(|&gpu| {
+        let mut props = vk::PhysicalDeviceProperties2::default();
+        unsafe { instance().get_physical_device_properties2(gpu, &mut props) };
+        let props = props.properties;
+        let mut score = 0;
+        score += (props.device_type == vk::PhysicalDeviceType::DISCRETE_GPU) as u32 * 1_000_000;
+        score += props.limits.max_image_dimension2_d;
+        score += props.limits.max_uniform_buffer_range / 64;
+        score += props.limits.max_push_constants_size / 4;
+        score += props.limits.max_compute_shared_memory_size / 16;
+        score += props.limits.max_compute_work_group_invocations;
+        (gpu, props, score)
+    })
+    .max_by_key(|(_, _, score)| *score)
+    .map(|(gpu, props, _)| (gpu, props))
+    .unwrap();
     let mut features = vk::PhysicalDeviceFeatures2::default();
-    unsafe { INSTANCE.get_physical_device_features2(gpu, &mut features) };
+    unsafe { instance().get_physical_device_features2(gpu, &mut features) };
     (gpu, gpu_props, features.features)
 });
 static GPU_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe {
-    INSTANCE
+    instance()
         .enumerate_device_extension_properties(physical_gpu())
         .unwrap_or_default()
         .into_iter()
@@ -40,7 +45,7 @@ static GPU_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe {
 });
 static GPU_MEMORY_PROPS: LazyLock<vk::PhysicalDeviceMemoryProperties> = LazyLock::new(|| unsafe {
     let mut mem_props = vk::PhysicalDeviceMemoryProperties2::default();
-    INSTANCE.get_physical_device_memory_properties2(physical_gpu(), &mut mem_props);
+    instance().get_physical_device_memory_properties2(physical_gpu(), &mut mem_props);
     mem_props.memory_properties
 });
 static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
@@ -82,7 +87,7 @@ static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
         .collect();
     let queue_priorities = [1.0];
     let queue_infos = [vk::DeviceQueueCreateInfo::default()
-        .queue_family_index(*QUEUE_FAMILY_INDEX)
+        .queue_family_index(queue_family_index())
         .queue_priorities(&queue_priorities)];
     let sampler_anisotropy = vk::PhysicalDeviceFeatures::default().sampler_anisotropy(true);
     let info = vk::DeviceCreateInfo::default()
@@ -93,7 +98,7 @@ static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
         .push_next(&mut sync2);
     #[cfg(debug_assertions)]
     let info = info.push_next(&mut pipeline_exec_props);
-    INSTANCE
+    instance()
         .create_device(physical_gpu(), &info, None)
         .expect("Failed to create VkDevice")
 });

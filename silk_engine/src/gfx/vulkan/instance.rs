@@ -76,7 +76,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     vk::FALSE
 }
 
-pub static INSTANCE_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe {
+static INSTANCE_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe {
     ENTRY
         .enumerate_instance_extension_properties(None)
         .unwrap_or_default()
@@ -85,7 +85,7 @@ pub static INSTANCE_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe
         .collect()
 });
 
-pub static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
+static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
     let app_info = vk::ApplicationInfo::default()
         .api_version(vk::API_VERSION_1_3)
         .application_name(CStr::from_bytes_with_nul(b"silky\0").unwrap())
@@ -172,3 +172,7 @@ pub static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
 
     instance
 });
+
+pub fn instance() -> &'static ash::Instance {
+    &INSTANCE
+}

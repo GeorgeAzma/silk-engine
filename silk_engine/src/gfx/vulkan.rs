@@ -1,6 +1,5 @@
 use std::sync::LazyLock;
 
-use ash::khr;
 pub use ash::vk;
 mod buffer_alloc;
 pub(super) use buffer_alloc::BufferAlloc;
@@ -22,21 +21,22 @@ pub use pipeline::*;
 mod render_pass;
 pub(super) use render_pass::RenderPass;
 
-pub static ENTRY: LazyLock<ash::Entry> =
+static ENTRY: LazyLock<ash::Entry> =
     LazyLock::new(|| unsafe { ash::Entry::load().expect("Failed to load Vulkan") });
-pub static QUEUE_FAMILIES: LazyLock<Vec<vk::QueueFamilyProperties>> = LazyLock::new(|| unsafe {
+static QUEUE_FAMILY_PROPS: LazyLock<Vec<vk::QueueFamilyProperties>> = LazyLock::new(|| unsafe {
     let queue_family_props_len =
-        INSTANCE.get_physical_device_queue_family_properties2_len(physical_gpu());
+        instance().get_physical_device_queue_family_properties2_len(physical_gpu());
     let mut queue_family_props =
         vec![vk::QueueFamilyProperties2::default(); queue_family_props_len];
-    INSTANCE.get_physical_device_queue_family_properties2(physical_gpu(), &mut queue_family_props);
+    instance()
+        .get_physical_device_queue_family_properties2(physical_gpu(), &mut queue_family_props);
     queue_family_props
         .into_iter()
         .map(|qfp| qfp.queue_family_properties)
         .collect()
 });
-pub static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
-    QUEUE_FAMILIES
+static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
+    QUEUE_FAMILY_PROPS
         .iter()
         .position(|&queue_family_props| {
             queue_family_props.queue_flags.contains(
@@ -45,19 +45,8 @@ pub static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
         })
         .unwrap_or_default() as u32
 });
-pub static QUEUE: LazyLock<vk::Queue> =
+static QUEUE: LazyLock<vk::Queue> =
     LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
-pub static PIPELINE_EXEC_PROPS_LOADER: LazyLock<khr::pipeline_executable_properties::Device> =
-    LazyLock::new(|| {
-        if cfg!(debug_assertions) {
-            khr::pipeline_executable_properties::Device::new(&INSTANCE, gpu())
-        } else {
-            #[allow(invalid_value)]
-            unsafe {
-                std::mem::zeroed()
-            }
-        }
-    });
 
 pub fn gpu_idle() {
     unsafe { gpu().device_wait_idle().unwrap() };
@@ -65,6 +54,18 @@ pub fn gpu_idle() {
 
 pub fn queue_idle() {
     unsafe { gpu().queue_wait_idle(*QUEUE).unwrap() };
+}
+
+pub fn entry() -> &'static ash::Entry {
+    &ENTRY
+}
+
+pub fn queue_family_index() -> u32 {
+    *QUEUE_FAMILY_INDEX
+}
+
+pub fn queue() -> vk::Queue {
+    *QUEUE
 }
 
 pub fn format_size(format: vk::Format) -> u32 {
