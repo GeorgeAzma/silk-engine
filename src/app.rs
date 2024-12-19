@@ -20,15 +20,15 @@ Resource:
 */
 
 pub struct MyApp {
-    app: Arc<App>,
+    app: Arc<AppContext<Self>>,
 }
 
-impl MyApp {
-    pub fn new(app: Arc<App>) -> Self {
+impl App for MyApp {
+    fn new(app: Arc<AppContext<Self>>) -> Self {
         Self { app }
     }
 
-    pub fn update(&mut self) {
+    fn update(&mut self) {
         if self.app.frame % 512 == 0 {
             println!(
                 "{:?} ({:.0} fps)",
@@ -41,7 +41,7 @@ impl MyApp {
         }
     }
 
-    pub fn render(&mut self) {}
+    fn render(&mut self) {}
 
-    pub fn event(&mut self, _e: Event) {}
+    fn event(&mut self, _e: Event) {}
 }

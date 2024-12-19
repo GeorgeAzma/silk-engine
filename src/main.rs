@@ -25,8 +25,15 @@ pub use window::*;
 mod app;
 use app::MyApp;
 
-pub struct App {
-    my_app: Option<MyApp>,
+pub trait App: Sized {
+    fn new(app: Arc<AppContext<Self>>) -> Self;
+    fn update(&mut self);
+    fn render(&mut self);
+    fn event(&mut self, _e: Event) {}
+}
+
+pub struct AppContext<T: App> {
+    my_app: Option<T>,
     window: Arc<Window>,
     width: u32,
     height: u32,
@@ -41,7 +48,7 @@ pub struct App {
     renderer: Renderer,
 }
 
-impl App {
+impl<T: App> AppContext<T> {
     pub fn new() -> *mut Self {
         scope_time!("init");
         let window = WINDOW.read().unwrap().as_ref().unwrap().clone();
@@ -64,7 +71,7 @@ impl App {
             renderer: Renderer::new(),
         });
         let app_mut = ptr::from_ref(app.as_ref()).cast_mut();
-        unsafe { app_mut.as_mut() }.unwrap().my_app = Some(MyApp::new(app.clone()));
+        unsafe { app_mut.as_mut() }.unwrap().my_app = Some(T::new(app.clone()));
         app_mut
     }
 
@@ -140,7 +147,7 @@ impl App {
         self.window.request_redraw();
     }
 
-    fn my_app(&mut self) -> &mut MyApp {
+    fn my_app(&mut self) -> &mut T {
         self.my_app.as_mut().unwrap()
     }
 
@@ -150,18 +157,28 @@ impl App {
     expose!(input.focused() -> bool);
 }
 
-#[derive(Default)]
-struct AppBuilder {
-    app: Option<*mut App>,
+struct Engine<T: App> {
+    app: Option<*mut AppContext<T>>,
 }
-impl winit::application::ApplicationHandler for AppBuilder {
+
+impl<T: App> Engine<T> {
+    fn new() -> Engine<T> {
+        let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
+        let mut engine = Self { app: None };
+        event_loop.run_app(&mut engine).unwrap();
+        Self { app: None }
+    }
+}
+
+impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         *WINDOW.write().unwrap() = Some(Arc::new(
             event_loop
                 .create_window(WindowAttributes::default())
                 .unwrap(),
         ));
-        self.app = Some(App::new());
+        self.app = Some(AppContext::new());
     }
 
     fn window_event(
@@ -176,10 +193,6 @@ impl winit::application::ApplicationHandler for AppBuilder {
     }
 }
 
-fn main() -> Result<(), EventLoopError> {
-    let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
-    event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
-    let mut app = AppBuilder::default();
-    event_loop.run_app(&mut app)?;
-    Ok(())
+fn main() {
+    Engine::<MyApp>::new();
 }
