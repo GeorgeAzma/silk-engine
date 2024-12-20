@@ -81,7 +81,7 @@ impl Renderer {
         }
     }
 
-    pub(crate) fn begin_render(&mut self) {
+    pub(crate) fn begin_frame(&mut self) {
         let frame = &self.frames[self.current_frame];
         frame.wait();
         let mut window_ctx = self.window_ctx.lock().unwrap();
@@ -104,7 +104,7 @@ impl Renderer {
         );
     }
 
-    pub(crate) fn end_render(&mut self, window: &Window) {
+    pub(crate) fn end_frame(&mut self, window: &Window) {
         let mut ctx = self.render_ctx.lock().unwrap();
         ctx.end_render();
 
@@ -134,21 +134,6 @@ impl Renderer {
         #[allow(clippy::modulo_one)]
         {
             self.current_frame = (self.current_frame + 1) % Self::FRAMES;
-        }
-    }
-
-    pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
-        unsafe {
-            gpu().cmd_clear_color_image(
-                self.render_ctx.lock().unwrap().cmd(),
-                image,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-                &vk::ClearColorValue { float32: color },
-                &[vk::ImageSubresourceRange::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .layer_count(1)
-                    .level_count(1)],
-            );
         }
     }
 }

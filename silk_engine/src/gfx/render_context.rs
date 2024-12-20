@@ -548,6 +548,21 @@ impl RenderContext {
             self.buffer_alloc.dealloc(staging_buffer);
         }
     }
+
+    pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
+        unsafe {
+            gpu().cmd_clear_color_image(
+                self.cmd(),
+                image,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                &vk::ClearColorValue { float32: color },
+                &[vk::ImageSubresourceRange::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .layer_count(1)
+                    .level_count(1)],
+            );
+        }
+    }
 }
 
 pub struct DebugScope<'a> {
@@ -569,16 +584,6 @@ impl Drop for DebugScope<'_> {
     fn drop(&mut self) {
         self.render_ctx.debug_end();
     }
-}
-
-#[macro_export]
-macro_rules! debug_scope {
-    ($name:expr) => {
-        let _d = DebugScope::new($name);
-    };
-    ($name:expr, [$r:literal, $g:literal, $b:literal, $a:literal]) => {
-        let _d = DebugScope::new($name, [r, g, b, a]);
-    };
 }
 
 #[cfg(debug_assertions)]

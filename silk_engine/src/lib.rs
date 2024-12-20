@@ -117,11 +117,11 @@ impl<A: App> AppContext<A> {
         }
         scope_time!("render {}", self.frame; self.frame < 4);
 
-        self.renderer.begin_render();
+        self.renderer.begin_frame();
 
         self.my_app().render();
 
-        self.renderer.end_render(&self.window);
+        self.renderer.end_frame(&self.window);
 
         self.input.reset();
         self.frame += 1;
