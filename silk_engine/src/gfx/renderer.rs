@@ -3,12 +3,9 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use winit::window::Window;
 
-use crate::{err, window::WindowContext};
+use crate::window::WindowContext;
 
-use super::{
-    gpu, queue, vulkan::pipeline::GraphicsPipeline, write_desc_set_uniform_buffer_whole,
-    RenderContext,
-};
+use super::{gpu, queue, RenderContext};
 
 #[derive(Clone, Copy)]
 struct Frame {
@@ -57,15 +54,6 @@ impl Default for Frame {
     }
 }
 
-#[repr(C)]
-#[derive(Default, Clone)]
-pub struct GlobalUniform {
-    pub resolution: [u32; 2],
-    pub mouse_pos: [f32; 2],
-    pub time: f32,
-    pub dt: f32,
-}
-
 pub struct Renderer {
     render_ctx: Arc<Mutex<RenderContext>>,
     window_ctx: Arc<Mutex<WindowContext>>,
@@ -81,38 +69,9 @@ impl Renderer {
         window_ctx: Arc<Mutex<WindowContext>>,
     ) -> Self {
         {
-            std::panic::set_hook(Box::new(|panic_info| {
-                if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-                    err!("panic occurred: {s:?}");
-                } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
-                    err!("panic occurred: {s:?}");
-                } else {
-                    err!("panicked");
-                }
-            }));
             let mut ctx = render_ctx.lock().unwrap();
-            ctx.add_shader("shader");
-            ctx.add_pipeline(
-                "pipeline",
-                "shader",
-                GraphicsPipeline::new()
-                    .dyn_size()
-                    .color_attachment(window_ctx.lock().unwrap().surface_format.format)
-                    .blend_attachment_empty(),
-                &[],
-            );
-            let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
-
             ctx.add_cmds_numbered("render", Self::FRAMES);
             ctx.add_cmd("init");
-
-            let uniform_buffer = ctx.add_buffer(
-                "global uniform",
-                size_of::<GlobalUniform>() as u64,
-                vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-            );
-            write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
         }
         Self {
             render_ctx,
@@ -172,7 +131,10 @@ impl Renderer {
         window.pre_present_notify();
         window_ctx.present(&[frame.render_done]);
 
-        // self.current_frame = (self.current_frame + 1) % Self::FRAMES;
+        #[allow(clippy::modulo_one)]
+        {
+            self.current_frame = (self.current_frame + 1) % Self::FRAMES;
+        }
     }
 
     pub fn clear(&self, image: vk::Image, color: [f32; 4]) {

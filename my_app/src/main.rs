@@ -7,19 +7,50 @@ pub(crate) struct MyApp<'a> {
 impl App for MyApp<'_> {
     fn new(app: *mut AppContext<Self>) -> Self {
         let app = unsafe { &mut *app };
+        let surf_format = app.surface_format;
+        {
+            let mut ctx = app.ctx();
+            ctx.add_shader("shader");
+            ctx.add_pipeline(
+                "pipeline",
+                "shader",
+                GraphicsPipeline::new()
+                    .dyn_size()
+                    .color_attachment(surf_format)
+                    .blend_attachment_empty(),
+                &[],
+            );
+            let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
+
+            let uniform_buffer = ctx.add_buffer(
+                "global uniform",
+                size_of::<GlobalUniform>() as u64,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
+            );
+            write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
+        }
         Self { app }
     }
 
     fn update(&mut self) {
-        if self.app.frame % 512 == 0 {
+        let app = &mut self.app;
+        if app.frame % 512 == 0 {
             println!(
                 "{:?} ({:.0} fps)",
-                Duration::from_secs_f32(self.app.dt),
-                1.0 / self.app.dt
+                Duration::from_secs_f32(app.dt),
+                1.0 / app.dt
             );
         }
-        if self.app.frame > 8 {
-            // abort();
+        let uniform_data = GlobalUniform {
+            resolution: [app.width, app.height],
+            mouse_pos: [app.mouse_x, app.mouse_y],
+            time: app.time,
+            dt: app.dt,
+        };
+        {
+            let buf = app.ctx().buffer("global uniform");
+            app.ctx().write_buffer(buf, &uniform_data);
         }
     }
 
@@ -31,6 +62,15 @@ impl App for MyApp<'_> {
     }
 
     fn event(&mut self, _e: Event) {}
+}
+
+#[repr(C)]
+#[derive(Default, Clone)]
+pub struct GlobalUniform {
+    pub resolution: [u32; 2],
+    pub mouse_pos: [f32; 2],
+    pub time: f32,
+    pub dt: f32,
 }
 
 fn main() {

@@ -52,6 +52,7 @@ pub struct AppContext<A: App> {
     pub mouse_x: f32,
     pub mouse_y: f32,
     pub mouse_scroll: f32,
+    pub surface_format: vk::Format,
     window_ctx: Arc<Mutex<WindowContext>>,
     render_ctx: Arc<Mutex<RenderContext>>,
     renderer: Renderer,
@@ -71,6 +72,7 @@ impl<A: App> AppContext<A> {
 
         let render_ctx = Arc::new(Mutex::new(RenderContext::new()));
         let window_ctx = Arc::new(Mutex::new(WindowContext::new(&window)));
+        let surf_format = window_ctx.lock().unwrap().surface_format.format;
 
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
@@ -92,6 +94,7 @@ impl<A: App> AppContext<A> {
             window_ctx: window_ctx.clone(),
             render_ctx: render_ctx.clone(),
             renderer: Renderer::new(render_ctx, window_ctx),
+            surface_format: surf_format,
         }));
         {
             let app_mut = &mut *app.lock().unwrap();
@@ -105,17 +108,6 @@ impl<A: App> AppContext<A> {
         let now = Instant::now().duration_since(self.start_time).as_secs_f32();
         self.dt = now - self.time;
         self.time = now;
-
-        let uniform_data = GlobalUniform {
-            resolution: [self.width, self.height],
-            mouse_pos: [self.mouse_x, self.mouse_y],
-            time: self.time,
-            dt: self.dt,
-        };
-        {
-            let buf = self.ctx().buffer("global uniform");
-            self.ctx().write_buffer(buf, &uniform_data);
-        }
         self.my_app().update();
     }
 
@@ -236,6 +228,18 @@ static EVENT_LOOP: LazyLock<Mutex<UnsafeEventLoop>> = LazyLock::new(|| {
     ))
 });
 
+static PANIC_HOOK: LazyLock<()> = LazyLock::new(|| {
+    std::panic::set_hook(Box::new(|panic_info| {
+        if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            err!("panic occurred: {s:?}");
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            err!("panic occurred: {s:?}");
+        } else {
+            err!("panicked");
+        }
+    }));
+});
+
 impl<T: App> Engine<T> {
     pub fn window(title: &str, width: u32, height: u32) {
         Self::with(
@@ -266,6 +270,7 @@ impl<T: App> Engine<T> {
 
 impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        *PANIC_HOOK;
         let monitor = event_loop.primary_monitor().unwrap();
         // center window by default
         if self.window_attribs.position.is_none() {
