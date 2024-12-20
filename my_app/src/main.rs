@@ -1,12 +1,14 @@
 use silk_engine::*;
 
-pub struct MyApp {
-    app: Arc<AppContext<Self>>,
+pub struct MyApp<'a> {
+    app: &'a mut AppContext<Self>,
 }
 
-impl App for MyApp {
-    fn new(app: Arc<AppContext<Self>>) -> Self {
-        Self { app }
+impl App for MyApp<'_> {
+    fn new(app: *mut AppContext<Self>) -> Self {
+        Self {
+            app: unsafe { &mut *app },
+        }
     }
 
     fn update(&mut self) {
@@ -22,7 +24,12 @@ impl App for MyApp {
         }
     }
 
-    fn render(&mut self) {}
+    fn render(&mut self) {
+        let mut ctx = self.app.ctx();
+        ctx.bind_pipeline("pipeline");
+        ctx.bind_desc_set("global uniform");
+        ctx.draw(3, 1);
+    }
 
     fn event(&mut self, _e: Event) {}
 }

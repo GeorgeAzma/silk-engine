@@ -143,10 +143,6 @@ impl Renderer {
             window_ctx.swapchain_size.height,
             window_ctx.cur_img_view(),
         );
-
-        ctx.bind_pipeline("pipeline");
-        ctx.bind_desc_set("global uniform");
-        ctx.draw(3, 1);
     }
 
     pub(crate) fn end_render(&mut self, window: &Window) {

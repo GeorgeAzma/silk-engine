@@ -2,6 +2,7 @@
 - image loading
 - simple scene
 - render graph
+- multiple windows
 
 # Large Scene Problems
 - model loading

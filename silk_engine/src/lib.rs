@@ -9,9 +9,7 @@ pub use std::{
 };
 
 use window::WindowContext;
-use winit::{
-    event_loop::ActiveEventLoop, platform::windows::EventLoopBuilderExtWindows, window::Window,
-};
+use winit::{event_loop::ActiveEventLoop, window::Window};
 use winit::{event_loop::ControlFlow, window::WindowId};
 use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
@@ -26,7 +24,7 @@ mod util;
 mod window;
 
 pub trait App: Sized {
-    fn new(app: Arc<AppContext<Self>>) -> Self;
+    fn new(app: *mut AppContext<Self>) -> Self;
     fn update(&mut self);
     fn render(&mut self);
     fn event(&mut self, _e: Event) {}
@@ -51,14 +49,14 @@ pub struct AppContext<A: App> {
 }
 
 impl<A: App> AppContext<A> {
-    pub fn new(window: Window) -> *mut Self {
+    pub fn new(window: Window) -> Arc<Mutex<Self>> {
         scope_time!("init");
         let width = window.inner_size().width;
         let height = window.inner_size().height;
         let render_ctx = Arc::new(Mutex::new(RenderContext::new()));
         let window_ctx = Arc::new(Mutex::new(WindowContext::new(&window)));
 
-        let app = Arc::new(Self {
+        let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
             width,
@@ -74,10 +72,12 @@ impl<A: App> AppContext<A> {
             window_ctx: window_ctx.clone(),
             render_ctx: render_ctx.clone(),
             renderer: Renderer::new(render_ctx, window_ctx),
-        });
-        let app_mut = ptr::from_ref(app.as_ref()).cast_mut();
-        unsafe { app_mut.as_mut() }.unwrap().my_app = Some(A::new(app.clone()));
-        app_mut
+        }));
+        {
+            let app_mut = &mut *app.lock().unwrap();
+            app_mut.my_app = Some(A::new(app_mut as *mut _));
+        }
+        app
     }
 
     fn update(&mut self) {
@@ -179,8 +179,8 @@ impl<A: App> AppContext<A> {
     }
 }
 
-pub struct Engine<T: App> {
-    app: Option<*mut AppContext<T>>,
+pub struct Engine<A: App> {
+    app: Option<Arc<Mutex<AppContext<A>>>>,
     window_attribs: WindowAttributes,
 }
 
@@ -251,8 +251,8 @@ impl<T: App> winit::application::ApplicationHandler for Engine<T> {
         window_id: winit::window::WindowId,
         event: Event,
     ) {
-        if let Some(app) = unsafe { self.app.unwrap().as_mut() } {
-            app.event(event_loop, event, window_id);
+        if let Some(app) = &self.app {
+            app.lock().unwrap().event(event_loop, event, window_id);
         }
     }
 }
