@@ -29,7 +29,6 @@ Output:
 pub struct Shader {
     spirv: Vec<u32>,
     ir_module: naga::Module,
-    entry_names: Vec<String>,
 }
 
 impl Shader {
@@ -40,12 +39,6 @@ impl Shader {
         let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| {
             fatal!("WGSL Error:\n{}", e.emit_to_string(&source));
         });
-        let mut entry_names = Vec::new();
-        for entry in module.entry_points.iter() {
-            let mut name = entry.name.clone();
-            name.push('\0');
-            entry_names.push(name);
-        }
 
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
@@ -85,7 +78,6 @@ impl Shader {
         Self {
             spirv,
             ir_module: module,
-            entry_names,
         }
     }
 
@@ -326,14 +318,20 @@ impl Shader {
     }
 
     pub fn get_pipeline_stages(&self, module: vk::ShaderModule) -> Vec<PipelineStageInfo> {
-        self.entry_names
+        self.ir_module
+            .entry_points
             .iter()
-            .zip(self.ir_module.entry_points.iter().map(|ep| &ep.stage))
-            .map(|(entry_name, stage)| PipelineStageInfo {
-                stage: stage_to_vk(stage),
-                module,
-                name: entry_name.clone(),
-                ..Default::default()
+            .map(|ep| {
+                let mut name = ep.name.clone();
+                if !name.ends_with('\0') {
+                    name.push('\0');
+                }
+                PipelineStageInfo {
+                    stage: stage_to_vk(&ep.stage),
+                    module,
+                    name,
+                    ..Default::default()
+                }
             })
             .collect()
     }
