@@ -1,14 +1,13 @@
 use silk_engine::*;
 
-pub struct MyApp<'a> {
+pub(crate) struct MyApp<'a> {
     app: &'a mut AppContext<Self>,
 }
 
 impl App for MyApp<'_> {
     fn new(app: *mut AppContext<Self>) -> Self {
-        Self {
-            app: unsafe { &mut *app },
-        }
+        let app = unsafe { &mut *app };
+        Self { app }
     }
 
     fn update(&mut self) {

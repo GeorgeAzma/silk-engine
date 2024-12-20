@@ -9,7 +9,12 @@ pub use std::{
 };
 
 use window::WindowContext;
-use winit::{event_loop::ActiveEventLoop, window::Window};
+use winit::{
+    dpi::{PhysicalPosition, PhysicalSize},
+    event_loop::ActiveEventLoop,
+    monitor::MonitorHandle,
+    window::Window,
+};
 use winit::{event_loop::ControlFlow, window::WindowId};
 use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
@@ -35,6 +40,10 @@ pub struct AppContext<A: App> {
     pub window: Window,
     pub width: u32,
     pub height: u32,
+    pub monitor: MonitorHandle,
+    pub monitor_width: u32,
+    pub monitor_height: u32,
+    pub refresh_rate: u32,
     pub start_time: std::time::Instant,
     pub time: f32,
     pub dt: f32,
@@ -49,10 +58,17 @@ pub struct AppContext<A: App> {
 }
 
 impl<A: App> AppContext<A> {
-    pub fn new(window: Window) -> Arc<Mutex<Self>> {
+    pub fn new(window: Window, monitor: MonitorHandle) -> Arc<Mutex<Self>> {
         scope_time!("init");
-        let width = window.inner_size().width;
-        let height = window.inner_size().height;
+        let PhysicalSize { width, height } = window.inner_size();
+        let PhysicalSize {
+            width: monitor_width,
+            height: monitor_height,
+        } = monitor.size();
+        let refresh_rate =
+            (monitor.refresh_rate_millihertz().unwrap_or(60) as f32 / 1000.0).round() as u32;
+        log!("Monitor: {}", monitor.name().unwrap_or_default());
+
         let render_ctx = Arc::new(Mutex::new(RenderContext::new()));
         let window_ctx = Arc::new(Mutex::new(WindowContext::new(&window)));
 
@@ -61,6 +77,10 @@ impl<A: App> AppContext<A> {
             window,
             width,
             height,
+            monitor,
+            monitor_width,
+            monitor_height,
+            refresh_rate,
             start_time: Instant::now(),
             time: 0.0,
             dt: 0.0,
@@ -177,6 +197,13 @@ impl<A: App> AppContext<A> {
     pub fn read_buffer<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
         self.ctx().read_buffer(buffer, data);
     }
+
+    pub fn center_window(&self) {
+        self.window.set_outer_position(PhysicalPosition::new(
+            (self.monitor_width as i32 - self.width as i32) / 2,
+            (self.monitor_height as i32 - self.height as i32) / 2,
+        ));
+    }
 }
 
 pub struct Engine<A: App> {
@@ -214,7 +241,7 @@ impl<T: App> Engine<T> {
         Self::with(
             WindowAttributes::default()
                 .with_title(title)
-                .with_inner_size(winit::dpi::LogicalSize::new(width, height)),
+                .with_inner_size(PhysicalSize::new(width, height)),
             ControlFlow::Poll,
         );
     }
@@ -239,10 +266,24 @@ impl<T: App> Engine<T> {
 
 impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let monitor = event_loop.primary_monitor().unwrap();
+        // center window by default
+        if self.window_attribs.position.is_none() {
+            let PhysicalSize::<i32> { width, height } = self
+                .window_attribs
+                .inner_size
+                .unwrap_or(winit::dpi::Size::Physical(PhysicalSize::new(800, 600)))
+                .to_physical(monitor.scale_factor());
+            self.window_attribs.position =
+                Some(winit::dpi::Position::Physical(PhysicalPosition::new(
+                    (monitor.size().width as i32 - width) / 2,
+                    (monitor.size().height as i32 - height) / 2,
+                )));
+        }
         let window = event_loop
             .create_window(self.window_attribs.clone())
             .unwrap();
-        self.app = Some(AppContext::new(window));
+        self.app = Some(AppContext::new(window, monitor));
     }
 
     fn window_event(
