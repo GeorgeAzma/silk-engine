@@ -17,15 +17,6 @@ fn shader_cache_path(name: &str) -> String {
     format!("res/cache/shaders/{name}.spv")
 }
 
-/*
-Input:
-- pipeline state
-- shader files
-
-Output:
-- pipeline (cached)
-*/
-
 pub struct Shader {
     spirv: Vec<u32>,
     ir_module: naga::Module,
@@ -34,7 +25,6 @@ pub struct Shader {
 impl Shader {
     pub fn new(name: &str) -> Self {
         // TODO: save/load reflection (using naga's serde serialize feature) (only if bottlenecked)
-        // parse wgsl
         let source = std::fs::read_to_string(shader_path(name)).unwrap();
         let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| {
             fatal!("WGSL Error:\n{}", e.emit_to_string(&source));
@@ -43,7 +33,7 @@ impl Shader {
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
             log!("shader cache loaded: \"{name}.spv\"");
-            crate::util::cast_slice_to(&spirv).to_owned()
+            crate::util::to_slice(&spirv).to_owned()
         } else {
             log!("shader loaded: \"{name}.wgsl\"");
             // validate wgsl
@@ -69,7 +59,7 @@ impl Shader {
             #[cfg(not(debug_assertions))]
             *INIT_CACHE_PATH;
             #[cfg(not(debug_assertions))]
-            std::fs::write(&shader_cache_path(name), crate::util::cast_slice(&spirv))
+            std::fs::write(&shader_cache_path(name), crate::util::to_slice(&spirv))
                 .unwrap_or_default();
 
             spirv
@@ -184,7 +174,7 @@ impl Shader {
     ///   - if one of the binding's resource_locations is empty, unlocated resources are put in that binding automatically
     ///
     /// Returns:
-    /// - `(attrib_descs, binding_descs)` binding_descs[i] corresponds to attrib_descs with binding=i
+    /// - `(attrib_descs, binding_descs)` `binding_descs[i]` corresponds to `attrib_descs` with `binding=i`
     pub fn get_vert_layout(
         &self,
         bindings: &[(bool, Vec<u32>)],
@@ -281,26 +271,24 @@ impl Shader {
         }
 
         (
-            bindings
-                .iter()
-                .enumerate()
-                .filter_map(|(i, binding)| {
-                    if binding.1.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            vk::VertexInputBindingDescription::default()
-                                .stride(binding_offset[i])
-                                .binding(i as u32)
-                                .input_rate(if binding.0 {
-                                    vk::VertexInputRate::INSTANCE
-                                } else {
-                                    vk::VertexInputRate::VERTEX
-                                }),
-                        )
-                    }
-                })
-                .collect(),
+            if vert_attrib_descs.is_empty() {
+                vec![]
+            } else {
+                bindings
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &(instanced, _))| {
+                        vk::VertexInputBindingDescription::default()
+                            .stride(binding_offset[i])
+                            .binding(i as u32)
+                            .input_rate(if instanced {
+                                vk::VertexInputRate::INSTANCE
+                            } else {
+                                vk::VertexInputRate::VERTEX
+                            })
+                    })
+                    .collect()
+            },
             vert_attrib_descs,
         )
     }

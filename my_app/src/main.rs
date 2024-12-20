@@ -26,7 +26,7 @@ impl App for MyApp<'_> {
                 "global uniform",
                 size_of::<GlobalUniform>() as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_CACHED,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
             write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
         }
@@ -55,6 +55,24 @@ impl App for MyApp<'_> {
     }
 
     fn render(&mut self) {
+        self.app.gfx().add_vert(BatchVertex {
+            pos: [0.1, 0.1],
+            color: [1.0, 0.0, 0.0, 1.0],
+            ..Default::default()
+        });
+        self.app.gfx().add_vert(BatchVertex {
+            pos: [0.5, 0.9],
+            color: [0.0, 1.0, 0.0, 1.0],
+            ..Default::default()
+        });
+        self.app.gfx().add_vert(BatchVertex {
+            pos: [0.9, 0.1],
+            color: [0.0, 0.0, 1.0, 1.0],
+            ..Default::default()
+        });
+        self.app.gfx().add_idx(0);
+        self.app.gfx().add_idx(1);
+        self.app.gfx().add_idx(2);
         let mut ctx = self.app.ctx();
         ctx.bind_pipeline("pipeline");
         ctx.bind_desc_set("global uniform");

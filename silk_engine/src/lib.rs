@@ -7,8 +7,6 @@ pub use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-
-use window::WindowContext;
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
     event_loop::ActiveEventLoop,
@@ -26,7 +24,6 @@ pub use print::*;
 mod gfx;
 pub use gfx::*;
 mod util;
-mod window;
 
 pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
@@ -53,9 +50,8 @@ pub struct AppContext<A: App> {
     pub mouse_y: f32,
     pub mouse_scroll: f32,
     pub surface_format: vk::Format,
-    window_ctx: Arc<Mutex<WindowContext>>,
     render_ctx: Arc<Mutex<RenderContext>>,
-    renderer: Renderer,
+    batch_renderer: BatchRenderer,
 }
 
 impl<A: App> AppContext<A> {
@@ -70,9 +66,8 @@ impl<A: App> AppContext<A> {
             (monitor.refresh_rate_millihertz().unwrap_or(60) as f32 / 1000.0).round() as u32;
         log!("Monitor: {}", monitor.name().unwrap_or_default());
 
-        let render_ctx = Arc::new(Mutex::new(RenderContext::new()));
-        let window_ctx = Arc::new(Mutex::new(WindowContext::new(&window)));
-        let surf_format = window_ctx.lock().unwrap().surface_format.format;
+        let render_ctx = Arc::new(Mutex::new(RenderContext::new(&window)));
+        let surf_format = render_ctx.lock().unwrap().surface_format.format;
 
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
@@ -91,10 +86,9 @@ impl<A: App> AppContext<A> {
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_scroll: 0.0,
-            window_ctx: window_ctx.clone(),
             render_ctx: render_ctx.clone(),
-            renderer: Renderer::new(render_ctx, window_ctx),
             surface_format: surf_format,
+            batch_renderer: BatchRenderer::new(render_ctx.clone()),
         }));
         {
             let app_mut = &mut *app.lock().unwrap();
@@ -117,11 +111,12 @@ impl<A: App> AppContext<A> {
         }
         scope_time!("render {}", self.frame; self.frame < 4);
 
-        self.renderer.begin_frame();
+        self.ctx().begin_frame();
 
         self.my_app().render();
+        self.batch_renderer.render_dynamic();
 
-        self.renderer.end_frame(&self.window);
+        self.render_ctx.lock().unwrap().end_frame(&self.window);
 
         self.input.reset();
         self.frame += 1;
@@ -136,7 +131,7 @@ impl<A: App> AppContext<A> {
         if width == 0 || height == 0 {
             return;
         }
-        self.window_ctx.lock().unwrap().recreate_swapchain();
+        self.ctx().recreate_swapchain();
     }
 
     fn event(&mut self, event_loop: &ActiveEventLoop, event: Event, window_id: WindowId) {
@@ -180,6 +175,10 @@ impl<A: App> AppContext<A> {
 
     pub fn ctx(&mut self) -> std::sync::MutexGuard<'_, RenderContext> {
         self.render_ctx.lock().unwrap()
+    }
+
+    pub fn gfx(&mut self) -> &mut BatchRenderer {
+        &mut self.batch_renderer
     }
 
     pub fn write_buffer<T>(&mut self, buffer: vk::Buffer, data: &T) {

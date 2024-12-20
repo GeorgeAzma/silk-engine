@@ -121,7 +121,7 @@ impl BufferAlloc {
         buffer
     }
 
-    pub fn alloc_staging_src<T>(&mut self, data: &T) -> vk::Buffer {
+    pub fn alloc_staging_src<T: ?Sized>(&mut self, data: &T) -> vk::Buffer {
         let staging_buffer = self.alloc(
             size_of_val(data) as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
@@ -131,7 +131,7 @@ impl BufferAlloc {
         staging_buffer
     }
 
-    pub fn alloc_staging_dst<T>(&mut self, data: &T) -> vk::Buffer {
+    pub fn alloc_staging_dst<T: ?Sized>(&mut self, data: &T) -> vk::Buffer {
         let staging_buffer = self.alloc(
             size_of_val(data) as u64,
             vk::BufferUsageFlags::TRANSFER_DST,
@@ -185,21 +185,25 @@ impl BufferAlloc {
         unsafe { gpu().unmap_memory(block.mem) }
     }
 
-    pub fn write_mapped<T>(&mut self, buffer: vk::Buffer, data: &T) {
+    pub fn write_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &T) {
         unsafe {
-            let buf_size = self.get_size(buffer) as usize;
-            assert_eq!(buf_size, size_of_val(data));
+            assert!(
+                self.get_size(buffer) >= size_of_val(data) as u64,
+                "write failed, buffer is too small"
+            );
             let mem_ptr = self.map(buffer);
-            mem_ptr.copy_from_nonoverlapping(data as *const T as *mut _, buf_size);
+            mem_ptr.copy_from_nonoverlapping(data as *const T as *const u8, size_of_val(data));
         }
     }
 
-    pub fn read_mapped<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
+    pub fn read_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &mut T) {
         unsafe {
-            let buf_size = self.get_size(buffer) as usize;
-            assert_eq!(buf_size, size_of_val(data));
+            assert!(
+                self.get_size(buffer) >= size_of_val(data) as u64,
+                "write failed, buffer is too small"
+            );
             let mem_ptr = self.map(buffer);
-            (data as *mut T).copy_from_nonoverlapping(mem_ptr as *const _, buf_size);
+            (data as *mut T as *mut u8).copy_from_nonoverlapping(mem_ptr, size_of_val(data));
         }
     }
 

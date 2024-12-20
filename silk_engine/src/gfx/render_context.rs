@@ -1,16 +1,68 @@
 use std::collections::HashMap;
 
 use ash::vk;
+use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use winit::window::Window;
 
-use crate::{gpu, scope_time};
+use crate::{gpu, gpu_idle, scope_time};
 
 use super::shader::Shader;
 use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
-use super::{BufferAlloc, CmdAlloc, DSLManager, DescAlloc, PipelineLayoutManager, RenderPass};
+use super::{
+    entry, instance, physical_gpu, queue, BufferAlloc, CmdAlloc, DSLManager, DescAlloc,
+    PipelineLayoutManager, RenderPass,
+};
 
 #[cfg(debug_assertions)]
 static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
     std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(crate::instance(), gpu()));
+
+#[derive(Clone, Copy)]
+struct Frame {
+    img_available: vk::Semaphore,
+    render_done: vk::Semaphore,
+    prev_frame_done: vk::Fence,
+}
+
+impl Frame {
+    fn new() -> Self {
+        Self {
+            img_available: unsafe {
+                gpu()
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .unwrap()
+            },
+            render_done: unsafe {
+                gpu()
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .unwrap()
+            },
+            prev_frame_done: unsafe {
+                gpu()
+                    .create_fence(
+                        &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
+                        None,
+                    )
+                    .unwrap()
+            },
+        }
+    }
+
+    fn wait(&self) {
+        unsafe {
+            gpu()
+                .wait_for_fences(&[self.prev_frame_done], true, u64::MAX)
+                .unwrap();
+            gpu().reset_fences(&[self.prev_frame_done]).unwrap();
+        }
+    }
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 struct ShaderData {
     shader: Shader,
@@ -36,7 +88,6 @@ struct CmdState {
     render_pass: RenderPass,
 }
 
-#[derive(Default)]
 pub struct RenderContext {
     cmd_state: CmdState,
     // allocators
@@ -53,11 +104,137 @@ pub struct RenderContext {
     cmds: HashMap<String, vk::CommandBuffer>,
     buffers: HashMap<String, vk::Buffer>,
     render_passes: HashMap<String, RenderPass>,
+    // window context
+    surface_caps2_loader: ash::khr::get_surface_capabilities2::Instance,
+    pub surface: vk::SurfaceKHR,
+    pub surface_format: vk::SurfaceFormatKHR,
+    surface_present_modes: Vec<vk::PresentModeKHR>,
+    swapchain_loader: ash::khr::swapchain::Device,
+    pub swapchain: vk::SwapchainKHR,
+    pub swapchain_images: Vec<vk::Image>,
+    pub swapchain_img_views: Vec<vk::ImageView>,
+    pub swapchain_size: vk::Extent2D,
+    pub swapchain_img_idx: usize,
+    // rendering
+    frames: [Frame; 1],
+    cur_frame: usize,
 }
 
 impl RenderContext {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new(window: &Window) -> Self {
+        let surface_loader = ash::khr::surface::Instance::new(entry(), instance());
+        let surface_caps2 = ash::khr::get_surface_capabilities2::Instance::new(entry(), instance());
+        let surface = unsafe {
+            ash_window::create_surface(
+                entry(),
+                instance(),
+                window.display_handle().unwrap().as_raw(),
+                window.window_handle().unwrap().as_raw(),
+                None,
+            )
+            .unwrap()
+        };
+        let surface_formats = unsafe {
+            surface_loader
+                .get_physical_device_surface_formats(physical_gpu(), surface)
+                .unwrap()
+        };
+        let surface_format = surface_formats
+            .iter()
+            .find(|&format| format.format == vk::Format::B8G8R8A8_UNORM)
+            .cloned()
+            .unwrap_or(vk::SurfaceFormatKHR {
+                format: vk::Format::B8G8R8A8_UNORM,
+                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            });
+        let surface_present_modes = unsafe {
+            surface_loader
+                .get_physical_device_surface_present_modes(physical_gpu(), surface)
+                .unwrap()
+        };
+        let swapchain_loader = ash::khr::swapchain::Device::new(instance(), gpu());
+        let mut slf = Self {
+            cmd_state: CmdState::default(),
+            desc_alloc: DescAlloc::default(),
+            cmd_alloc: CmdAlloc::default(),
+            buffer_alloc: BufferAlloc::default(),
+            dsl_manager: DSLManager::default(),
+            pipeline_layout_manager: PipelineLayoutManager::default(),
+            shaders: Default::default(),
+            pipelines: Default::default(),
+            desc_sets: Default::default(),
+            cmds: Default::default(),
+            buffers: Default::default(),
+            render_passes: Default::default(),
+            surface_caps2_loader: surface_caps2,
+            surface,
+            surface_format,
+            surface_present_modes,
+            swapchain_loader,
+            swapchain: Default::default(),
+            swapchain_images: Default::default(),
+            swapchain_img_views: Default::default(),
+            swapchain_size: Default::default(),
+            swapchain_img_idx: Default::default(),
+            frames: Default::default(),
+            cur_frame: 0,
+        };
+        {
+            slf.add_cmds_numbered("render", slf.frames.len());
+            slf.add_cmd("init");
+        }
+        slf
+    }
+
+    pub(crate) fn begin_frame(&mut self) {
+        let frame = &self.frames[self.cur_frame];
+        frame.wait();
+        self.acquire_img(frame.img_available);
+
+        let cmd_name = format!("render{}", self.cur_frame);
+        self.reset_cmd(&cmd_name);
+        self.begin_cmd(&cmd_name);
+        self.transition_image_layout(
+            self.cur_img(),
+            vk::ImageLayout::UNDEFINED,
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        );
+
+        let width = self.swapchain_size.width;
+        let height = self.swapchain_size.height;
+        let img_view = self.cur_img_view();
+        self.begin_render(width, height, img_view);
+    }
+
+    pub(crate) fn end_frame(&mut self, window: &Window) {
+        self.end_render();
+
+        self.transition_image_layout(
+            self.cur_img(),
+            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::ImageLayout::PRESENT_SRC_KHR,
+        );
+        let cmd_name = self.cmd_name().to_owned();
+        self.end_cmd();
+
+        // wait(image_available), submit cmd, signal(render_finished)
+        let frame = self.frames[self.cur_frame].clone();
+        self.submit_cmd(
+            &cmd_name,
+            queue(),
+            &[frame.img_available],
+            &[frame.render_done],
+            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+            frame.prev_frame_done,
+        );
+
+        window.pre_present_notify();
+        self.present(&[frame.render_done]);
+
+        #[allow(clippy::modulo_one)]
+        {
+            self.cur_frame = (self.cur_frame + 1) % self.frames.len();
+        }
     }
 
     pub fn shader(&self, name: &str) -> &Shader {
@@ -110,7 +287,6 @@ impl RenderContext {
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
         scope_time!("create pipeline: {name}");
-        self.shader(shader_name);
         let shader_data = &self.shaders[shader_name];
         let pipeline_info = pipeline_info
             .layout(shader_data.pipeline_layout)
@@ -274,6 +450,11 @@ impl RenderContext {
             gpu().end_command_buffer(self.cmd()).unwrap();
         }
         self.cmd_state = Default::default();
+    }
+
+    pub fn submit(&mut self) {
+        let cmd = self.cmd_name().to_string();
+        self.submit_cmd(&cmd, queue(), &[], &[], &[], vk::Fence::null());
     }
 
     pub fn submit_cmd(
@@ -459,9 +640,21 @@ impl RenderContext {
         }
     }
 
+    pub fn bind_index(&self, name: &str) {
+        unsafe {
+            gpu().cmd_bind_index_buffer(self.cmd(), self.buffers[name], 0, vk::IndexType::UINT32);
+        }
+    }
+
     pub fn draw(&self, vertices: u32, instances: u32) {
         unsafe {
             gpu().cmd_draw(self.cmd(), vertices, instances, 0, 0);
+        }
+    }
+
+    pub fn draw_indexed(&self, indices: u32, instances: u32) {
+        unsafe {
+            gpu().cmd_draw_indexed(self.cmd(), indices, instances, 0, 0, 0);
         }
     }
 
@@ -513,20 +706,14 @@ impl RenderContext {
     pub fn copy_buffer(&mut self, src_buffer: vk::Buffer, dst_buffer: vk::Buffer) {
         let cmd = self.begin_cmd("init");
         let buf_size = self.buffer_alloc.get_size(src_buffer) as usize;
-        assert_eq!(
-            self.buffer_alloc.get_size(src_buffer),
-            self.buffer_alloc.get_size(dst_buffer)
-        );
         unsafe {
             let copy_region = vk::BufferCopy::default().size(buf_size as u64);
             gpu().cmd_copy_buffer(cmd, src_buffer, dst_buffer, &[copy_region]);
         }
-        self.end_cmd();
+        self.submit();
     }
 
-    pub fn write_buffer<T>(&mut self, buffer: vk::Buffer, data: &T) {
-        let buf_size = self.buffer_alloc.get_size(buffer) as usize;
-        assert_eq!(buf_size, size_of_val(data));
+    pub fn write_buffer<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &T) {
         if self.buffer_alloc.is_mappable(buffer) {
             self.buffer_alloc.write_mapped(buffer, data);
         } else {
@@ -536,9 +723,7 @@ impl RenderContext {
         }
     }
 
-    pub fn read_buffer<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
-        let buf_size = self.buffer_alloc.get_size(buffer) as usize;
-        assert_eq!(buf_size, size_of_val(data));
+    pub fn read_buffer<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &mut T) {
         if self.buffer_alloc.is_mappable(buffer) {
             self.buffer_alloc.read_mapped(buffer, data);
         } else {
@@ -562,6 +747,174 @@ impl RenderContext {
                     .level_count(1)],
             );
         }
+    }
+
+    pub fn recreate_swapchain(&mut self) {
+        let surface_capabilities = self.surface_capabilities();
+        let size = self.swapchain_size;
+        let surface_resolution = match surface_capabilities.current_extent.width {
+            u32::MAX => vk::Extent2D {
+                width: size.width,
+                height: size.height,
+            },
+            _ => surface_capabilities.current_extent,
+        };
+        if surface_resolution.width == 0
+            || surface_resolution.height == 0
+            || surface_resolution == size
+        {
+            return;
+        }
+        self.swapchain_size = surface_resolution;
+        scope_time!(
+            "resize {}x{}",
+            surface_resolution.width,
+            surface_resolution.height
+        );
+        let pre_transform = if surface_capabilities
+            .supported_transforms
+            .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
+        {
+            vk::SurfaceTransformFlagsKHR::IDENTITY
+        } else {
+            surface_capabilities.current_transform
+        };
+        let present_mode = self
+            .surface_present_modes
+            .iter()
+            .find(|&mode| *mode == vk::PresentModeKHR::MAILBOX)
+            .copied()
+            .unwrap_or(vk::PresentModeKHR::FIFO);
+        let mut desired_image_count = surface_capabilities.min_image_count + 1;
+        if surface_capabilities.max_image_count > 0 {
+            desired_image_count = surface_capabilities
+                .max_image_count
+                .min(desired_image_count);
+        }
+        // Destroy old swap chain images
+        let old_swapchain = self.swapchain;
+        self.swapchain = unsafe {
+            self.swapchain_loader
+                .create_swapchain(
+                    &vk::SwapchainCreateInfoKHR::default()
+                        .surface(self.surface)
+                        .min_image_count(desired_image_count)
+                        .image_color_space(self.surface_format.color_space)
+                        .image_format(self.surface_format.format)
+                        .image_extent(surface_resolution)
+                        .image_array_layers(1)
+                        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                        .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+                        .pre_transform(pre_transform)
+                        .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+                        .present_mode(present_mode)
+                        .old_swapchain(old_swapchain)
+                        .clipped(true),
+                    None,
+                )
+                .unwrap()
+        };
+
+        if old_swapchain != Default::default() {
+            self.swapchain_images.clear();
+            unsafe {
+                self.swapchain_img_views
+                    .drain(..)
+                    .for_each(|image_view| gpu().destroy_image_view(image_view, None));
+            }
+            unsafe { self.swapchain_loader.destroy_swapchain(old_swapchain, None) };
+        }
+
+        self.swapchain_images = unsafe {
+            self.swapchain_loader
+                .get_swapchain_images(self.swapchain)
+                .unwrap()
+        };
+        self.swapchain_img_views = self
+            .swapchain_images
+            .iter()
+            .enumerate()
+            .map(|(i, &swapchain_image)| unsafe {
+                let img_view = gpu()
+                    .create_image_view(
+                        &vk::ImageViewCreateInfo::default()
+                            .view_type(vk::ImageViewType::TYPE_2D)
+                            .format(self.surface_format.format)
+                            .components(vk::ComponentMapping {
+                                r: vk::ComponentSwizzle::IDENTITY,
+                                g: vk::ComponentSwizzle::IDENTITY,
+                                b: vk::ComponentSwizzle::IDENTITY,
+                                a: vk::ComponentSwizzle::IDENTITY,
+                            })
+                            .subresource_range(
+                                vk::ImageSubresourceRange::default()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .layer_count(1)
+                                    .level_count(1),
+                            )
+                            .image(swapchain_image),
+                        None,
+                    )
+                    .unwrap();
+                debug_name(&format!("swapchain img {i}"), swapchain_image);
+                debug_name(&format!("swapchain img view {i}"), img_view);
+                img_view
+            })
+            .collect();
+
+        gpu_idle();
+    }
+
+    pub fn acquire_img(&mut self, signal: vk::Semaphore) {
+        if self.swapchain == vk::SwapchainKHR::null() {
+            self.recreate_swapchain();
+        }
+        unsafe {
+            self.swapchain_img_idx = self
+                .swapchain_loader
+                .acquire_next_image(self.swapchain, u64::MAX, signal, vk::Fence::null())
+                .unwrap()
+                .0 as usize;
+        }
+    }
+
+    pub fn present(&mut self, wait: &[vk::Semaphore]) {
+        unsafe {
+            self.swapchain_loader
+                .queue_present(
+                    queue(),
+                    &vk::PresentInfoKHR::default()
+                        .wait_semaphores(wait)
+                        .swapchains(&[self.swapchain])
+                        .image_indices(&[self.swapchain_img_idx as u32]),
+                )
+                .unwrap_or_else(|_| {
+                    self.recreate_swapchain();
+                    false
+                })
+        };
+    }
+
+    pub fn cur_img(&self) -> vk::Image {
+        self.swapchain_images[self.swapchain_img_idx]
+    }
+
+    pub fn cur_img_view(&self) -> vk::ImageView {
+        self.swapchain_img_views[self.swapchain_img_idx]
+    }
+
+    fn surface_capabilities(&self) -> vk::SurfaceCapabilitiesKHR {
+        let mut surface_caps = vk::SurfaceCapabilities2KHR::default();
+        unsafe {
+            self.surface_caps2_loader
+                .get_physical_device_surface_capabilities2(
+                    physical_gpu(),
+                    &vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(self.surface),
+                    &mut surface_caps,
+                )
+                .unwrap()
+        };
+        surface_caps.surface_capabilities
     }
 }
 
