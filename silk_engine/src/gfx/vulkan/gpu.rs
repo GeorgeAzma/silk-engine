@@ -1,4 +1,4 @@
-use crate::queue_family_index;
+use crate::{alloc_callbacks, queue_family_index};
 
 use super::{config::*, instance};
 use ash::vk;
@@ -99,7 +99,7 @@ static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
     #[cfg(debug_assertions)]
     let info = info.push_next(&mut pipeline_exec_props);
     instance()
-        .create_device(physical_gpu(), &info, None)
+        .create_device(physical_gpu(), &info, alloc_callbacks())
         .expect("Failed to create VkDevice")
 });
 

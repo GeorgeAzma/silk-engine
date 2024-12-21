@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{gpu, QUEUE_FAMILY_INDEX};
+use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
 use crate::{gpu_mem_props, log};
 use ash::vk;
 use vk::Handle;
@@ -42,11 +42,12 @@ impl MappedRange {
     }
 }
 
-struct MemBlock {
+struct BufMem {
     mem: vk::DeviceMemory,
-    size: u64,
+    size: vk::DeviceSize,
     mapped_range: Option<MappedRange>,
     props: vk::MemoryPropertyFlags,
+    usage: vk::BufferUsageFlags,
 }
 
 // TODO: make more efficient, implement actual allocator strategy and remove redundant calculations
@@ -55,7 +56,7 @@ struct MemBlock {
 // TODO: when buffer is full, allocate new buffer (maybe copy old data to new buffer)
 
 pub struct BufferAlloc {
-    buf_mems: HashMap<u64, MemBlock>,
+    buf_mems: HashMap<vk::DeviceSize, BufMem>,
 }
 
 impl Default for BufferAlloc {
@@ -73,7 +74,7 @@ impl BufferAlloc {
 
     pub fn alloc(
         &mut self,
-        size: u64,
+        size: vk::DeviceSize,
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
@@ -105,48 +106,42 @@ impl BufferAlloc {
         unsafe { gpu().bind_buffer_memory(buffer, mem, 0).unwrap() };
         self.buf_mems.insert(
             buffer.as_raw(),
-            MemBlock {
+            BufMem {
                 mem,
                 size,
                 mapped_range: None,
                 props: mem_props,
+                usage,
             },
         );
         log!(
-            "Alloc {:?} bytes, {:?}, {:?}",
-            mem_reqs.size,
+            "Alloc {:?}, {:?}, {:?}",
+            crate::util::Mem::b(mem_reqs.size),
             usage,
             mem_props
         );
         buffer
     }
 
-    pub fn alloc_staging_src<T: ?Sized>(&mut self, data: &T) -> vk::Buffer {
-        let staging_buffer = self.alloc(
-            size_of_val(data) as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        );
-        self.write_mapped(staging_buffer, data);
-        staging_buffer
-    }
-
-    pub fn alloc_staging_dst<T: ?Sized>(&mut self, data: &T) -> vk::Buffer {
-        let staging_buffer = self.alloc(
-            size_of_val(data) as u64,
-            vk::BufferUsageFlags::TRANSFER_DST,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        );
-        self.write_mapped(staging_buffer, data);
-        staging_buffer
-    }
-
     pub fn dealloc(&mut self, buffer: vk::Buffer) {
         let mem = self.buf_mems.remove(&buffer.as_raw()).unwrap();
         unsafe {
-            gpu().destroy_buffer(buffer, None);
-            gpu().free_memory(mem.mem, None);
+            gpu().destroy_buffer(buffer, alloc_callbacks());
+            gpu().free_memory(mem.mem, alloc_callbacks());
         }
+    }
+
+    /// does not copy memory
+    pub fn realloc(&mut self, buffer: vk::Buffer, new_size: vk::DeviceSize) -> vk::Buffer {
+        let BufMem {
+            mem: _,
+            size: _,
+            mapped_range: _,
+            props,
+            usage,
+        } = self.buf_mems[&buffer.as_raw()];
+        self.dealloc(buffer);
+        self.alloc(new_size, usage, props)
     }
 
     pub fn map(&mut self, buffer: vk::Buffer) -> *mut u8 {
@@ -176,6 +171,15 @@ impl BufferAlloc {
             },
             &range,
         ));
+        log!(
+            "Mapped({:X}): off({off}), size({})",
+            block.mem.as_raw(),
+            if size == vk::WHOLE_SIZE {
+                "WHOLE".to_string()
+            } else {
+                size.to_string()
+            }
+        );
         block.mapped_range.as_ref().unwrap().ptr
     }
 
@@ -185,34 +189,74 @@ impl BufferAlloc {
         unsafe { gpu().unmap_memory(block.mem) }
     }
 
-    pub fn write_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &T) {
+    pub fn write_mapped_off<T: ?Sized>(
+        &mut self,
+        buffer: vk::Buffer,
+        data: &T,
+        off: vk::DeviceSize,
+    ) {
         unsafe {
             assert!(
-                self.get_size(buffer) >= size_of_val(data) as u64,
-                "write failed, buffer is too small"
+                self.get_size(buffer) - off >= size_of_val(data) as vk::DeviceSize,
+                "buffer size({}){} is too small for data({})",
+                self.get_size(buffer) - off,
+                if off > 0 {
+                    format!("-off({off})")
+                } else {
+                    String::new()
+                },
+                size_of_val(data)
             );
-            let mem_ptr = self.map(buffer);
+            let mem_ptr = self.map(buffer).byte_add(off as usize);
             mem_ptr.copy_from_nonoverlapping(data as *const T as *const u8, size_of_val(data));
         }
     }
 
-    pub fn read_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &mut T) {
+    pub fn read_mapped_off<T: ?Sized>(
+        &mut self,
+        buffer: vk::Buffer,
+        data: &mut T,
+        off: vk::DeviceSize,
+    ) {
         unsafe {
             assert!(
-                self.get_size(buffer) >= size_of_val(data) as u64,
-                "write failed, buffer is too small"
+                self.get_size(buffer) - off >= size_of_val(data) as vk::DeviceSize,
+                "buffer size({}){} is too small for data({})",
+                self.get_size(buffer) - off,
+                if off > 0 {
+                    format!("-off({off})")
+                } else {
+                    String::new()
+                },
+                size_of_val(data)
             );
-            let mem_ptr = self.map(buffer);
+            let mem_ptr = self.map(buffer).byte_add(off as usize);
             (data as *mut T as *mut u8).copy_from_nonoverlapping(mem_ptr, size_of_val(data));
         }
+    }
+
+    pub fn write_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &T) {
+        self.write_mapped_off(buffer, data, 0);
+    }
+
+    pub fn read_mapped<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &mut T) {
+        self.read_mapped_off(buffer, data, 0);
     }
 
     pub fn get_mem(&self, buffer: vk::Buffer) -> vk::DeviceMemory {
         self.buf_mems[&buffer.as_raw()].mem
     }
 
-    pub fn get_size(&self, buffer: vk::Buffer) -> u64 {
+    pub fn get_size(&self, buffer: vk::Buffer) -> vk::DeviceSize {
         self.buf_mems[&buffer.as_raw()].size
+    }
+
+    pub fn get_props(&self, buffer: vk::Buffer) -> vk::MemoryPropertyFlags {
+        self.buf_mems[&buffer.as_raw()].props
+    }
+
+    pub fn get_usage(&self, buffer: vk::Buffer) -> vk::BufferUsageFlags {
+        self.buf_mems[&buffer.as_raw()].usage
     }
 
     pub fn is_mappable(&self, buffer: vk::Buffer) -> bool {

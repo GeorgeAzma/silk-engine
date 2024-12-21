@@ -1,3 +1,6 @@
+# Fixes
+- Free memory properly at the end
+
 # Functionality
 - image loading
 - simple scene

@@ -18,6 +18,18 @@ static PIPELINE_EXEC_PROPS_LOADER: LazyLock<ash::khr::pipeline_executable_proper
         }
     });
 
+static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
+    let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
+    unsafe {
+        gpu()
+            .create_pipeline_cache(
+                &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
+                None,
+            )
+            .unwrap_or_default()
+    }
+});
+
 #[derive(Default, Clone)]
 pub struct PipelineStageInfo {
     pub stage: vk::ShaderStageFlags,
@@ -301,29 +313,17 @@ impl GraphicsPipeline {
         if self.render_pass == Default::default() {
             info = info.push_next(&mut rendering_info);
         }
-        let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
-        let pipeline_cache = unsafe {
-            gpu()
-                .create_pipeline_cache(
-                    &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
-                    None,
-                )
-                .unwrap_or_default()
-        };
         let graphics_pipelines = unsafe {
             gpu()
-                .create_graphics_pipelines(pipeline_cache, &[info], None)
+                .create_graphics_pipelines(*PIPELINE_CACHE, &[info], alloc_callbacks())
                 .unwrap()
         };
         std::fs::write(pipeline_cache_path(), unsafe {
             gpu()
-                .get_pipeline_cache_data(pipeline_cache)
+                .get_pipeline_cache_data(*PIPELINE_CACHE)
                 .unwrap_or_default()
         })
         .unwrap_or_default();
-        unsafe {
-            gpu().destroy_pipeline_cache(pipeline_cache, None);
-        }
         let gp = graphics_pipelines[0];
         #[cfg(debug_assertions)]
         unsafe {
@@ -392,19 +392,10 @@ impl GraphicsPipeline {
 pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
     let shader = Shader::new(shader_name);
     let module = shader.create_module(); // TODO: destroy
-    let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
-    let pipeline_cache = unsafe {
-        gpu()
-            .create_pipeline_cache(
-                &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
-                None,
-            )
-            .unwrap_or_default()
-    };
     let compute_pipeline = unsafe {
         gpu()
             .create_compute_pipelines(
-                pipeline_cache,
+                *PIPELINE_CACHE,
                 &[vk::ComputePipelineCreateInfo::default().stage(
                     vk::PipelineShaderStageCreateInfo::default()
                         .stage(vk::ShaderStageFlags::COMPUTE)
@@ -420,12 +411,12 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
     };
     std::fs::write(pipeline_cache_path(), unsafe {
         gpu()
-            .get_pipeline_cache_data(pipeline_cache)
+            .get_pipeline_cache_data(*PIPELINE_CACHE)
             .unwrap_or_default()
     })
     .unwrap_or_default();
     unsafe {
-        gpu().destroy_pipeline_cache(pipeline_cache, None);
+        gpu().destroy_shader_module(module, alloc_callbacks());
     }
     compute_pipeline[0]
 }

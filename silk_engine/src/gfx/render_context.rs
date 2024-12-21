@@ -4,13 +4,14 @@ use ash::vk;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
+use crate::util::Mem;
 use crate::{gpu, gpu_idle, scope_time};
 
 use super::shader::Shader;
 use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
 use super::{
-    entry, instance, physical_gpu, queue, BufferAlloc, CmdAlloc, DSLManager, DescAlloc,
-    PipelineLayoutManager, RenderPass,
+    alloc_callbacks, entry, instance, physical_gpu, queue, BufferAlloc, CmdAlloc, DSLManager,
+    DescAlloc, PipelineLayoutManager, RenderPass,
 };
 
 #[cfg(debug_assertions)]
@@ -29,12 +30,12 @@ impl Frame {
         Self {
             img_available: unsafe {
                 gpu()
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
                     .unwrap()
             },
             render_done: unsafe {
                 gpu()
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
                     .unwrap()
             },
             prev_frame_done: unsafe {
@@ -182,6 +183,12 @@ impl RenderContext {
         {
             slf.add_cmds_numbered("render", slf.frames.len());
             slf.add_cmd("init");
+            slf.add_buffer(
+                "staging",
+                *Mem::mb(64),
+                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
+                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+            );
         }
         slf
     }
@@ -218,7 +225,7 @@ impl RenderContext {
         self.end_cmd();
 
         // wait(image_available), submit cmd, signal(render_finished)
-        let frame = self.frames[self.cur_frame].clone();
+        let frame = self.frames[self.cur_frame];
         self.submit_cmd(
             &cmd_name,
             queue(),
@@ -231,10 +238,7 @@ impl RenderContext {
         window.pre_present_notify();
         self.present(&[frame.render_done]);
 
-        #[allow(clippy::modulo_one)]
-        {
-            self.cur_frame = (self.cur_frame + 1) % self.frames.len();
-        }
+        self.cur_frame = (self.cur_frame + 1) % self.frames.len();
     }
 
     pub fn shader(&self, name: &str) -> &Shader {
@@ -286,7 +290,7 @@ impl RenderContext {
         pipeline_info: GraphicsPipeline,
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
-        scope_time!("create pipeline: {name}");
+        scope_time!("Create pipeline({name})");
         let shader_data = &self.shaders[shader_name];
         let pipeline_info = pipeline_info
             .layout(shader_data.pipeline_layout)
@@ -386,7 +390,7 @@ impl RenderContext {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
-        let buf = self.buffer_alloc.alloc(size, usage, mem_props); // TODO: free
+        let buf = self.buffer_alloc.alloc(size, usage, mem_props);
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists: {name}");
         debug_name(name, buf);
@@ -398,8 +402,21 @@ impl RenderContext {
         self.buffer_alloc.dealloc(buf);
     }
 
+    pub fn recreate_buffer(&mut self, name: &str, size: u64) -> vk::Buffer {
+        let buffer = self.buffer(name);
+        *self
+            .buffers
+            .entry(name.to_string())
+            .and_modify(|e| *e = self.buffer_alloc.realloc(buffer, size))
+            .or_default()
+    }
+
     pub fn buffer(&self, name: &str) -> vk::Buffer {
         self.buffers[name]
+    }
+
+    pub fn buffer_size(&self, name: &str) -> u64 {
+        self.buffer_alloc.get_size(self.buffer(name))
     }
 
     pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
@@ -423,7 +440,7 @@ impl RenderContext {
         }
         assert!(
             self.cmd_state.cmd == Default::default(),
-            "failed to begin cmd, other cmd is already begun: {name}"
+            "cmd begun when other cmd was running: {name}"
         );
         self.cmd_state.cmd = cmd;
         self.cmd_state.cmd_name = name.to_string();
@@ -452,9 +469,16 @@ impl RenderContext {
         self.cmd_state = Default::default();
     }
 
-    pub fn submit(&mut self) {
+    pub fn wait_cmd(&mut self) {
         let cmd = self.cmd_name().to_string();
-        self.submit_cmd(&cmd, queue(), &[], &[], &[], vk::Fence::null());
+        let fence = unsafe {
+            gpu()
+                .create_fence(&vk::FenceCreateInfo::default(), alloc_callbacks())
+                .unwrap()
+        };
+        self.submit_cmd(&cmd, queue(), &[], &[], &[], fence);
+        unsafe { gpu().wait_for_fences(&[fence], false, u64::MAX).unwrap() };
+        unsafe { gpu().destroy_fence(fence, alloc_callbacks()) };
     }
 
     pub fn submit_cmd(
@@ -634,15 +658,27 @@ impl RenderContext {
         }
     }
 
-    pub fn bind_vert(&self, name: &str) {
+    pub fn bind_vbo(&self, name: &str) {
         unsafe {
             gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
         }
     }
 
-    pub fn bind_index(&self, name: &str) {
+    pub fn bind_ebo(&self, name: &str) {
         unsafe {
             gpu().cmd_bind_index_buffer(self.cmd(), self.buffers[name], 0, vk::IndexType::UINT32);
+        }
+    }
+
+    pub fn bind_vao(&self, name: &str, index_buffer_offset: vk::DeviceSize) {
+        unsafe {
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
+            gpu().cmd_bind_index_buffer(
+                self.cmd(),
+                self.buffers[name],
+                index_buffer_offset,
+                vk::IndexType::UINT32,
+            );
         }
     }
 
@@ -703,35 +739,76 @@ impl RenderContext {
         }
     }
 
-    pub fn copy_buffer(&mut self, src_buffer: vk::Buffer, dst_buffer: vk::Buffer) {
+    pub fn copy_buffer_off(
+        &mut self,
+        src_buffer: vk::Buffer,
+        dst_buffer: vk::Buffer,
+        src_off: vk::DeviceSize,
+        dst_off: vk::DeviceSize,
+    ) {
         let cmd = self.begin_cmd("init");
-        let buf_size = self.buffer_alloc.get_size(src_buffer) as usize;
         unsafe {
-            let copy_region = vk::BufferCopy::default().size(buf_size as u64);
+            // let buffer_usage = self.buffer_alloc.get_usage(dst_buffer);
+            // if buffer_usage.contains(vk::BufferUsageFlags::VERTEX_BUFFER)
+            //     || buffer_usage.contains(vk::BufferUsageFlags::INDEX_BUFFER)
+            // {
+            //     gpu().cmd_pipeline_barrier(
+            //         cmd,
+            //         vk::PipelineStageFlags::VERTEX_INPUT,
+            //         vk::PipelineStageFlags::TRANSFER,
+            //         vk::DependencyFlags::empty(),
+            //         &[],
+            //         &[vk::BufferMemoryBarrier::default()
+            //             .src_access_mask(vk::AccessFlags::VERTEX_ATTRIBUTE_READ)
+            //             .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+            //             .buffer(dst_buffer)
+            //             .size(vk::WHOLE_SIZE)],
+            //         &[],
+            //     );
+            // }
+            let buf_size = self.buffer_alloc.get_size(src_buffer);
+            let buf_size = buf_size.min(self.buffer_alloc.get_size(dst_buffer));
+            let copy_region = vk::BufferCopy::default()
+                .size(buf_size)
+                .src_offset(src_off)
+                .dst_offset(dst_off);
             gpu().cmd_copy_buffer(cmd, src_buffer, dst_buffer, &[copy_region]);
         }
-        self.submit();
+        self.wait_cmd();
     }
 
-    pub fn write_buffer<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &T) {
+    pub fn copy_buffer(&mut self, src_buffer: vk::Buffer, dst_buffer: vk::Buffer) {
+        self.copy_buffer_off(src_buffer, dst_buffer, 0, 0);
+    }
+
+    pub fn write_buffer_off<T: ?Sized>(&mut self, name: &str, data: &T, off: vk::DeviceSize) {
+        let buffer = self.buffer(name);
         if self.buffer_alloc.is_mappable(buffer) {
-            self.buffer_alloc.write_mapped(buffer, data);
+            self.buffer_alloc.write_mapped_off(buffer, data, off);
         } else {
-            let staging_buffer = self.buffer_alloc.alloc_staging_src(data);
-            self.copy_buffer(staging_buffer, buffer);
-            self.buffer_alloc.dealloc(staging_buffer);
+            let staging = self.buffer("staging");
+            self.buffer_alloc.write_mapped(staging, data);
+            self.copy_buffer_off(staging, buffer, 0, off);
         }
     }
 
-    pub fn read_buffer<T: ?Sized>(&mut self, buffer: vk::Buffer, data: &mut T) {
+    pub fn read_buffer_off<T: ?Sized>(&mut self, name: &str, data: &mut T, off: vk::DeviceSize) {
+        let buffer = self.buffer(name);
         if self.buffer_alloc.is_mappable(buffer) {
-            self.buffer_alloc.read_mapped(buffer, data);
+            self.buffer_alloc.read_mapped_off(buffer, data, off);
         } else {
-            let staging_buffer = self.buffer_alloc.alloc_staging_dst(data);
-            self.copy_buffer(buffer, staging_buffer);
+            let staging_buffer = self.buffer("staging");
+            self.copy_buffer_off(buffer, staging_buffer, off, 0);
             self.buffer_alloc.read_mapped(staging_buffer, data);
-            self.buffer_alloc.dealloc(staging_buffer);
         }
+    }
+
+    pub fn write_buffer<T: ?Sized>(&mut self, name: &str, data: &T) {
+        self.write_buffer_off(name, data, 0);
+    }
+
+    pub fn read_buffer<T: ?Sized>(&mut self, name: &str, data: &mut T) {
+        self.read_buffer_off(name, data, 0);
     }
 
     pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
@@ -820,9 +897,12 @@ impl RenderContext {
             unsafe {
                 self.swapchain_img_views
                     .drain(..)
-                    .for_each(|image_view| gpu().destroy_image_view(image_view, None));
+                    .for_each(|image_view| gpu().destroy_image_view(image_view, alloc_callbacks()));
             }
-            unsafe { self.swapchain_loader.destroy_swapchain(old_swapchain, None) };
+            unsafe {
+                self.swapchain_loader
+                    .destroy_swapchain(old_swapchain, alloc_callbacks())
+            };
         }
 
         self.swapchain_images = unsafe {

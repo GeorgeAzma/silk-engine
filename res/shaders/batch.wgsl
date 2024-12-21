@@ -5,6 +5,8 @@ struct BatchVertex {
     @location(3) stroke_color: vec4f,
     @location(4) stroke_width: f32,
     @location(5) roundness: f32,
+    @location(6) rotation: f32,
+    @location(7) center: vec2f,
 }
 
 struct VSOut {
@@ -30,5 +32,5 @@ fn vs_main(in: BatchVertex) -> VSOut {
 
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
-    return vec4f(1.0, 1.0, 0.0, 1.0);
+    return in.color;
 }

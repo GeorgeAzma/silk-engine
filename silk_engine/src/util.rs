@@ -32,6 +32,7 @@ macro_rules! expose {
     };
 }
 
+#[allow(unused)]
 pub fn to_slice_u8<T>(data: &T) -> &[u8] {
     assert!(size_of::<T>() > 0, "Cannot cast a zero-sized type");
     unsafe { std::slice::from_raw_parts(data as *const T as *const u8, size_of_val(data)) }
@@ -48,11 +49,13 @@ pub fn to_slice<A, B>(data: &A) -> &[B] {
     }
 }
 
+#[allow(unused)]
 pub fn to_slice_u8_mut<T>(data: &mut T) -> &mut [u8] {
     assert!(size_of::<T>() > 0, "Cannot cast a zero-sized type");
     unsafe { std::slice::from_raw_parts_mut(data as *mut T as *mut u8, size_of_val(data)) }
 }
 
+#[allow(unused)]
 pub fn to_slice_mut<A, B>(data: &mut A) -> &mut [B] {
     assert!(size_of::<A>() > 0, "Cannot cast a zero-sized type");
     assert!(size_of::<B>() > 0, "Cannot cast to zero-sized type");

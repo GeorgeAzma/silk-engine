@@ -1,4 +1,4 @@
-use super::gpu;
+use super::{alloc_callbacks, gpu};
 use ash::vk;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -46,17 +46,18 @@ impl DSLManager {
         let dslbs = bindings.iter().map(|b| b.into()).collect::<Vec<_>>();
         let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&dslbs);
         let dslbs = DSLBindings(bindings.to_vec());
-        *self
-            .dsls
-            .entry(dslbs)
-            .or_insert(unsafe { gpu().create_descriptor_set_layout(&info, None).unwrap() })
+        *self.dsls.entry(dslbs).or_insert(unsafe {
+            gpu()
+                .create_descriptor_set_layout(&info, alloc_callbacks())
+                .unwrap()
+        })
     }
 }
 
 impl Drop for DSLManager {
     fn drop(&mut self) {
         for dsl in self.dsls.values() {
-            unsafe { gpu().destroy_descriptor_set_layout(*dsl, None) };
+            unsafe { gpu().destroy_descriptor_set_layout(*dsl, alloc_callbacks()) };
         }
     }
 }

@@ -202,7 +202,7 @@ impl Drop for ScopeTime {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
         let callers = backtrace_callers();
-        let caller = &callers[callers.len() - 1];
+        let caller = &callers[callers.len() - 2];
         crate::log!("[{}] {}: {:?}", caller, self.name, elapsed);
     }
 }

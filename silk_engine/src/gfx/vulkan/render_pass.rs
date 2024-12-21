@@ -1,6 +1,6 @@
 use ash::vk;
 
-use super::gpu;
+use super::{alloc_callbacks, gpu};
 
 #[derive(Default, Clone)]
 pub struct RenderPass {
@@ -51,7 +51,7 @@ impl RenderPass {
     ) {
         unsafe {
             for &fb in self.framebuffers.iter() {
-                gpu().destroy_framebuffer(fb, None);
+                gpu().destroy_framebuffer(fb, alloc_callbacks());
             }
             self.framebuffers.resize(count, vk::Framebuffer::null());
             for i in 0..count {
@@ -107,9 +107,9 @@ impl RenderPass {
     pub fn destroy(self) {
         unsafe {
             for fb in self.framebuffers {
-                gpu().destroy_framebuffer(fb, None);
+                gpu().destroy_framebuffer(fb, alloc_callbacks());
             }
-            gpu().destroy_render_pass(self.render_pass, None);
+            gpu().destroy_render_pass(self.render_pass, alloc_callbacks());
         }
     }
 }

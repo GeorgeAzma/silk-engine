@@ -111,10 +111,16 @@ impl<A: App> AppContext<A> {
         }
         scope_time!("render {}", self.frame; self.frame < 4);
 
+        // TODO:
+        // gfx().rect() and such must be done before flush()
+        // flush() must be done before render cmd begins
+        // make such that gfx().rect() can be called in render()
+        self.batch_renderer.flush();
         self.ctx().begin_frame();
 
         self.my_app().render();
-        self.batch_renderer.render_dynamic();
+        self.batch_renderer.render();
+        self.batch_renderer.reset();
 
         self.render_ctx.lock().unwrap().end_frame(&self.window);
 
@@ -179,14 +185,6 @@ impl<A: App> AppContext<A> {
 
     pub fn gfx(&mut self) -> &mut BatchRenderer {
         &mut self.batch_renderer
-    }
-
-    pub fn write_buffer<T>(&mut self, buffer: vk::Buffer, data: &T) {
-        self.ctx().write_buffer(buffer, data);
-    }
-
-    pub fn read_buffer<T>(&mut self, buffer: vk::Buffer, data: &mut T) {
-        self.ctx().read_buffer(buffer, data);
     }
 
     pub fn center_window(&self) {

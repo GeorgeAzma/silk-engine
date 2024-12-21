@@ -1,4 +1,4 @@
-use super::{gpu, QUEUE_FAMILY_INDEX};
+use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
 use ash::vk;
 
 pub struct CmdAlloc {
@@ -17,7 +17,11 @@ impl CmdAlloc {
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(*QUEUE_FAMILY_INDEX);
         Self {
-            pool: unsafe { gpu().create_command_pool(&pool_info, None).unwrap() },
+            pool: unsafe {
+                gpu()
+                    .create_command_pool(&pool_info, alloc_callbacks())
+                    .unwrap()
+            },
         }
     }
 

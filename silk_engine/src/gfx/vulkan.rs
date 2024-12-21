@@ -1,4 +1,4 @@
-use std::sync::LazyLock;
+use std::{ptr::null_mut, sync::LazyLock};
 
 pub use ash::vk;
 mod buffer_alloc;
@@ -21,8 +21,25 @@ pub use pipeline::*;
 mod render_pass;
 pub(super) use render_pass::RenderPass;
 
+static ALLOC_CALLBACKS: LazyLock<Option<vk::AllocationCallbacks<'static>>> = LazyLock::new(|| {
+    Some(
+        vk::AllocationCallbacks::default()
+            .pfn_allocation(None)
+            .pfn_free(None)
+            .pfn_internal_allocation(None)
+            .pfn_internal_free(None)
+            .pfn_reallocation(None)
+            .user_data(null_mut()),
+    )
+});
+
+pub fn alloc_callbacks() -> Option<&'static vk::AllocationCallbacks<'static>> {
+    ALLOC_CALLBACKS.as_ref()
+}
+
 static ENTRY: LazyLock<ash::Entry> =
     LazyLock::new(|| unsafe { ash::Entry::load().expect("Failed to load Vulkan") });
+
 static QUEUE_FAMILY_PROPS: LazyLock<Vec<vk::QueueFamilyProperties>> = LazyLock::new(|| unsafe {
     let queue_family_props_len =
         instance().get_physical_device_queue_family_properties2_len(physical_gpu());
@@ -35,6 +52,7 @@ static QUEUE_FAMILY_PROPS: LazyLock<Vec<vk::QueueFamilyProperties>> = LazyLock::
         .map(|qfp| qfp.queue_family_properties)
         .collect()
 });
+
 static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
     QUEUE_FAMILY_PROPS
         .iter()
@@ -45,6 +63,7 @@ static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
         })
         .unwrap_or_default() as u32
 });
+
 static QUEUE: LazyLock<vk::Queue> =
     LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
 

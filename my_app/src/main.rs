@@ -35,7 +35,7 @@ impl App for MyApp<'_> {
 
     fn update(&mut self) {
         let app = &mut self.app;
-        if app.frame % 512 == 0 {
+        if app.frame % 64 == 0 {
             println!(
                 "{:?} ({:.0} fps)",
                 Duration::from_secs_f32(app.dt),
@@ -48,31 +48,21 @@ impl App for MyApp<'_> {
             time: app.time,
             dt: app.dt,
         };
-        {
-            let buf = app.ctx().buffer("global uniform");
-            app.ctx().write_buffer(buf, &uniform_data);
+        app.ctx().write_buffer("global uniform", &uniform_data);
+        let gfx = self.app.gfx();
+        for x in 0..256 {
+            for y in 0..256 {
+                gfx.rect(
+                    -0.99 + x as f32 / 256.0 * 1.98,
+                    -0.99 + y as f32 / 256.0 * 1.98,
+                    0.005,
+                    0.005,
+                );
+            }
         }
     }
 
     fn render(&mut self) {
-        self.app.gfx().add_vert(BatchVertex {
-            pos: [0.1, 0.1],
-            color: [1.0, 0.0, 0.0, 1.0],
-            ..Default::default()
-        });
-        self.app.gfx().add_vert(BatchVertex {
-            pos: [0.5, 0.9],
-            color: [0.0, 1.0, 0.0, 1.0],
-            ..Default::default()
-        });
-        self.app.gfx().add_vert(BatchVertex {
-            pos: [0.9, 0.1],
-            color: [0.0, 0.0, 1.0, 1.0],
-            ..Default::default()
-        });
-        self.app.gfx().add_idx(0);
-        self.app.gfx().add_idx(1);
-        self.app.gfx().add_idx(2);
         let mut ctx = self.app.ctx();
         ctx.bind_pipeline("pipeline");
         ctx.bind_desc_set("global uniform");

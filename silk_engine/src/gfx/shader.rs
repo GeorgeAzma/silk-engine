@@ -32,10 +32,10 @@ impl Shader {
 
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
-            log!("shader cache loaded: \"{name}.spv\"");
+            log!("Shader cache loaded: \"{name}.spv\"");
             crate::util::to_slice(&spirv).to_owned()
         } else {
-            log!("shader loaded: \"{name}.wgsl\"");
+            log!("Shader loaded: \"{name}.wgsl\"");
             // validate wgsl
             let info = naga::valid::Validator::new(
                 naga::valid::ValidationFlags::all(),
