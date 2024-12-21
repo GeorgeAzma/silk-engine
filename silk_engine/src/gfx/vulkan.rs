@@ -1,4 +1,6 @@
-use std::{ptr::null_mut, sync::LazyLock};
+use std::collections::HashMap;
+use std::ffi::c_void;
+use std::sync::{LazyLock, Mutex};
 
 pub use ash::vk;
 mod buffer_alloc;
@@ -21,15 +23,126 @@ pub use pipeline::*;
 mod render_pass;
 pub(super) use render_pass::RenderPass;
 
+use crate::log;
+
+static ALLOCS: LazyLock<Mutex<HashMap<usize, std::alloc::Layout>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[cfg(debug_assertions)]
+fn sys_alloc_scope_str(sys_alloc_scope: vk::SystemAllocationScope) -> String {
+    match sys_alloc_scope {
+        vk::SystemAllocationScope::COMMAND => "command",
+        vk::SystemAllocationScope::OBJECT => "object",
+        vk::SystemAllocationScope::CACHE => "cache",
+        vk::SystemAllocationScope::DEVICE => "device",
+        vk::SystemAllocationScope::INSTANCE => "instance",
+        _ => "unknown",
+    }
+    .to_string()
+}
+
+unsafe extern "system" fn alloc(
+    _user_data: *mut c_void,
+    size: usize,
+    alignment: usize,
+    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+) -> *mut c_void {
+    let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
+    let ptr = std::alloc::alloc_zeroed(layout);
+    if size > 8192 {
+        log!(
+            "vkAlloc: {:?}, align({alignment}), {}, {ptr:?}",
+            crate::util::Mem::b(size),
+            sys_alloc_scope_str(sys_alloc_scope)
+        );
+    }
+    ALLOCS.lock().unwrap().insert(ptr as usize, layout);
+    ptr as *mut _
+}
+
+unsafe extern "system" fn free(_user_data: *mut c_void, ptr: *mut c_void) {
+    if ptr.is_null() {
+        return;
+    }
+    let layout = ALLOCS.lock().unwrap().remove(&(ptr as usize)).unwrap();
+    if layout.size() > 8192 {
+        log!(
+            "vkFree: {}, align({}), {ptr:?}",
+            crate::util::Mem::b(layout.size()),
+            layout.align()
+        );
+    }
+    std::alloc::dealloc(ptr as *mut _, layout)
+}
+
+unsafe extern "system" fn realloc(
+    _user_data: *mut c_void,
+    ptr: *mut c_void,
+    size: usize,
+    alignment: usize,
+    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+) -> *mut c_void {
+    let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
+    ALLOCS
+        .lock()
+        .unwrap()
+        .entry(ptr as usize)
+        .and_modify(|l| *l = layout)
+        .or_insert(layout);
+    let new_ptr = std::alloc::realloc(ptr as *mut _, layout, size);
+    if new_ptr.is_null() {
+        std::alloc::dealloc(ptr as *mut _, layout);
+        return std::ptr::null_mut();
+    }
+    if size > 8192 {
+        log!(
+            "vkRealloc: {}, align({alignment}), {}, {new_ptr:?}",
+            crate::util::Mem::b(size),
+            sys_alloc_scope_str(sys_alloc_scope)
+        );
+    }
+    new_ptr as *mut _
+}
+
+unsafe extern "system" fn internal_alloc(
+    _user_data: *mut c_void,
+    size: usize,
+    _alloc_type: vk::InternalAllocationType,
+    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+) {
+    if size > 8192 {
+        log!(
+            "vkAlloc(internal): {}, {}",
+            crate::util::Mem::b(size),
+            sys_alloc_scope_str(sys_alloc_scope)
+        );
+    }
+}
+
+unsafe extern "system" fn internal_free(
+    _user_data: *mut c_void,
+    size: usize,
+    _alloc_type: vk::InternalAllocationType,
+    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+) {
+    if size > 8192 {
+        log!(
+            "vkFree(internal): {}, {}",
+            crate::util::Mem::b(size),
+            sys_alloc_scope_str(sys_alloc_scope)
+        );
+    }
+}
+
 static ALLOC_CALLBACKS: LazyLock<Option<vk::AllocationCallbacks<'static>>> = LazyLock::new(|| {
     Some(
         vk::AllocationCallbacks::default()
-            .pfn_allocation(None)
-            .pfn_free(None)
-            .pfn_internal_allocation(None)
-            .pfn_internal_free(None)
-            .pfn_reallocation(None)
-            .user_data(null_mut()),
+            .pfn_allocation(Some(alloc))
+            .pfn_free(Some(free))
+            .pfn_internal_allocation(Some(internal_alloc))
+            .pfn_internal_free(Some(internal_free))
+            .pfn_reallocation(Some(realloc))
+            .user_data(std::ptr::null_mut()),
     )
 });
 

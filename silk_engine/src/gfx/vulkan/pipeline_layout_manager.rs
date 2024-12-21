@@ -6,7 +6,7 @@ use std::{
 use ash::vk;
 use vk::Handle;
 
-use super::gpu;
+use super::{alloc_callbacks, gpu};
 
 pub struct PipelineLayoutManager {
     pipeline_layouts: HashMap<PipelineLayoutInfo, vk::PipelineLayout>,
@@ -35,7 +35,7 @@ impl PipelineLayoutManager {
                 gpu()
                     .create_pipeline_layout(
                         &vk::PipelineLayoutCreateInfo::default().set_layouts(set_layouts),
-                        None,
+                        alloc_callbacks(),
                     )
                     .unwrap()
             })

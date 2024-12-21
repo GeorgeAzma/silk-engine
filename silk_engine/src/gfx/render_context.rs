@@ -42,7 +42,7 @@ impl Frame {
                 gpu()
                     .create_fence(
                         &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
-                        None,
+                        alloc_callbacks(),
                     )
                     .unwrap()
             },
@@ -131,10 +131,11 @@ impl RenderContext {
                 instance(),
                 window.display_handle().unwrap().as_raw(),
                 window.window_handle().unwrap().as_raw(),
-                None,
+                alloc_callbacks(),
             )
             .unwrap()
         };
+        debug_name("surface", surface);
         let surface_formats = unsafe {
             surface_loader
                 .get_physical_device_surface_formats(physical_gpu(), surface)
@@ -185,7 +186,7 @@ impl RenderContext {
             slf.add_cmd("init");
             slf.add_buffer(
                 "staging",
-                *Mem::mb(64),
+                *Mem::kb(256) as vk::DeviceSize,
                 vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
@@ -390,6 +391,12 @@ impl RenderContext {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
+        crate::log!(
+            "Alloc({name}) {:?}, {:?}, {:?}",
+            crate::util::Mem::b(size as usize),
+            usage,
+            mem_props
+        );
         let buf = self.buffer_alloc.alloc(size, usage, mem_props);
         let inserted = self.buffers.insert(name.to_string(), buf).is_none();
         assert!(inserted, "buffer already exists: {name}");
@@ -425,7 +432,7 @@ impl RenderContext {
 
     pub fn cmd(&self) -> vk::CommandBuffer {
         let cmd = self.cmd_state.cmd;
-        assert_ne!(cmd, Default::default());
+        assert_ne!(cmd, Default::default(), "no active cmd");
         cmd
     }
 
@@ -453,6 +460,7 @@ impl RenderContext {
                 )
                 .unwrap();
         }
+        self.debug_begin(&format!("Begin Cmd({name})"));
         self.cmd_state.cmd
     }
 
@@ -463,6 +471,7 @@ impl RenderContext {
         if self.cmd_state.render_area != Default::default() {
             self.end_render();
         }
+        self.debug_end();
         unsafe {
             gpu().end_command_buffer(self.cmd()).unwrap();
         }
@@ -537,6 +546,7 @@ impl RenderContext {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: vk::Extent2D { width, height },
         };
+        self.debug_begin(&format!("Begin Render({width}x{height})"));
         unsafe {
             gpu().cmd_begin_rendering(
                 self.cmd(),
@@ -562,6 +572,8 @@ impl RenderContext {
             self.cmd_state.render_area != Default::default(),
             "can't end rendering that has not begun"
         );
+        let width = self.cmd_state.render_area.extent.width;
+        let height = self.cmd_state.render_area.extent.height;
         self.cmd_state.render_area = Default::default();
         unsafe {
             if self.cmd_state.render_pass.render_pass == Default::default() {
@@ -571,6 +583,7 @@ impl RenderContext {
                 self.cmd_state.render_pass = Default::default();
             }
         }
+        self.debug_begin(&format!("End Render({width}x{height})"));
     }
 
     // TODO:
@@ -739,6 +752,14 @@ impl RenderContext {
         }
     }
 
+    pub fn staging_buffer(&mut self, size: vk::DeviceSize) -> vk::Buffer {
+        if self.buffer_size("staging") >= size {
+            self.buffer("staging")
+        } else {
+            self.recreate_buffer("staging", size.next_power_of_two())
+        }
+    }
+
     pub fn copy_buffer_off(
         &mut self,
         src_buffer: vk::Buffer,
@@ -786,7 +807,7 @@ impl RenderContext {
         if self.buffer_alloc.is_mappable(buffer) {
             self.buffer_alloc.write_mapped_off(buffer, data, off);
         } else {
-            let staging = self.buffer("staging");
+            let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
             self.buffer_alloc.write_mapped(staging, data);
             self.copy_buffer_off(staging, buffer, 0, off);
         }
@@ -797,9 +818,9 @@ impl RenderContext {
         if self.buffer_alloc.is_mappable(buffer) {
             self.buffer_alloc.read_mapped_off(buffer, data, off);
         } else {
-            let staging_buffer = self.buffer("staging");
-            self.copy_buffer_off(buffer, staging_buffer, off, 0);
-            self.buffer_alloc.read_mapped(staging_buffer, data);
+            let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
+            self.copy_buffer_off(buffer, staging, off, 0);
+            self.buffer_alloc.read_mapped(staging, data);
         }
     }
 
@@ -887,10 +908,11 @@ impl RenderContext {
                         .present_mode(present_mode)
                         .old_swapchain(old_swapchain)
                         .clipped(true),
-                    None,
+                    alloc_callbacks(),
                 )
                 .unwrap()
         };
+        debug_name("swapchain", self.swapchain);
 
         if old_swapchain != Default::default() {
             self.swapchain_images.clear();
@@ -933,7 +955,7 @@ impl RenderContext {
                                     .level_count(1),
                             )
                             .image(swapchain_image),
-                        None,
+                        alloc_callbacks(),
                     )
                     .unwrap();
                 debug_name(&format!("swapchain img {i}"), swapchain_image);

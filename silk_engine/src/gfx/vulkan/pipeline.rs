@@ -24,7 +24,7 @@ static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
         gpu()
             .create_pipeline_cache(
                 &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
-                None,
+                alloc_callbacks(),
             )
             .unwrap_or_default()
     }
@@ -405,7 +405,7 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
                         .module(module)
                         .specialization_info(&vk::SpecializationInfo::default()),
                 )],
-                None,
+                alloc_callbacks(),
             )
             .unwrap_or_default()
     };

@@ -64,7 +64,7 @@ impl RenderPass {
                             .height(height)
                             .attachments(img_views)
                             .render_pass(self.render_pass),
-                        None,
+                        alloc_callbacks(),
                     )
                     .unwrap();
             }
@@ -97,7 +97,7 @@ impl RenderPass {
                         .subpasses(&[vk::SubpassDescription::default()
                             .color_attachments(&self.attachment_refs)
                             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)]),
-                    None,
+                    alloc_callbacks(),
                 )
                 .unwrap()
         };

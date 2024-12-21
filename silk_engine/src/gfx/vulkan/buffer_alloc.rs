@@ -86,7 +86,7 @@ impl BufferAlloc {
                         .usage(usage)
                         .queue_family_indices(&[*QUEUE_FAMILY_INDEX])
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
-                    None,
+                    alloc_callbacks(),
                 )
                 .unwrap()
         };
@@ -99,7 +99,7 @@ impl BufferAlloc {
                         .allocation_size(mem_reqs.size)
                         .memory_type_index(mem_type_idx)
                         .push_next(&mut vk::MemoryPriorityAllocateInfoEXT::default().priority(0.5)),
-                    None,
+                    alloc_callbacks(),
                 )
                 .unwrap()
         };
@@ -113,12 +113,6 @@ impl BufferAlloc {
                 props: mem_props,
                 usage,
             },
-        );
-        log!(
-            "Alloc {:?}, {:?}, {:?}",
-            crate::util::Mem::b(mem_reqs.size),
-            usage,
-            mem_props
         );
         buffer
     }

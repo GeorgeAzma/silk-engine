@@ -1,4 +1,3 @@
-use std::ffi::CStr;
 use std::ffi::CString;
 use std::sync::LazyLock;
 
@@ -88,8 +87,8 @@ static INSTANCE_EXTENSIONS: LazyLock<Vec<CString>> = LazyLock::new(|| unsafe {
 static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
     let app_info = vk::ApplicationInfo::default()
         .api_version(vk::API_VERSION_1_3)
-        .application_name(CStr::from_bytes_with_nul(b"silky\0").unwrap())
-        .engine_name(CStr::from_bytes_with_nul(b"silk-engine\0").unwrap())
+        .application_name(c"silky")
+        .engine_name(c"silk-engine")
         .application_version(0)
         .engine_version(0);
 
@@ -165,7 +164,7 @@ static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
                             | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
                     )
                     .pfn_user_callback(Some(vulkan_debug_callback)),
-                None,
+                crate::alloc_callbacks(),
             )
             .unwrap()
     };

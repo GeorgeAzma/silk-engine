@@ -1,3 +1,5 @@
+use crate::alloc_callbacks;
+
 use super::gpu;
 use ash::vk;
 
@@ -36,7 +38,7 @@ impl DescAlloc {
                         &vk::DescriptorPoolCreateInfo::default()
                             .max_sets(MAX_SETS)
                             .pool_sizes(&POOL_SIZES),
-                        None,
+                        alloc_callbacks(),
                     )
                     .unwrap()
             },

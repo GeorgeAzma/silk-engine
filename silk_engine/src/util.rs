@@ -32,64 +32,38 @@ macro_rules! expose {
     };
 }
 
-#[allow(unused)]
-pub fn to_slice_u8<T>(data: &T) -> &[u8] {
-    assert!(size_of::<T>() > 0, "Cannot cast a zero-sized type");
-    unsafe { std::slice::from_raw_parts(data as *const T as *const u8, size_of_val(data)) }
-}
-
-pub fn to_slice<A, B>(data: &A) -> &[B] {
-    assert!(size_of::<A>() > 0, "Cannot cast a zero-sized type");
-    assert!(size_of::<B>() > 0, "Cannot cast to zero-sized type");
+pub fn as_slice<T: ?Sized, U>(p: &T) -> &[U] {
     unsafe {
         std::slice::from_raw_parts(
-            data as *const A as *const B,
-            size_of_val(data) / size_of::<B>(),
-        )
-    }
-}
-
-#[allow(unused)]
-pub fn to_slice_u8_mut<T>(data: &mut T) -> &mut [u8] {
-    assert!(size_of::<T>() > 0, "Cannot cast a zero-sized type");
-    unsafe { std::slice::from_raw_parts_mut(data as *mut T as *mut u8, size_of_val(data)) }
-}
-
-#[allow(unused)]
-pub fn to_slice_mut<A, B>(data: &mut A) -> &mut [B] {
-    assert!(size_of::<A>() > 0, "Cannot cast a zero-sized type");
-    assert!(size_of::<B>() > 0, "Cannot cast to zero-sized type");
-    unsafe {
-        std::slice::from_raw_parts_mut(
-            data as *const A as *mut B,
-            size_of_val(data) / size_of::<B>(),
+            (p as *const T) as *const U,
+            std::mem::size_of_val(p) / std::mem::size_of::<U>(),
         )
     }
 }
 
 pub struct Mem {
-    bytes: u64,
+    bytes: usize,
 }
 
 #[allow(unused)]
 impl Mem {
-    pub fn b(bytes: u64) -> Self {
+    pub fn b(bytes: usize) -> Self {
         Self { bytes }
     }
 
-    pub fn kb(kb: u64) -> Self {
+    pub fn kb(kb: usize) -> Self {
         Self { bytes: kb << 10 }
     }
 
-    pub fn mb(mb: u64) -> Self {
+    pub fn mb(mb: usize) -> Self {
         Self { bytes: mb << 20 }
     }
 
-    pub fn gb(gb: u64) -> Self {
+    pub fn gb(gb: usize) -> Self {
         Self { bytes: gb << 30 }
     }
 
-    pub fn tb(tb: u64) -> Self {
+    pub fn tb(tb: usize) -> Self {
         Self { bytes: tb << 40 }
     }
 
@@ -99,33 +73,33 @@ impl Mem {
         }
     }
 
-    pub fn as_bytes(&self) -> u64 {
+    pub fn as_bytes(&self) -> usize {
         self.bytes
     }
 
-    pub fn as_b(&self) -> u64 {
+    pub fn as_b(&self) -> usize {
         self.bytes
     }
 
-    pub fn as_kb(&self) -> u64 {
+    pub fn as_kb(&self) -> usize {
         self.bytes >> 10
     }
 
-    pub fn as_mb(&self) -> u64 {
+    pub fn as_mb(&self) -> usize {
         self.bytes >> 20
     }
 
-    pub fn as_gb(&self) -> u64 {
+    pub fn as_gb(&self) -> usize {
         self.bytes >> 30
     }
 
-    pub fn as_tb(&self) -> u64 {
+    pub fn as_tb(&self) -> usize {
         self.bytes >> 40
     }
 }
 
 impl std::ops::Deref for Mem {
-    type Target = u64;
+    type Target = usize;
 
     fn deref(&self) -> &Self::Target {
         &self.bytes
