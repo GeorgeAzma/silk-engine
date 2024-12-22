@@ -2,6 +2,7 @@ use silk_engine::*;
 
 pub(crate) struct MyApp<'a> {
     app: &'a mut AppContext<Self>,
+    print: Cooldown,
 }
 
 impl App for MyApp<'_> {
@@ -30,17 +31,17 @@ impl App for MyApp<'_> {
             );
             write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
         }
-        Self { app }
+        Self {
+            app,
+            print: Cooldown::ms(256),
+        }
     }
 
     fn update(&mut self) {
         let app = &mut self.app;
-        if app.frame % 64 == 0 {
-            println!(
-                "{:?} ({:.0} fps)",
-                Duration::from_secs_f32(app.dt),
-                1.0 / app.dt
-            );
+        if self.print.ready() {
+            println!("{:?} ({:.0} fps)", Duration::from_secs_f32(app.dt), app.fps);
+            self.print.reset();
         }
         let uniform_data = GlobalUniform {
             resolution: [app.width, app.height],
@@ -60,6 +61,8 @@ impl App for MyApp<'_> {
                 );
             }
         }
+        gfx.color = [255, 32, 100, 255];
+        gfx.circle(0.0, 0.0, 0.3);
     }
 
     fn render(&mut self) {

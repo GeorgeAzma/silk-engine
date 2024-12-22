@@ -87,6 +87,8 @@ struct CmdState {
     desc_sets: Vec<vk::DescriptorSet>,
     render_area: vk::Rect2D,
     render_pass: RenderPass,
+    viewport: vk::Viewport,
+    scissor: vk::Rect2D,
 }
 
 pub struct RenderContext {
@@ -410,12 +412,9 @@ impl RenderContext {
     }
 
     pub fn recreate_buffer(&mut self, name: &str, size: u64) -> vk::Buffer {
-        let buffer = self.buffer(name);
-        *self
-            .buffers
-            .entry(name.to_string())
-            .and_modify(|e| *e = self.buffer_alloc.realloc(buffer, size))
-            .or_default()
+        let buffer = self.buffers.get_mut(name).unwrap();
+        *buffer = self.buffer_alloc.realloc(*buffer, size);
+        *buffer
     }
 
     pub fn buffer(&self, name: &str) -> vk::Buffer {
@@ -618,36 +617,57 @@ impl RenderContext {
     //     }
     // }
 
+    pub fn set_viewport(&mut self, viewport: vk::Viewport) {
+        if self.cmd_state.viewport.width == viewport.width
+            && self.cmd_state.viewport.height == viewport.height
+            && self.cmd_state.viewport.x == viewport.x
+            && self.cmd_state.viewport.y == viewport.y
+            && self.cmd_state.viewport.min_depth == viewport.min_depth
+            && self.cmd_state.viewport.max_depth == viewport.max_depth
+        {
+            return;
+        }
+        self.cmd_state.viewport = viewport;
+        unsafe { gpu().cmd_set_viewport(self.cmd(), 0, &[viewport]) };
+    }
+
+    pub fn set_scissor(&mut self, scissor: vk::Rect2D) {
+        if self.cmd_state.scissor.extent.width == scissor.extent.width
+            && self.cmd_state.scissor.extent.height == scissor.extent.height
+            && self.cmd_state.scissor.offset.x == scissor.offset.x
+            && self.cmd_state.scissor.offset.y == scissor.offset.y
+        {
+            return;
+        }
+        self.cmd_state.scissor = scissor;
+        unsafe { gpu().cmd_set_scissor(self.cmd(), 0, &[scissor]) };
+    }
+
     pub fn bind_pipeline(&mut self, name: &str) {
         let pipeline_data = self.pipelines[name].clone();
+        if pipeline_data.pipeline == self.cmd_state.pipeline_data.pipeline {
+            return;
+        }
         self.cmd_state.pipeline_data = pipeline_data;
 
         unsafe {
-            let dyn_states = &self.cmd_state.pipeline_data.info.dynamic_states;
+            let dyn_states = self.cmd_state.pipeline_data.info.dynamic_states.clone();
             let extent = self.cmd_state.render_area.extent;
             if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
-                gpu().cmd_set_viewport(
-                    self.cmd(),
-                    0,
-                    &[vk::Viewport {
-                        x: 0.0,
-                        y: 0.0,
-                        width: extent.width as f32,
-                        height: extent.height as f32,
-                        min_depth: 0.0,
-                        max_depth: 1.0,
-                    }],
-                );
+                self.set_viewport(vk::Viewport {
+                    x: 0.0,
+                    y: 0.0,
+                    width: extent.width as f32,
+                    height: extent.height as f32,
+                    min_depth: 0.0,
+                    max_depth: 1.0,
+                });
             }
             if dyn_states.contains(&vk::DynamicState::SCISSOR) {
-                gpu().cmd_set_scissor(
-                    self.cmd(),
-                    0,
-                    &[vk::Rect2D {
-                        offset: vk::Offset2D { x: 0, y: 0 },
-                        extent,
-                    }],
-                );
+                self.set_scissor(vk::Rect2D {
+                    offset: vk::Offset2D { x: 0, y: 0 },
+                    extent,
+                });
             }
             gpu().cmd_bind_pipeline(
                 self.cmd(),
@@ -756,7 +776,7 @@ impl RenderContext {
         if self.buffer_size("staging") >= size {
             self.buffer("staging")
         } else {
-            self.recreate_buffer("staging", size.next_power_of_two())
+            self.recreate_buffer("staging", (size + 1).next_power_of_two())
         }
     }
 
@@ -787,8 +807,10 @@ impl RenderContext {
             //         &[],
             //     );
             // }
-            let buf_size = self.buffer_alloc.get_size(src_buffer);
-            let buf_size = buf_size.min(self.buffer_alloc.get_size(dst_buffer));
+            let buf_size = self
+                .buffer_alloc
+                .get_size(src_buffer)
+                .min(self.buffer_alloc.get_size(dst_buffer));
             let copy_region = vk::BufferCopy::default()
                 .size(buf_size)
                 .src_offset(src_off)

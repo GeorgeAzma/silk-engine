@@ -47,13 +47,6 @@ macro_rules! err {
 }
 
 #[macro_export]
-macro_rules! err_abort {
-    ($($args:tt)*) => {
-        panic!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
-    };
-}
-
-#[macro_export]
 macro_rules! warn {
     ($($args:tt)*) => {
         println!("\x1b[38;2;240;230;80m{}\x1b[0m", format_args!($($args)*))

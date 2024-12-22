@@ -1,5 +1,7 @@
 # Fixes
 - Free memory properly at the end
+- Window resize should resize or rerender image
+- gfx() cmds should be in render()
 
 # Functionality
 - image loading

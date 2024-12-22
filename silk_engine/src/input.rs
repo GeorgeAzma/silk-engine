@@ -39,8 +39,12 @@ impl Input {
                 device_id: _,
                 position,
             } => {
-                self.mouse_x = position.x as f32 / width as f32 * 2.0 - 1.0;
-                self.mouse_y = 1.0 - position.y as f32 / height as f32 * 2.0;
+                if width > 0 {
+                    self.mouse_x = position.x as f32 / width as f32 * 2.0 - 1.0;
+                }
+                if height > 0 {
+                    self.mouse_y = 1.0 - position.y as f32 / height as f32 * 2.0;
+                }
             }
             Event::MouseInput {
                 device_id: _,
@@ -62,7 +66,9 @@ impl Input {
                 match delta {
                     MouseScrollDelta::LineDelta(_, y) => self.mouse_scroll = *y,
                     MouseScrollDelta::PixelDelta(p) => {
-                        self.mouse_scroll = p.y as f32 / height as f32
+                        if height > 0 {
+                            self.mouse_scroll = p.y as f32 / height as f32
+                        }
                     }
                 }
             }

@@ -24,6 +24,7 @@ pub use print::*;
 mod gfx;
 pub use gfx::*;
 mod util;
+pub use util::*;
 
 pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
@@ -44,6 +45,7 @@ pub struct AppContext<A: App> {
     pub start_time: std::time::Instant,
     pub time: f32,
     pub dt: f32,
+    pub fps: f32,
     pub frame: u32,
     input: Input,
     pub mouse_x: f32,
@@ -51,7 +53,7 @@ pub struct AppContext<A: App> {
     pub mouse_scroll: f32,
     pub surface_format: vk::Format,
     render_ctx: Arc<Mutex<RenderContext>>,
-    batch_renderer: BatchRenderer,
+    batch_renderer: Renderer,
 }
 
 impl<A: App> AppContext<A> {
@@ -81,6 +83,7 @@ impl<A: App> AppContext<A> {
             start_time: Instant::now(),
             time: 0.0,
             dt: 0.0,
+            fps: 0.0,
             frame: 0,
             input: Input::new(),
             mouse_x: 0.0,
@@ -88,7 +91,7 @@ impl<A: App> AppContext<A> {
             mouse_scroll: 0.0,
             render_ctx: render_ctx.clone(),
             surface_format: surf_format,
-            batch_renderer: BatchRenderer::new(render_ctx.clone()),
+            batch_renderer: Renderer::new(render_ctx.clone()),
         }));
         {
             let app_mut = &mut *app.lock().unwrap();
@@ -101,28 +104,29 @@ impl<A: App> AppContext<A> {
         scope_time!("update {}", self.frame; self.frame < 4);
         let now = Instant::now().duration_since(self.start_time).as_secs_f32();
         self.dt = now - self.time;
+        self.fps = 1.0 / self.dt;
         self.time = now;
         self.my_app().update();
     }
 
     fn render(&mut self) {
-        if self.width == 0 || self.height == 0 {
-            return;
-        }
-        scope_time!("render {}", self.frame; self.frame < 4);
-
         // TODO:
         // gfx().rect() and such must be done before flush()
         // flush() must be done before render cmd begins
         // make such that gfx().rect() can be called in render()
         self.batch_renderer.flush();
-        self.ctx().begin_frame();
 
-        self.my_app().render();
-        self.batch_renderer.render();
+        if self.width != 0 && self.height != 0 {
+            scope_time!("render {}", self.frame; self.frame < 4);
+
+            self.ctx().begin_frame();
+
+            self.my_app().render();
+
+            self.batch_renderer.render();
+            self.render_ctx.lock().unwrap().end_frame(&self.window);
+        }
         self.batch_renderer.reset();
-
-        self.render_ctx.lock().unwrap().end_frame(&self.window);
 
         self.input.reset();
         self.frame += 1;
@@ -159,7 +163,7 @@ impl<A: App> AppContext<A> {
                         self.input.reset();
                     }
                 }
-                Event::CloseRequested => {
+                Event::Destroyed | Event::CloseRequested => {
                     event_loop.exit();
                 }
                 _ => {}
@@ -183,7 +187,7 @@ impl<A: App> AppContext<A> {
         self.render_ctx.lock().unwrap()
     }
 
-    pub fn gfx(&mut self) -> &mut BatchRenderer {
+    pub fn gfx(&mut self) -> &mut Renderer {
         &mut self.batch_renderer
     }
 
@@ -227,12 +231,19 @@ static EVENT_LOOP: LazyLock<Mutex<UnsafeEventLoop>> = LazyLock::new(|| {
 
 static PANIC_HOOK: LazyLock<()> = LazyLock::new(|| {
     std::panic::set_hook(Box::new(|panic_info| {
+        let panic = |s: &str| {
+            println!(
+                "panicked: \x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m",
+                s,
+                crate::backtrace_skip(1)
+            );
+        };
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-            err!("panic occurred: {s:?}");
+            panic(s);
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
-            err!("panic occurred: {s:?}");
+            panic(&s);
         } else {
-            err!("panicked");
+            panic("")
         }
     }));
 });

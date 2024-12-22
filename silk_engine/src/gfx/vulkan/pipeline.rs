@@ -240,6 +240,26 @@ impl GraphicsPipeline {
         self
     }
 
+    pub fn topology(mut self, topology: vk::PrimitiveTopology) -> Self {
+        self.topology = topology;
+        self
+    }
+
+    pub fn polygon_mode(mut self, polygon_mode: vk::PolygonMode) -> Self {
+        self.polygon_mode = polygon_mode;
+        self
+    }
+
+    pub fn cull_back(mut self) -> Self {
+        self.cull_mode |= vk::CullModeFlags::BACK;
+        self
+    }
+
+    pub fn cull_front(mut self) -> Self {
+        self.cull_mode |= vk::CullModeFlags::FRONT;
+        self
+    }
+
     pub fn build(&self) -> vk::Pipeline {
         let stages = self.stages.iter().map(|s| s.into()).collect::<Vec<_>>();
         let vertex_input_state_info = vk::PipelineVertexInputStateCreateInfo::default()
