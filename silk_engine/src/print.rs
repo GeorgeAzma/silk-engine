@@ -109,7 +109,7 @@ pub fn backtrace_skip(last_callers: usize) -> String {
 }
 
 pub fn backtrace() -> String {
-    backtrace_callers().join(" > ")
+    backtrace_skip(0)
 }
 
 #[macro_export]

@@ -114,16 +114,16 @@ impl<A: App> AppContext<A> {
         // gfx().rect() and such must be done before flush()
         // flush() must be done before render cmd begins
         // make such that gfx().rect() can be called in render()
-        self.batch_renderer.flush();
+        self.batch_renderer.flush(); // in [rendered objects] | out [written vbo]
 
         if self.width != 0 && self.height != 0 {
             scope_time!("render {}", self.frame; self.frame < 4);
 
             self.ctx().begin_frame();
 
-            self.my_app().render();
+            self.my_app().render(); // to [swap img render area]
 
-            self.batch_renderer.render();
+            self.batch_renderer.render(); // in [written vbo (vs)] | to [swap img render area]
             self.render_ctx.lock().unwrap().end_frame(&self.window);
         }
         self.batch_renderer.reset();
@@ -235,7 +235,7 @@ static PANIC_HOOK: LazyLock<()> = LazyLock::new(|| {
             println!(
                 "panicked: \x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m",
                 s,
-                crate::backtrace_skip(1)
+                crate::backtrace()
             );
         };
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {

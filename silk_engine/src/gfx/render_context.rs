@@ -91,6 +91,12 @@ struct CmdState {
     scissor: vk::Rect2D,
 }
 
+#[derive(Default)]
+struct FenceData {
+    fence: vk::Fence,
+    signaled: bool,
+}
+
 pub struct RenderContext {
     cmd_state: CmdState,
     // allocators
@@ -107,6 +113,8 @@ pub struct RenderContext {
     cmds: HashMap<String, vk::CommandBuffer>,
     buffers: HashMap<String, vk::Buffer>,
     render_passes: HashMap<String, RenderPass>,
+    fences: HashMap<String, FenceData>,
+    semaphores: HashMap<String, vk::Semaphore>,
     // window context
     surface_caps2_loader: ash::khr::get_surface_capabilities2::Instance,
     pub surface: vk::SurfaceKHR,
@@ -170,6 +178,8 @@ impl RenderContext {
             cmds: Default::default(),
             buffers: Default::default(),
             render_passes: Default::default(),
+            fences: Default::default(),
+            semaphores: Default::default(),
             surface_caps2_loader: surface_caps2,
             surface,
             surface_format,
@@ -192,6 +202,7 @@ impl RenderContext {
                 vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
+            slf.add_fence("cmd wait", false);
         }
         slf
     }
@@ -202,7 +213,6 @@ impl RenderContext {
         self.acquire_img(frame.img_available);
 
         let cmd_name = format!("render{}", self.cur_frame);
-        self.reset_cmd(&cmd_name);
         self.begin_cmd(&cmd_name);
         self.transition_image_layout(
             self.cur_img(),
@@ -273,17 +283,82 @@ impl RenderContext {
 
     pub fn add_render_pass(&mut self, name: &str, mut render_pass: RenderPass) -> vk::RenderPass {
         let rp = render_pass.build();
-        let inserted = self
-            .render_passes
-            .insert(name.to_string(), render_pass)
-            .is_none();
-        assert!(inserted, "render pass already exists: {name}");
+        assert!(
+            self.render_passes
+                .insert(name.to_string(), render_pass)
+                .is_none(),
+            "render pass already exists: {name}"
+        );
         debug_name(name, rp);
         rp
     }
 
     pub fn render_pass(&mut self, name: &str) -> vk::RenderPass {
         self.render_passes[name].render_pass
+    }
+
+    pub fn add_fence(&mut self, name: &str, signaled: bool) {
+        let fence = unsafe {
+            gpu()
+                .create_fence(
+                    &vk::FenceCreateInfo::default().flags(if signaled {
+                        vk::FenceCreateFlags::SIGNALED
+                    } else {
+                        vk::FenceCreateFlags::empty()
+                    }),
+                    alloc_callbacks(),
+                )
+                .unwrap()
+        };
+        debug_name(name, fence);
+        assert!(
+            self.fences
+                .insert(name.to_string(), FenceData { fence, signaled })
+                .is_none(),
+            "fence already exists: {name}"
+        );
+    }
+
+    pub fn fence(&mut self, name: &str) -> vk::Fence {
+        self.fences[name].fence
+    }
+
+    pub fn reset_fence(&mut self, name: &str) -> vk::Fence {
+        let fence = self.fences.get_mut(name).unwrap();
+        if fence.signaled {
+            unsafe { gpu().reset_fences(&[fence.fence]).unwrap() };
+            fence.signaled = false;
+        }
+        fence.fence
+    }
+
+    pub fn wait_fence(&mut self, name: &str) {
+        let fence = self.fences.get_mut(name).unwrap();
+        unsafe {
+            gpu()
+                .wait_for_fences(&[fence.fence], false, u64::MAX)
+                .unwrap()
+        };
+        fence.signaled = true;
+    }
+
+    pub fn add_semaphore(&mut self, name: &str) {
+        let semaphore = unsafe {
+            gpu()
+                .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
+                .unwrap()
+        };
+        debug_name(name, semaphore);
+        assert!(
+            self.semaphores
+                .insert(name.to_string(), semaphore)
+                .is_none(),
+            "semaphore already exists: {name}"
+        );
+    }
+
+    pub fn semaphore(&self, name: &str) -> vk::Semaphore {
+        self.semaphores[name]
     }
 
     pub fn add_pipeline(
@@ -300,18 +375,19 @@ impl RenderContext {
             .stages(&shader_data.pipeline_stages)
             .vert_layout(&shader_data.shader, vert_input_bindings);
         let pipeline = pipeline_info.build();
-        let inserted = self
-            .pipelines
-            .insert(
-                name.to_string(),
-                PipelineData {
-                    pipeline,
-                    info: pipeline_info,
-                    bind_point: vk::PipelineBindPoint::GRAPHICS,
-                },
-            )
-            .is_none();
-        assert!(inserted, "pipeline already exists: {name}");
+        assert!(
+            self.pipelines
+                .insert(
+                    name.to_string(),
+                    PipelineData {
+                        pipeline,
+                        info: pipeline_info,
+                        bind_point: vk::PipelineBindPoint::GRAPHICS,
+                    },
+                )
+                .is_none(),
+            "pipeline already exists: {name}"
+        );
         debug_name(name, pipeline);
         pipeline
     }
@@ -324,8 +400,10 @@ impl RenderContext {
     ) -> vk::DescriptorSet {
         let dsl = self.shaders[shader_name].dsls[group];
         let desc_set = self.desc_alloc.alloc_one(dsl);
-        let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
-        assert!(inserted, "desc set already exists: {name}");
+        assert!(
+            self.desc_sets.insert(name.to_string(), desc_set).is_none(),
+            "desc set already exists: {name}"
+        );
         debug_name(name, desc_set);
         desc_set
     }
@@ -334,8 +412,10 @@ impl RenderContext {
         let dsls = &self.shaders[shader_name].dsls;
         let desc_sets = self.desc_alloc.alloc(dsls);
         for (name, &desc_set) in names.iter().zip(desc_sets.iter()) {
-            let inserted = self.desc_sets.insert(name.to_string(), desc_set).is_none();
-            assert!(inserted, "desc set already exists: {name}");
+            assert!(
+                self.desc_sets.insert(name.to_string(), desc_set).is_none(),
+                "desc set already exists: {name}"
+            );
             debug_name(name, desc_set);
         }
         desc_sets
@@ -348,8 +428,10 @@ impl RenderContext {
     pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
         let cmds = self.cmd_alloc.alloc(names.len() as u32);
         for (&cmd, &name) in cmds.iter().zip(names.iter()) {
-            let inserted = self.cmds.insert(name.to_string(), cmd).is_none();
-            assert!(inserted, "cmd buf already exists: {name}");
+            assert!(
+                self.cmds.insert(name.to_string(), cmd).is_none(),
+                "cmd buf already exists: {name}"
+            );
             debug_name(name, cmd);
         }
         cmds
@@ -400,8 +482,10 @@ impl RenderContext {
             mem_props
         );
         let buf = self.buffer_alloc.alloc(size, usage, mem_props);
-        let inserted = self.buffers.insert(name.to_string(), buf).is_none();
-        assert!(inserted, "buffer already exists: {name}");
+        assert!(
+            self.buffers.insert(name.to_string(), buf).is_none(),
+            "buffer already exists: {name}"
+        );
         debug_name(name, buf);
         buf
     }
@@ -414,6 +498,7 @@ impl RenderContext {
     pub fn recreate_buffer(&mut self, name: &str, size: u64) -> vk::Buffer {
         let buffer = self.buffers.get_mut(name).unwrap();
         *buffer = self.buffer_alloc.realloc(*buffer, size);
+        debug_name(name, *buffer);
         *buffer
     }
 
@@ -479,14 +564,9 @@ impl RenderContext {
 
     pub fn wait_cmd(&mut self) {
         let cmd = self.cmd_name().to_string();
-        let fence = unsafe {
-            gpu()
-                .create_fence(&vk::FenceCreateInfo::default(), alloc_callbacks())
-                .unwrap()
-        };
+        let fence = self.reset_fence("cmd wait");
         self.submit_cmd(&cmd, queue(), &[], &[], &[], fence);
-        unsafe { gpu().wait_for_fences(&[fence], false, u64::MAX).unwrap() };
-        unsafe { gpu().destroy_fence(fence, alloc_callbacks()) };
+        self.wait_fence("cmd wait");
     }
 
     pub fn submit_cmd(
@@ -780,6 +860,8 @@ impl RenderContext {
         }
     }
 
+    // TODO: don't begin cmd unless have to
+    // TODO: automatic barrier system
     pub fn copy_buffer_off(
         &mut self,
         src_buffer: vk::Buffer,

@@ -49,7 +49,7 @@ unsafe extern "system" fn alloc(
 ) -> *mut c_void {
     let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
     let ptr = std::alloc::alloc_zeroed(layout);
-    if size > 8192 {
+    if size > 1024 {
         log!(
             "vkAlloc: {:?}, align({alignment}), {}, {ptr:?}",
             crate::util::Mem::b(size),
@@ -65,7 +65,7 @@ unsafe extern "system" fn free(_user_data: *mut c_void, ptr: *mut c_void) {
         return;
     }
     let layout = ALLOCS.lock().unwrap().remove(&(ptr as usize)).unwrap();
-    if layout.size() > 8192 {
+    if layout.size() > 1024 {
         log!(
             "vkFree: {}, align({}), {ptr:?}",
             crate::util::Mem::b(layout.size()),
@@ -94,7 +94,7 @@ unsafe extern "system" fn realloc(
         std::alloc::dealloc(ptr as *mut _, layout);
         return std::ptr::null_mut();
     }
-    if size > 8192 {
+    if size > 1024 {
         log!(
             "vkRealloc: {}, align({alignment}), {}, {new_ptr:?}",
             crate::util::Mem::b(size),
@@ -110,7 +110,7 @@ unsafe extern "system" fn internal_alloc(
     _alloc_type: vk::InternalAllocationType,
     #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
 ) {
-    if size > 8192 {
+    if size > 1024 {
         log!(
             "vkAlloc(internal): {}, {}",
             crate::util::Mem::b(size),
@@ -125,7 +125,7 @@ unsafe extern "system" fn internal_free(
     _alloc_type: vk::InternalAllocationType,
     #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
 ) {
-    if size > 8192 {
+    if size > 1024 {
         log!(
             "vkFree(internal): {}, {}",
             crate::util::Mem::b(size),
