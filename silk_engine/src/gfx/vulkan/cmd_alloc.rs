@@ -1,5 +1,5 @@
 use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
-use ash::vk;
+use ash::vk::{self, Handle};
 
 pub struct CmdAlloc {
     pool: vk::CommandPool,
@@ -13,9 +13,8 @@ impl Default for CmdAlloc {
 
 impl CmdAlloc {
     pub fn new() -> Self {
-        let pool_info = vk::CommandPoolCreateInfo::default()
-            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(*QUEUE_FAMILY_INDEX);
+        let pool_info =
+            vk::CommandPoolCreateInfo::default().queue_family_index(*QUEUE_FAMILY_INDEX);
         Self {
             pool: unsafe {
                 gpu()
@@ -47,11 +46,19 @@ impl CmdAlloc {
         self.dealloc(&[cmd]);
     }
 
-    pub fn reset(&self, cmd: vk::CommandBuffer) {
+    pub fn reset(&self) {
         unsafe {
             gpu()
-                .reset_command_buffer(cmd, vk::CommandBufferResetFlags::empty())
+                .reset_command_pool(self.pool, vk::CommandPoolResetFlags::empty())
                 .unwrap()
-        };
+        }
+    }
+}
+
+impl Drop for CmdAlloc {
+    fn drop(&mut self) {
+        if !self.pool.is_null() {
+            unsafe { gpu().destroy_command_pool(self.pool, alloc_callbacks()) }
+        }
     }
 }

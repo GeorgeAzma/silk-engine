@@ -35,14 +35,14 @@ pub fn trace(text: &str) -> String {
 #[macro_export]
 macro_rules! fatal {
     ($($args:tt)*) => {
-        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
+        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace(1))
     };
 }
 
 #[macro_export]
 macro_rules! err {
     ($($args:tt)*) => {
-        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace_skip(1))
+        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace(1))
     };
 }
 
@@ -96,20 +96,21 @@ pub fn backtrace_callers() -> Vec<String> {
         .collect();
     callers.pop();
     callers.dedup();
+    if callers.is_empty() {
+        callers = vec![String::new()];
+    }
     callers
 }
 
-pub fn backtrace_skip(last_callers: usize) -> String {
+pub fn backtrace(skips: usize) -> String {
     let mut callers = backtrace_callers();
-    callers.resize(
-        callers.len().saturating_sub(last_callers + 1),
-        String::new(),
-    );
+    callers.resize(callers.len().saturating_sub(skips + 1), String::new());
     callers.join(" > ")
 }
 
-pub fn backtrace() -> String {
-    backtrace_skip(0)
+pub fn backtrace_last(skips: usize) -> String {
+    let callers = backtrace_callers();
+    callers[callers.len().saturating_sub(2 + skips)].clone()
 }
 
 #[macro_export]
@@ -193,9 +194,11 @@ impl ScopeTime {
 #[cfg(debug_assertions)]
 impl Drop for ScopeTime {
     fn drop(&mut self) {
-        let elapsed = self.start.elapsed();
-        let callers = backtrace_callers();
-        let caller = &callers[callers.len() - 2];
-        crate::log!("[{}] {}: {:?}", caller, self.name, elapsed);
+        crate::log!(
+            "[{}] {}: {:?}",
+            backtrace_last(1),
+            self.name,
+            self.start.elapsed()
+        );
     }
 }

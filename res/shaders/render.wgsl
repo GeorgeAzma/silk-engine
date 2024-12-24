@@ -1,4 +1,4 @@
-struct BatchVertex {
+struct Vertex {
     @location(0) pos: vec2f,
     @location(1) scale: vec2f,
     @location(2) color: u32,
@@ -18,7 +18,7 @@ struct VSOut {
 }
 
 @vertex
-fn vs_main(@builtin(vertex_index) vert_idx: u32, in: BatchVertex) -> VSOut {
+fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     var out: VSOut;
     out.uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u)) * 2.0 - 1.0;
     out.coord = vec4f(in.pos + out.uv * in.scale, 0, 1);
@@ -29,14 +29,14 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: BatchVertex) -> VSOut {
     return out;
 }
 
-// fn round_rect(p: vec2f, r: f32) -> f32 {
-// 	let q = abs(p) - 1.0 + r;
-// 	return length(max(q, vec2f(0))) + min(max(q.x, q.y), 0.0) - r;
-// }
+fn round_rect(p: vec2f, r: f32) -> f32 {
+	let q = abs(p) - 1.0 + r;
+	return length(max(q, vec2f(0))) + min(max(q.x, q.y), 0.0) - r;
+}
 
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
-    // let rr = round_rect(in.);
-    // return in.color;
-    return vec4f(1);
+    let rr = round_rect(in.uv, 0.5);
+    
+    return vec4f(in.color.rgb, in.color.a * step(rr, 0.0));
 }

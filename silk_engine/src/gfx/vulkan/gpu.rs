@@ -51,9 +51,16 @@ static GPU_MEMORY_PROPS: LazyLock<vk::PhysicalDeviceMemoryProperties> = LazyLock
 static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
     #[cfg(debug_assertions)]
     crate::log_file!(
-            "logs/gpu.log",
-            "//////////////////// Properties ////////////////////\n{:#?}\n\n//////////////////// Features ////////////////////\n{:#?}\n\n//////////////////// Extensions ////////////////////\n{:#?}", gpu_props(), gpu_features(), gpu_extensions()
-        );
+        "logs/gpu.log",
+        "//////////////////// Properties ////////////////////\n{:#?}\n\n\
+        //////////////////// Memory Properties /////////////\n{:#?}\n\n\
+        //////////////////// Features //////////////////////\n{:#?}\n\n\
+        /////////////////// Extensions /////////////////////\n{:#?}",
+        gpu_props(),
+        gpu_mem_props(),
+        gpu_features(),
+        gpu_extensions()
+    );
 
     let required_gpu_extensions = required_vulkan_gpu_extensions();
     required_gpu_extensions

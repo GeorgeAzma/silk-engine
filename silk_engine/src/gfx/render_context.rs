@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::ptr::null;
 
-use ash::vk;
+use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
@@ -8,62 +9,16 @@ use crate::util::Mem;
 use crate::{gpu, gpu_idle, scope_time};
 
 use super::shader::Shader;
-use super::vulkan::pipeline::{GraphicsPipeline, PipelineStageInfo};
+use super::vulkan::pipeline::{GraphicsPipelineInfo, PipelineStageInfo};
+use super::vulkan::ImageInfo;
 use super::{
-    alloc_callbacks, entry, instance, physical_gpu, queue, BufferAlloc, CmdAlloc, DSLManager,
-    DescAlloc, PipelineLayoutManager, RenderPass,
+    alloc_callbacks, entry, instance, physical_gpu, queue, CmdAlloc, DSLManager, DescAlloc,
+    GpuAlloc, PipelineLayoutManager, RenderPass,
 };
 
 #[cfg(debug_assertions)]
 static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
     std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(crate::instance(), gpu()));
-
-#[derive(Clone, Copy)]
-struct Frame {
-    img_available: vk::Semaphore,
-    render_done: vk::Semaphore,
-    prev_frame_done: vk::Fence,
-}
-
-impl Frame {
-    fn new() -> Self {
-        Self {
-            img_available: unsafe {
-                gpu()
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
-                    .unwrap()
-            },
-            render_done: unsafe {
-                gpu()
-                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
-                    .unwrap()
-            },
-            prev_frame_done: unsafe {
-                gpu()
-                    .create_fence(
-                        &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
-                        alloc_callbacks(),
-                    )
-                    .unwrap()
-            },
-        }
-    }
-
-    fn wait(&self) {
-        unsafe {
-            gpu()
-                .wait_for_fences(&[self.prev_frame_done], true, u64::MAX)
-                .unwrap();
-            gpu().reset_fences(&[self.prev_frame_done]).unwrap();
-        }
-    }
-}
-
-impl Default for Frame {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 struct ShaderData {
     shader: Shader,
@@ -75,7 +30,7 @@ struct ShaderData {
 #[derive(Default, Clone)]
 struct PipelineData {
     pipeline: vk::Pipeline,
-    info: GraphicsPipeline,
+    info: GraphicsPipelineInfo,
     bind_point: vk::PipelineBindPoint,
 }
 
@@ -97,12 +52,15 @@ struct FenceData {
     signaled: bool,
 }
 
+unsafe impl Sync for RenderContext {}
+unsafe impl Send for RenderContext {}
+
 pub struct RenderContext {
     cmd_state: CmdState,
     // allocators
     desc_alloc: DescAlloc,
     cmd_alloc: CmdAlloc,
-    pub buffer_alloc: BufferAlloc,
+    pub gpu_alloc: GpuAlloc,
     // managers (hashmap cached)
     dsl_manager: DSLManager,
     pipeline_layout_manager: PipelineLayoutManager,
@@ -115,6 +73,8 @@ pub struct RenderContext {
     render_passes: HashMap<String, RenderPass>,
     fences: HashMap<String, FenceData>,
     semaphores: HashMap<String, vk::Semaphore>,
+    images: HashMap<String, (vk::Image, Vec<String>)>,
+    img_views: HashMap<String, (vk::ImageView, String)>,
     // window context
     surface_caps2_loader: ash::khr::get_surface_capabilities2::Instance,
     pub surface: vk::SurfaceKHR,
@@ -122,13 +82,8 @@ pub struct RenderContext {
     surface_present_modes: Vec<vk::PresentModeKHR>,
     swapchain_loader: ash::khr::swapchain::Device,
     pub swapchain: vk::SwapchainKHR,
-    pub swapchain_images: Vec<vk::Image>,
-    pub swapchain_img_views: Vec<vk::ImageView>,
     pub swapchain_size: vk::Extent2D,
     pub swapchain_img_idx: usize,
-    // rendering
-    frames: [Frame; 1],
-    cur_frame: usize,
 }
 
 impl RenderContext {
@@ -143,13 +98,13 @@ impl RenderContext {
                 window.window_handle().unwrap().as_raw(),
                 alloc_callbacks(),
             )
-            .unwrap()
+            .expect("failed to create surface")
         };
         debug_name("surface", surface);
         let surface_formats = unsafe {
             surface_loader
                 .get_physical_device_surface_formats(physical_gpu(), surface)
-                .unwrap()
+                .expect("failed to get surface formats")
         };
         let surface_format = surface_formats
             .iter()
@@ -169,7 +124,7 @@ impl RenderContext {
             cmd_state: CmdState::default(),
             desc_alloc: DescAlloc::default(),
             cmd_alloc: CmdAlloc::default(),
-            buffer_alloc: BufferAlloc::default(),
+            gpu_alloc: GpuAlloc::default(),
             dsl_manager: DSLManager::default(),
             pipeline_layout_manager: PipelineLayoutManager::default(),
             shaders: Default::default(),
@@ -180,21 +135,19 @@ impl RenderContext {
             render_passes: Default::default(),
             fences: Default::default(),
             semaphores: Default::default(),
+            images: Default::default(),
+            img_views: Default::default(),
             surface_caps2_loader: surface_caps2,
             surface,
             surface_format,
             surface_present_modes,
             swapchain_loader,
             swapchain: Default::default(),
-            swapchain_images: Default::default(),
-            swapchain_img_views: Default::default(),
             swapchain_size: Default::default(),
             swapchain_img_idx: Default::default(),
-            frames: Default::default(),
-            cur_frame: 0,
         };
         {
-            slf.add_cmds_numbered("render", slf.frames.len());
+            slf.add_cmd("render");
             slf.add_cmd("init");
             slf.add_buffer(
                 "staging",
@@ -203,17 +156,36 @@ impl RenderContext {
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
             slf.add_fence("cmd wait", false);
+            slf.add_semaphore("img available");
+            slf.add_semaphore("render finished");
+            slf.add_fence("prev frame finished", true);
         }
         slf
     }
 
     pub(crate) fn begin_frame(&mut self) {
-        let frame = &self.frames[self.cur_frame];
-        frame.wait();
-        self.acquire_img(frame.img_available);
+        self.wait_fence("prev frame finished");
+        self.cmd_alloc.reset();
+        self.acquire_img(self.semaphore("img available"));
 
-        let cmd_name = format!("render{}", self.cur_frame);
-        self.begin_cmd(&cmd_name);
+        self.begin_cmd("render", true);
+    }
+
+    pub(crate) fn end_frame(&mut self, window: &Window) {
+        self.submit_cmd(
+            "render",
+            queue(),
+            &[self.semaphore("img available")],
+            &[self.semaphore("render finished")],
+            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+            self.fence("prev frame finished"),
+        );
+
+        window.pre_present_notify();
+        self.present(&[self.semaphore("render finished")]);
+    }
+
+    pub fn begin_render_swapchain(&mut self) {
         self.transition_image_layout(
             self.cur_img(),
             vk::ImageLayout::UNDEFINED,
@@ -226,7 +198,7 @@ impl RenderContext {
         self.begin_render(width, height, img_view);
     }
 
-    pub(crate) fn end_frame(&mut self, window: &Window) {
+    pub fn end_render_swapchain(&mut self) {
         self.end_render();
 
         self.transition_image_layout(
@@ -234,24 +206,6 @@ impl RenderContext {
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
         );
-        let cmd_name = self.cmd_name().to_owned();
-        self.end_cmd();
-
-        // wait(image_available), submit cmd, signal(render_finished)
-        let frame = self.frames[self.cur_frame];
-        self.submit_cmd(
-            &cmd_name,
-            queue(),
-            &[frame.img_available],
-            &[frame.render_done],
-            &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            frame.prev_frame_done,
-        );
-
-        window.pre_present_notify();
-        self.present(&[frame.render_done]);
-
-        self.cur_frame = (self.cur_frame + 1) % self.frames.len();
     }
 
     pub fn shader(&self, name: &str) -> &Shader {
@@ -266,9 +220,9 @@ impl RenderContext {
                 .iter()
                 .map(|dslb| self.dsl_manager.get(dslb))
                 .collect::<Vec<_>>();
+            let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
             let module = shader.create_module();
             debug_name(name, module);
-            let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
             let pipeline_stages = shader.get_pipeline_stages(module);
             ShaderData {
                 shader,
@@ -281,6 +235,11 @@ impl RenderContext {
         &shader_data.shader
     }
 
+    // TODO: impl remove_* for all add_*
+    // pub fn remove_shader(&mut self, name: &str) {
+    //     let shader = self.shaders.remove(name).unwrap();
+    // }
+
     pub fn add_render_pass(&mut self, name: &str, mut render_pass: RenderPass) -> vk::RenderPass {
         let rp = render_pass.build();
         assert!(
@@ -291,6 +250,12 @@ impl RenderContext {
         );
         debug_name(name, rp);
         rp
+    }
+
+    pub fn remove_render_pass(&mut self, name: &str) {
+        self.render_passes
+            .remove(name)
+            .unwrap_or_else(|| panic!("render pass not found: {name}"));
     }
 
     pub fn render_pass(&mut self, name: &str) -> vk::RenderPass {
@@ -308,38 +273,66 @@ impl RenderContext {
                     }),
                     alloc_callbacks(),
                 )
-                .unwrap()
+                .unwrap_or_else(|_| panic!("failed to create fence: {name}"))
         };
         debug_name(name, fence);
         assert!(
             self.fences
-                .insert(name.to_string(), FenceData { fence, signaled })
+                .insert(
+                    name.to_string(),
+                    FenceData {
+                        fence,
+                        signaled: false
+                    }
+                )
                 .is_none(),
             "fence already exists: {name}"
         );
     }
 
-    pub fn fence(&mut self, name: &str) -> vk::Fence {
+    pub fn remove_fence(&mut self, name: &str) {
+        let FenceData { fence, signaled } = self
+            .fences
+            .remove(name)
+            .unwrap_or_else(|| panic!("fence not found: {name}"));
+        assert!(signaled, "trying to destroy fence that is not signaled");
+        unsafe { gpu().destroy_fence(fence, alloc_callbacks()) }
+    }
+
+    pub fn fence(&self, name: &str) -> vk::Fence {
         self.fences[name].fence
     }
 
     pub fn reset_fence(&mut self, name: &str) -> vk::Fence {
-        let fence = self.fences.get_mut(name).unwrap();
+        let fence = self
+            .fences
+            .get_mut(name)
+            .unwrap_or_else(|| panic!("fence not found: {name}"));
         if fence.signaled {
-            unsafe { gpu().reset_fences(&[fence.fence]).unwrap() };
+            unsafe {
+                gpu()
+                    .reset_fences(&[fence.fence])
+                    .unwrap_or_else(|e| panic!("failed to reset fence: {name}, {e}"))
+            };
             fence.signaled = false;
         }
         fence.fence
     }
 
     pub fn wait_fence(&mut self, name: &str) {
-        let fence = self.fences.get_mut(name).unwrap();
-        unsafe {
-            gpu()
-                .wait_for_fences(&[fence.fence], false, u64::MAX)
-                .unwrap()
-        };
-        fence.signaled = true;
+        let fence = self
+            .fences
+            .get_mut(name)
+            .unwrap_or_else(|| panic!("failed to wait fence: {name}"));
+        if !fence.signaled {
+            unsafe {
+                gpu()
+                    .wait_for_fences(&[fence.fence], false, u64::MAX)
+                    .unwrap()
+            };
+            fence.signaled = true;
+        }
+        self.reset_fence(name);
     }
 
     pub fn add_semaphore(&mut self, name: &str) {
@@ -357,15 +350,116 @@ impl RenderContext {
         );
     }
 
+    pub fn remove_semaphore(&mut self, name: &str) {
+        let semaphore = self
+            .semaphores
+            .remove(name)
+            .unwrap_or_else(|| panic!("no semaphore found: {name}"));
+        unsafe {
+            gpu().destroy_semaphore(semaphore, alloc_callbacks());
+        }
+    }
+
     pub fn semaphore(&self, name: &str) -> vk::Semaphore {
         self.semaphores[name]
+    }
+
+    pub fn add_image(
+        &mut self,
+        name: &str,
+        img_info: &ImageInfo,
+        mem_props: vk::MemoryPropertyFlags,
+    ) -> vk::Image {
+        let img = self.gpu_alloc.alloc_img(img_info, mem_props);
+        debug_name(name, img);
+        assert!(
+            self.images
+                .insert(name.to_string(), (img, vec![]))
+                .is_none(),
+            "image already exists: {name}"
+        );
+        img
+    }
+
+    pub fn remove_image(&mut self, name: &str) {
+        let (image, img_views) = self
+            .images
+            .remove(name)
+            .unwrap_or_else(|| panic!("no image found: {name}"));
+        self.gpu_alloc.dealloc_img(image);
+        for img_view in img_views {
+            let (img_view, _) = self
+                .img_views
+                .remove(&img_view)
+                .unwrap_or_else(|| panic!("no image view found: {img_view}, for image({name})"));
+            unsafe {
+                gpu().destroy_image_view(img_view, alloc_callbacks());
+            }
+        }
+    }
+
+    pub fn image(&self, name: &str) -> vk::Image {
+        self.images[name].0
+    }
+
+    pub fn add_img_view(&mut self, name: &str, img_name: &str) -> vk::ImageView {
+        let (img, img_views) = self
+            .images
+            .get_mut(img_name)
+            .unwrap_or_else(|| panic!("no image found: {img_name}"));
+        img_views.push(name.to_string());
+        let img_view = unsafe {
+            gpu()
+                .create_image_view(
+                    &vk::ImageViewCreateInfo::default()
+                        .view_type(vk::ImageViewType::TYPE_2D)
+                        .format(self.surface_format.format)
+                        .components(vk::ComponentMapping {
+                            r: vk::ComponentSwizzle::IDENTITY,
+                            g: vk::ComponentSwizzle::IDENTITY,
+                            b: vk::ComponentSwizzle::IDENTITY,
+                            a: vk::ComponentSwizzle::IDENTITY,
+                        })
+                        .subresource_range(
+                            vk::ImageSubresourceRange::default()
+                                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                .layer_count(1)
+                                .level_count(1),
+                        )
+                        .image(*img),
+                    alloc_callbacks(),
+                )
+                .unwrap_or_else(|_| panic!("failed to create image view: {name}"))
+        };
+        self.img_views
+            .insert(name.to_string(), (img_view, img_name.to_string()));
+        debug_name(name, img_view);
+        img_view
+    }
+
+    pub fn remove_img_view(&mut self, name: &str) {
+        let (img_view, img_name) = self.img_views.remove(name).unwrap();
+        let img_views = &mut self.images.get_mut(&img_name).unwrap().1;
+        img_views.remove(
+            img_views
+                .iter()
+                .position(|s| s.as_str() == name)
+                .unwrap_or_else(|| panic!("image view({name}) not found for image({img_name})")),
+        );
+        unsafe {
+            gpu().destroy_image_view(img_view, alloc_callbacks());
+        }
+    }
+
+    pub fn img_view(&self, name: &str) -> vk::ImageView {
+        self.img_views[name].0
     }
 
     pub fn add_pipeline(
         &mut self,
         name: &str,
         shader_name: &str,
-        pipeline_info: GraphicsPipeline,
+        pipeline_info: GraphicsPipelineInfo,
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
         scope_time!("Create pipeline({name})");
@@ -458,15 +552,15 @@ impl RenderContext {
         self.remove_cmds(&[name])
     }
 
-    pub fn reset_cmds(&mut self, names: &[&str]) {
-        for name in names.iter() {
-            self.cmd_alloc.reset(self.cmds[&name.to_string()]);
-        }
-    }
+    // pub fn reset_cmds(&mut self, names: &[&str]) {
+    //     for name in names.iter() {
+    //         self.cmd_alloc.reset(self.cmds[&name.to_string()]);
+    //     }
+    // }
 
-    pub fn reset_cmd(&mut self, name: &str) {
-        self.reset_cmds(&[name])
-    }
+    // pub fn reset_cmd(&mut self, name: &str) {
+    //     self.reset_cmds(&[name])
+    // }
 
     pub fn add_buffer(
         &mut self,
@@ -477,11 +571,11 @@ impl RenderContext {
     ) -> vk::Buffer {
         crate::log!(
             "Alloc({name}) {:?}, {:?}, {:?}",
-            crate::util::Mem::b(size as usize),
+            crate::Mem::b(size as usize),
             usage,
             mem_props
         );
-        let buf = self.buffer_alloc.alloc(size, usage, mem_props);
+        let buf = self.gpu_alloc.alloc_buf(size, usage, mem_props);
         assert!(
             self.buffers.insert(name.to_string(), buf).is_none(),
             "buffer already exists: {name}"
@@ -492,12 +586,12 @@ impl RenderContext {
 
     pub fn remove_buffer(&mut self, name: &str) {
         let buf = self.buffers.remove(name).unwrap();
-        self.buffer_alloc.dealloc(buf);
+        self.gpu_alloc.dealloc_buf(buf);
     }
 
     pub fn recreate_buffer(&mut self, name: &str, size: u64) -> vk::Buffer {
         let buffer = self.buffers.get_mut(name).unwrap();
-        *buffer = self.buffer_alloc.realloc(*buffer, size);
+        *buffer = self.gpu_alloc.realloc_buf(*buffer, size);
         debug_name(name, *buffer);
         *buffer
     }
@@ -507,7 +601,7 @@ impl RenderContext {
     }
 
     pub fn buffer_size(&self, name: &str) -> u64 {
-        self.buffer_alloc.get_size(self.buffer(name))
+        self.gpu_alloc.buf_size(self.buffer(name))
     }
 
     pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
@@ -524,7 +618,7 @@ impl RenderContext {
         &self.cmd_state.cmd_name
     }
 
-    pub fn begin_cmd(&mut self, name: &str) -> vk::CommandBuffer {
+    pub fn begin_cmd(&mut self, name: &str, once: bool) -> vk::CommandBuffer {
         let cmd = self.get_cmd(name);
         if self.cmd_state.cmd == cmd {
             return cmd;
@@ -539,8 +633,11 @@ impl RenderContext {
             gpu()
                 .begin_command_buffer(
                     self.cmd_state.cmd,
-                    &vk::CommandBufferBeginInfo::default()
-                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                    &vk::CommandBufferBeginInfo::default().flags(if once {
+                        vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT
+                    } else {
+                        vk::CommandBufferUsageFlags::empty()
+                    }),
                 )
                 .unwrap();
         }
@@ -564,8 +661,7 @@ impl RenderContext {
 
     pub fn wait_cmd(&mut self) {
         let cmd = self.cmd_name().to_string();
-        let fence = self.reset_fence("cmd wait");
-        self.submit_cmd(&cmd, queue(), &[], &[], &[], fence);
+        self.submit_cmd(&cmd, queue(), &[], &[], &[], self.fence("cmd wait"));
         self.wait_fence("cmd wait");
     }
 
@@ -573,27 +669,20 @@ impl RenderContext {
         &mut self,
         name: &str,
         queue: vk::Queue,
-        wait_semaphores: &[vk::Semaphore],
-        signal_semaphores: &[vk::Semaphore],
+        wait: &[vk::Semaphore],
+        signal: &[vk::Semaphore],
         wait_dst_stage_mask: &[vk::PipelineStageFlags],
         fence: vk::Fence,
     ) {
-        self.submit_cmds(
-            &[name],
-            queue,
-            wait_semaphores,
-            signal_semaphores,
-            wait_dst_stage_mask,
-            fence,
-        );
+        self.submit_cmds(&[name], queue, wait, signal, wait_dst_stage_mask, fence);
     }
 
     pub fn submit_cmds(
         &mut self,
         names: &[&str],
         queue: vk::Queue,
-        wait_semaphores: &[vk::Semaphore],
-        signal_semaphores: &[vk::Semaphore],
+        wait: &[vk::Semaphore],
+        signal: &[vk::Semaphore],
         wait_dst_stage_mask: &[vk::PipelineStageFlags],
         fence: vk::Fence,
     ) {
@@ -609,18 +698,37 @@ impl RenderContext {
             gpu()
                 .queue_submit(
                     queue,
-                    &[vk::SubmitInfo::default()
-                        .command_buffers(&cmds)
-                        .wait_semaphores(wait_semaphores)
-                        .signal_semaphores(signal_semaphores)
-                        .wait_dst_stage_mask(wait_dst_stage_mask)],
+                    &[vk::SubmitInfo {
+                        signal_semaphore_count: signal.len() as u32,
+                        wait_semaphore_count: wait.len() as u32,
+                        p_signal_semaphores: if signal.is_empty() {
+                            null()
+                        } else {
+                            signal.as_ptr()
+                        },
+                        p_wait_semaphores: if wait.is_empty() {
+                            null()
+                        } else {
+                            wait.as_ptr()
+                        },
+                        ..Default::default()
+                    }
+                    .command_buffers(&cmds)
+                    .wait_dst_stage_mask(wait_dst_stage_mask)],
                     fence,
                 )
                 .unwrap();
         }
     }
 
-    pub fn begin_render(&mut self, width: u32, height: u32, image_view: vk::ImageView) {
+    pub fn begin_render(
+        &mut self,
+        width: u32,
+        height: u32,
+        image_view: vk::ImageView,
+        // resolve_image_view: vk::ImageView,
+    ) {
+        let resolve_image_view = vk::ImageView::null();
         self.cmd_state.render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: vk::Extent2D { width, height },
@@ -633,13 +741,20 @@ impl RenderContext {
                     .render_area(self.cmd_state.render_area)
                     .layer_count(1)
                     .color_attachments(&[vk::RenderingAttachmentInfo::default()
-                        .load_op(vk::AttachmentLoadOp::CLEAR)
+                        .load_op(vk::AttachmentLoadOp::DONT_CARE)
                         .store_op(vk::AttachmentStoreOp::STORE)
                         .clear_value(vk::ClearValue {
                             color: vk::ClearColorValue {
                                 float32: [0.0, 0.0, 0.0, 0.0],
                             },
                         })
+                        .resolve_mode(if resolve_image_view.is_null() {
+                            vk::ResolveModeFlags::NONE
+                        } else {
+                            vk::ResolveModeFlags::AVERAGE
+                        })
+                        .resolve_image_view(resolve_image_view)
+                        .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .image_view(image_view)]),
             )
@@ -869,9 +984,9 @@ impl RenderContext {
         src_off: vk::DeviceSize,
         dst_off: vk::DeviceSize,
     ) {
-        let cmd = self.begin_cmd("init");
+        let cmd = self.begin_cmd("init", false);
         unsafe {
-            // let buffer_usage = self.buffer_alloc.get_usage(dst_buffer);
+            // let buffer_usage = self.gpu_alloc.buf_usage(dst_buffer);
             // if buffer_usage.contains(vk::BufferUsageFlags::VERTEX_BUFFER)
             //     || buffer_usage.contains(vk::BufferUsageFlags::INDEX_BUFFER)
             // {
@@ -890,9 +1005,9 @@ impl RenderContext {
             //     );
             // }
             let buf_size = self
-                .buffer_alloc
-                .get_size(src_buffer)
-                .min(self.buffer_alloc.get_size(dst_buffer));
+                .gpu_alloc
+                .buf_size(src_buffer)
+                .min(self.gpu_alloc.buf_size(dst_buffer));
             let copy_region = vk::BufferCopy::default()
                 .size(buf_size)
                 .src_offset(src_off)
@@ -908,23 +1023,23 @@ impl RenderContext {
 
     pub fn write_buffer_off<T: ?Sized>(&mut self, name: &str, data: &T, off: vk::DeviceSize) {
         let buffer = self.buffer(name);
-        if self.buffer_alloc.is_mappable(buffer) {
-            self.buffer_alloc.write_mapped_off(buffer, data, off);
+        if self.gpu_alloc.is_mappable(buffer) {
+            self.gpu_alloc.write_mapped_off(buffer, data, off);
         } else {
             let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
-            self.buffer_alloc.write_mapped(staging, data);
+            self.gpu_alloc.write_mapped(staging, data);
             self.copy_buffer_off(staging, buffer, 0, off);
         }
     }
 
     pub fn read_buffer_off<T: ?Sized>(&mut self, name: &str, data: &mut T, off: vk::DeviceSize) {
         let buffer = self.buffer(name);
-        if self.buffer_alloc.is_mappable(buffer) {
-            self.buffer_alloc.read_mapped_off(buffer, data, off);
+        if self.gpu_alloc.is_mappable(buffer) {
+            self.gpu_alloc.read_mapped_off(buffer, data, off);
         } else {
             let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
             self.copy_buffer_off(buffer, staging, off, 0);
-            self.buffer_alloc.read_mapped(staging, data);
+            self.gpu_alloc.read_mapped(staging, data);
         }
     }
 
@@ -1019,11 +1134,14 @@ impl RenderContext {
         debug_name("swapchain", self.swapchain);
 
         if old_swapchain != Default::default() {
-            self.swapchain_images.clear();
-            unsafe {
-                self.swapchain_img_views
-                    .drain(..)
-                    .for_each(|image_view| gpu().destroy_image_view(image_view, alloc_callbacks()));
+            // FIXME: assumes swapchain image count is constant
+            for i in 0..desired_image_count {
+                let img_name = format!("swapchain image {i}");
+                let img_views = self.images[&img_name].1.clone();
+                for img_view in img_views {
+                    self.remove_img_view(&img_view);
+                }
+                self.images.remove(&img_name).unwrap();
             }
             unsafe {
                 self.swapchain_loader
@@ -1031,42 +1149,18 @@ impl RenderContext {
             };
         }
 
-        self.swapchain_images = unsafe {
+        let swapchain_images = unsafe {
             self.swapchain_loader
                 .get_swapchain_images(self.swapchain)
                 .unwrap()
         };
-        self.swapchain_img_views = self
-            .swapchain_images
-            .iter()
-            .enumerate()
-            .map(|(i, &swapchain_image)| unsafe {
-                let img_view = gpu()
-                    .create_image_view(
-                        &vk::ImageViewCreateInfo::default()
-                            .view_type(vk::ImageViewType::TYPE_2D)
-                            .format(self.surface_format.format)
-                            .components(vk::ComponentMapping {
-                                r: vk::ComponentSwizzle::IDENTITY,
-                                g: vk::ComponentSwizzle::IDENTITY,
-                                b: vk::ComponentSwizzle::IDENTITY,
-                                a: vk::ComponentSwizzle::IDENTITY,
-                            })
-                            .subresource_range(
-                                vk::ImageSubresourceRange::default()
-                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                    .layer_count(1)
-                                    .level_count(1),
-                            )
-                            .image(swapchain_image),
-                        alloc_callbacks(),
-                    )
-                    .unwrap();
-                debug_name(&format!("swapchain img {i}"), swapchain_image);
-                debug_name(&format!("swapchain img view {i}"), img_view);
-                img_view
-            })
-            .collect();
+        for (i, swap_img) in swapchain_images.into_iter().enumerate() {
+            let img_name = format!("swapchain image {i}");
+            debug_name(&img_name, swap_img);
+            let img_view_name = format!("swapchain image view {i}");
+            self.images.insert(img_name.clone(), (swap_img, vec![]));
+            self.add_img_view(&img_view_name, &img_name);
+        }
 
         gpu_idle();
     }
@@ -1102,11 +1196,11 @@ impl RenderContext {
     }
 
     pub fn cur_img(&self) -> vk::Image {
-        self.swapchain_images[self.swapchain_img_idx]
+        self.image(&format!("swapchain image {}", self.swapchain_img_idx))
     }
 
     pub fn cur_img_view(&self) -> vk::ImageView {
-        self.swapchain_img_views[self.swapchain_img_idx]
+        self.img_view(&format!("swapchain image view {}", self.swapchain_img_idx))
     }
 
     fn surface_capabilities(&self) -> vk::SurfaceCapabilitiesKHR {
@@ -1204,6 +1298,84 @@ impl RenderContext {
     }
 }
 
+impl Drop for RenderContext {
+    fn drop(&mut self) {
+        gpu_idle();
+        for pipeline in self.pipelines.values() {
+            let pipeline = pipeline.pipeline;
+            if !pipeline.is_null() {
+                unsafe {
+                    gpu().destroy_pipeline(pipeline, alloc_callbacks());
+                }
+            }
+        }
+        // TODO: shader modules are weird
+        // implement system like:
+        // ctx().add_shader_module("vert")
+        // ctx().add_shader_module("frag")
+        // ctx().add_shader(["vert", "frag"])
+        // ctx().add_shader("wgsl")
+        // where add_shader generates dsl bindings
+        // and pipeline stages with modules
+        // ctx().remove_shader_module("vert")
+        // ctx().remove_shader_module("frag")
+        // ctx().remove_shader_module("wgsl")
+        // destroys shader modules
+        // can also debug check for dangling shaders
+        // for shader in self.shaders.values() {
+        //     for ps in shader.pipeline_stages.iter() {
+        //         let module = ps.module;
+        //         if !module.is_null() {
+        //             unsafe {
+        //                 gpu().destroy_shader_module(module, alloc_callbacks());
+        //             }
+        //         }
+        //     }
+        // }
+        for fence in self.fences.values() {
+            let fence = fence.fence;
+            if !fence.is_null() {
+                unsafe {
+                    gpu().destroy_fence(fence, alloc_callbacks());
+                }
+            }
+        }
+        for &semaphore in self.semaphores.values() {
+            if !semaphore.is_null() {
+                unsafe {
+                    gpu().destroy_semaphore(semaphore, alloc_callbacks());
+                }
+            }
+        }
+        if !self.swapchain.is_null() {
+            unsafe {
+                self.swapchain_loader
+                    .destroy_swapchain(self.swapchain, alloc_callbacks())
+            };
+        }
+        for &(img_view, _) in self.img_views.values() {
+            if !img_view.is_null() {
+                unsafe {
+                    gpu().destroy_image_view(img_view, alloc_callbacks());
+                }
+            }
+        }
+        for img in self.images.iter().filter_map(|(img_name, (img, _))| {
+            if !img_name.contains("swapchain image") {
+                Some(*img)
+            } else {
+                None
+            }
+        }) {
+            if !img.is_null() {
+                unsafe {
+                    gpu().destroy_image(img, alloc_callbacks());
+                }
+            }
+        }
+    }
+}
+
 #[cfg(not(debug_assertions))]
 impl RenderContext {
     pub fn debug_begin_colored(&self, _label: &str, _color: [f32; 4]) {}
@@ -1221,12 +1393,13 @@ impl RenderContext {
 
 #[cfg(debug_assertions)]
 pub fn debug_name<T: vk::Handle>(name: &str, obj: T) {
+    let raw = obj.as_raw();
     unsafe {
         DEBUG_UTILS_LOADER
             .set_debug_utils_object_name(
                 &vk::DebugUtilsObjectNameInfoEXT::default()
                     .object_name(&std::ffi::CString::new(name).unwrap())
-                    .object_handle(obj),
+                    .object_handle(T::from_raw(raw)),
             )
             .unwrap()
     }
@@ -1322,8 +1495,4 @@ pub fn write_desc_set_storage_buffer_whole(
     binding: u32,
 ) {
     write_desc_set_storage_buffer(desc_set, buffer, 0..vk::WHOLE_SIZE, binding)
-}
-
-impl Drop for RenderContext {
-    fn drop(&mut self) {}
 }

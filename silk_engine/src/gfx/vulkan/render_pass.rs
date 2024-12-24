@@ -1,8 +1,8 @@
-use ash::vk;
+use ash::vk::{self, Handle};
 
 use super::{alloc_callbacks, gpu};
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct RenderPass {
     attachment_descs: Vec<vk::AttachmentDescription>,
     attachment_refs: Vec<vk::AttachmentReference>,
@@ -103,13 +103,19 @@ impl RenderPass {
         };
         self.render_pass
     }
+}
 
-    pub fn destroy(self) {
+impl Drop for RenderPass {
+    fn drop(&mut self) {
         unsafe {
-            for fb in self.framebuffers {
-                gpu().destroy_framebuffer(fb, alloc_callbacks());
+            for &fb in self.framebuffers.iter() {
+                if !fb.is_null() {
+                    gpu().destroy_framebuffer(fb, alloc_callbacks());
+                }
             }
-            gpu().destroy_render_pass(self.render_pass, alloc_callbacks());
+            if !self.render_pass.is_null() {
+                gpu().destroy_render_pass(self.render_pass, alloc_callbacks());
+            }
         }
     }
 }

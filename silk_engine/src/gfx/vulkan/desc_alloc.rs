@@ -1,12 +1,12 @@
 use crate::alloc_callbacks;
 
 use super::gpu;
-use ash::vk;
+use ash::vk::{self, Handle};
 
-// TODO: manage DSLs and descriptor pools, free them together
-// TODO: track descriptor allocs and create new pools based on that
-// TODO: allocate descriptor sets together
-// For now it just uses single large descriptor pool
+// TODO: manage DSLs and desc pools, free them together
+// TODO: track desc allocs and create new pools based on that
+// TODO: allocate desc sets together
+// For now it just uses single large desc pool
 pub struct DescAlloc {
     pool: vk::DescriptorPool,
 }
@@ -63,5 +63,13 @@ impl DescAlloc {
 
     pub fn alloc_one(&self, dsl: vk::DescriptorSetLayout) -> vk::DescriptorSet {
         self.alloc(&[dsl])[0]
+    }
+}
+
+impl Drop for DescAlloc {
+    fn drop(&mut self) {
+        if !self.pool.is_null() {
+            unsafe { gpu().destroy_descriptor_pool(self.pool, alloc_callbacks()) }
+        }
     }
 }

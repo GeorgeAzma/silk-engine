@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use super::{GraphicsPipeline, RenderContext};
+use super::{GraphicsPipelineInfo, RenderContext};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -90,24 +90,28 @@ impl Renderer {
                 "batch vbo",
                 (vertices.len() * size_of::<Vertex>()) as vk::DeviceSize,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                vk::MemoryPropertyFlags::HOST_VISIBLE
+                    | vk::MemoryPropertyFlags::HOST_COHERENT
+                    | vk::MemoryPropertyFlags::HOST_CACHED,
             );
             ctx.add_buffer(
                 "instance vbo",
                 (instances.len() * size_of::<Vertex>()) as vk::DeviceSize,
                 vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                vk::MemoryPropertyFlags::HOST_VISIBLE
+                    | vk::MemoryPropertyFlags::HOST_COHERENT
+                    | vk::MemoryPropertyFlags::HOST_CACHED,
             );
             ctx.add_shader("render");
             let format = ctx.surface_format.format;
             ctx.add_pipeline(
                 "render",
                 "render",
-                GraphicsPipeline::new()
-                    .blend_attachment_empty()
+                GraphicsPipelineInfo::new()
+                    .blend_attachment_standard()
                     .dyn_size()
                     .color_attachment(format)
-                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
+                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP), // .samples(8)
                 &[(true, vec![])],
             );
         }
@@ -134,7 +138,7 @@ impl Renderer {
     }
 
     pub fn hex(&mut self, hex: u32) {
-        self.color = unsafe { std::mem::transmute(hex.to_be()) }
+        self.color = hex.to_be_bytes()
     }
 
     pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) {
@@ -146,7 +150,7 @@ impl Renderer {
     }
 
     pub fn stroke_hex(&mut self, hex: u32) {
-        self.color = unsafe { std::mem::transmute(hex.to_be()) }
+        self.color = hex.to_be_bytes()
     }
 
     pub fn verts(&mut self, verts: &[Vertex]) {

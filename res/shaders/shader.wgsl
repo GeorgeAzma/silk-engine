@@ -20,5 +20,5 @@ struct Uniform {
 
 @fragment
 fn fs_main(@builtin(position) coord: vec4f) -> @location(0) vec4f {
-    return vec4f(fract(uni.time + coord.xy / 600.0), 0.0, 1.0);
+    return vec4f(fract(uni.time + coord.xy / 800.0) * 0.3, 0.0, 1.0);
 }

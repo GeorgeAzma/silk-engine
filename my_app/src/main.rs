@@ -15,13 +15,13 @@ impl App for MyApp<'_> {
             ctx.add_pipeline(
                 "pipeline",
                 "shader",
-                GraphicsPipeline::new()
+                GraphicsPipelineInfo::new()
                     .dyn_size()
                     .color_attachment(surf_format)
                     .blend_attachment_empty(),
                 &[],
             );
-            let desc_set = ctx.add_desc_set("global uniform", "shader", 0);
+            let desc_set = ctx.add_desc_set("global uniform ds", "shader", 0);
 
             let uniform_buffer = ctx.add_buffer(
                 "global uniform",
@@ -50,7 +50,11 @@ impl App for MyApp<'_> {
             dt: app.dt,
         };
         app.ctx().write_buffer("global uniform", &uniform_data);
+    }
+
+    fn render(&mut self) {
         let gfx = self.app.gfx();
+        gfx.color = [0, 32, 55, 255];
         for x in 0..256 {
             for y in 0..256 {
                 gfx.rect(
@@ -62,13 +66,12 @@ impl App for MyApp<'_> {
             }
         }
         gfx.color = [255, 32, 100, 255];
-        gfx.circle(0.0, 0.0, 0.3);
-    }
+        // gfx.circle(0.0, 0.0, 0.3);
+        gfx.rect_center(0.0, 0.0, 0.5, 0.2);
 
-    fn render(&mut self) {
         let mut ctx = self.app.ctx();
         ctx.bind_pipeline("pipeline");
-        ctx.bind_desc_set("global uniform");
+        ctx.bind_desc_set("global uniform ds");
         ctx.draw(3, 1);
     }
 

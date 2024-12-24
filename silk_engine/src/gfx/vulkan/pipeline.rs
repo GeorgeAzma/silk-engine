@@ -7,16 +7,7 @@ const fn pipeline_cache_path() -> &'static str {
 
 #[cfg(debug_assertions)]
 static PIPELINE_EXEC_PROPS_LOADER: LazyLock<ash::khr::pipeline_executable_properties::Device> =
-    LazyLock::new(|| {
-        if cfg!(debug_assertions) {
-            ash::khr::pipeline_executable_properties::Device::new(instance(), gpu())
-        } else {
-            #[allow(invalid_value)]
-            unsafe {
-                std::mem::zeroed()
-            }
-        }
-    });
+    LazyLock::new(|| ash::khr::pipeline_executable_properties::Device::new(instance(), gpu()));
 
 static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
     let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
@@ -48,8 +39,18 @@ impl<'a> From<&'a PipelineStageInfo> for vk::PipelineShaderStageCreateInfo<'a> {
     }
 }
 
+pub enum Enable {
+    PrimitiveRestart,
+    DepthClamp,
+    RasterizerDiscard,
+    SampleShading,
+    AlphaCoverage,
+    AlphaOne,
+    DepthWrite,
+}
+
 #[derive(Clone)]
-pub struct GraphicsPipeline {
+pub struct GraphicsPipelineInfo {
     pub stages: Vec<PipelineStageInfo>,
     pub vertex_input_binding_descriptions: Vec<vk::VertexInputBindingDescription>,
     pub vertex_input_attribute_descriptions: Vec<vk::VertexInputAttributeDescription>,
@@ -95,7 +96,7 @@ pub struct GraphicsPipeline {
     pub subpass: u32,
 }
 
-impl Default for GraphicsPipeline {
+impl Default for GraphicsPipelineInfo {
     fn default() -> Self {
         Self {
             topology: vk::PrimitiveTopology::TRIANGLE_LIST,
@@ -145,16 +146,26 @@ impl Default for GraphicsPipeline {
     }
 }
 
-impl GraphicsPipeline {
+impl GraphicsPipelineInfo {
     pub fn new() -> Self {
         Default::default()
     }
 
     pub fn depth(mut self) -> Self {
-        self.depth_test_enable = true;
         self.depth_write_enable = true;
-        self.depth_compare_op = vk::CompareOp::LESS;
+        self.depth_compare(vk::CompareOp::LESS)
+    }
+
+    pub fn depth_compare(mut self, compare_op: vk::CompareOp) -> Self {
+        self.depth_test_enable = true;
+        self.depth_compare_op = compare_op;
         self
+    }
+
+    pub fn depth_bounds(mut self, min: f32, max: f32) {
+        self.depth_bounds_test_enable = true;
+        self.min_depth_bounds = min;
+        self.max_depth_bounds = max;
     }
 
     pub fn dyn_size(mut self) -> Self {
@@ -190,16 +201,18 @@ impl GraphicsPipeline {
     }
 
     pub fn blend_attachment_standard(mut self) -> Self {
+        // rgb = src.rgb * src.a + dst.rgb * (1 - src.a)
+        // a   = src.a   * src.a + dst.a   * (1 - src.a)
         self.attachments.push(
             vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(true)
                 .alpha_blend_op(vk::BlendOp::ADD)
                 .color_blend_op(vk::BlendOp::ADD)
-                .blend_enable(true)
                 .color_write_mask(vk::ColorComponentFlags::RGBA)
-                .dst_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
                 .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
                 .src_alpha_blend_factor(vk::BlendFactor::SRC_ALPHA)
-                .src_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA),
+                .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA),
         );
         self
     }
@@ -219,8 +232,13 @@ impl GraphicsPipeline {
         self
     }
 
+    pub fn logic_op(mut self, logic_op: vk::LogicOp) -> Self {
+        self.logic_op_enable = true;
+        self.logic_op = logic_op;
+        self
+    }
+
     pub fn color_attachment(mut self, format: vk::Format) -> Self {
-        // TODO: assert valid color format (same for depth)
         self.color_attachment_formats.push(format);
         self
     }
@@ -257,6 +275,38 @@ impl GraphicsPipeline {
 
     pub fn cull_front(mut self) -> Self {
         self.cull_mode |= vk::CullModeFlags::FRONT;
+        self
+    }
+
+    pub fn samples(mut self, samples: u32) -> Self {
+        self.rasterization_samples = samples_u32_to_vk(samples);
+        self
+    }
+
+    pub fn line_width(mut self, line_width: f32) -> Self {
+        self.line_width = line_width;
+        self
+    }
+
+    /// depth_biased = depth + constant * bias + slope * max(dz/dx, dz/dy)
+    pub fn depth_bias(mut self, constant: f32, slope: f32, clamp: f32) -> Self {
+        self.depth_bias_enable = true;
+        self.depth_bias_constant_factor = constant;
+        self.depth_bias_slope_factor = slope;
+        self.depth_bias_clamp = clamp;
+        self
+    }
+
+    pub fn enable(mut self, enable: Enable) -> Self {
+        match enable {
+            Enable::PrimitiveRestart => self.primitive_restart_enable = true,
+            Enable::DepthClamp => self.depth_clamp_enable = true,
+            Enable::RasterizerDiscard => self.rasterizer_discard_enable = true,
+            Enable::SampleShading => self.sample_shading_enable = true,
+            Enable::AlphaCoverage => self.alpha_to_coverage_enable = true,
+            Enable::AlphaOne => self.alpha_to_one_enable = true,
+            Enable::DepthWrite => self.depth_write_enable = true,
+        }
         self
     }
 
@@ -345,73 +395,14 @@ impl GraphicsPipeline {
         })
         .unwrap_or_default();
         let gp = graphics_pipelines[0];
-        #[cfg(debug_assertions)]
-        unsafe {
-            let exec_props = PIPELINE_EXEC_PROPS_LOADER
-                .get_pipeline_executable_properties(&vk::PipelineInfoKHR::default().pipeline(gp))
-                .unwrap();
-
-            for (i, exec_prop) in exec_props.iter().enumerate() {
-                log!(
-                    "{}",
-                    exec_prop.description_as_c_str().unwrap().to_string_lossy()
-                );
-                let stats = PIPELINE_EXEC_PROPS_LOADER
-                    .get_pipeline_executable_statistics(
-                        &vk::PipelineExecutableInfoKHR::default()
-                            .pipeline(gp)
-                            .executable_index(i as u32),
-                    )
-                    .unwrap();
-                for stat in stats {
-                    let val = match stat.format {
-                        vk::PipelineExecutableStatisticFormatKHR::BOOL32 => {
-                            stat.value.b32.to_string()
-                        }
-                        vk::PipelineExecutableStatisticFormatKHR::INT64 => {
-                            stat.value.i64.to_string()
-                        }
-                        vk::PipelineExecutableStatisticFormatKHR::UINT64 => {
-                            stat.value.u64.to_string()
-                        }
-                        vk::PipelineExecutableStatisticFormatKHR::FLOAT64 => {
-                            stat.value.f64.to_string()
-                        }
-                        _ => "unknown".to_string(),
-                    };
-                    let name = stat
-                        .name_as_c_str()
-                        .unwrap()
-                        .to_string_lossy()
-                        .replace("Memory", "Mem")
-                        .replace("Size", "")
-                        .replace("Register", "Reg")
-                        .replace(" Count", "s")
-                        .replace("Color", "Col")
-                        .replace("Output", "Out")
-                        .replace("Input", "In")
-                        .replace("Local", "Loc")
-                        .trim()
-                        .to_string();
-                    if name == "Loc Mem" {
-                        continue;
-                    }
-                    if name == "Binary" {
-                        let val = util::Mem::str(&val);
-                        log!("    {name:<8} {val}");
-                    } else {
-                        log!("    {name:<8} {val}");
-                    }
-                }
-            }
-        }
+        log_pipeline_info(gp);
         gp
     }
 }
 
 pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
     let shader = Shader::new(shader_name);
-    let module = shader.create_module(); // TODO: destroy
+    let module = shader.create_module();
     let compute_pipeline = unsafe {
         gpu()
             .create_compute_pipelines(
@@ -438,5 +429,73 @@ pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
     unsafe {
         gpu().destroy_shader_module(module, alloc_callbacks());
     }
-    compute_pipeline[0]
+    let cp = compute_pipeline[0];
+    log_pipeline_info(cp);
+    cp
 }
+
+#[cfg(debug_assertions)]
+fn log_pipeline_info(pipeline: vk::Pipeline) {
+    unsafe {
+        let exec_props = PIPELINE_EXEC_PROPS_LOADER
+            .get_pipeline_executable_properties(&vk::PipelineInfoKHR::default().pipeline(pipeline))
+            .unwrap();
+
+        for (i, exec_prop) in exec_props.iter().enumerate() {
+            let desc = exec_prop
+                .description_as_c_str()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            let desc = desc
+                .replace(" Shader", "")
+                .replace("Fragment", "Frag")
+                .replace("Vertex", "Vert")
+                .replace("Compute", "Comp");
+            let mut stats_str = desc;
+            let stats = PIPELINE_EXEC_PROPS_LOADER
+                .get_pipeline_executable_statistics(
+                    &vk::PipelineExecutableInfoKHR::default()
+                        .pipeline(pipeline)
+                        .executable_index(i as u32),
+                )
+                .unwrap();
+            for stat in stats {
+                let val = match stat.format {
+                    vk::PipelineExecutableStatisticFormatKHR::BOOL32 => stat.value.b32.to_string(),
+                    vk::PipelineExecutableStatisticFormatKHR::INT64 => stat.value.i64.to_string(),
+                    vk::PipelineExecutableStatisticFormatKHR::UINT64 => stat.value.u64.to_string(),
+                    vk::PipelineExecutableStatisticFormatKHR::FLOAT64 => stat.value.f64.to_string(),
+                    _ => "unknown".to_string(),
+                };
+                let name = stat.name_as_c_str().unwrap().to_string_lossy().to_string();
+
+                let name = name
+                    .replace("Memory", "mem")
+                    .replace("Size", "")
+                    .replace("Register", "reg")
+                    .replace(" Count", "")
+                    .replace("Color", "col")
+                    .replace("Output", "out")
+                    .replace("Input", "in")
+                    .replace("Local", "loc")
+                    .replace("Binary", "bin")
+                    .trim()
+                    .to_string();
+                if name == "loc mem" {
+                    continue;
+                }
+                if name == "bin" {
+                    let val = util::Mem::str(&val);
+                    stats_str += &format!(" {name}({val})");
+                } else {
+                    stats_str += &format!(" {name}({val})");
+                }
+            }
+            log!("{stats_str}");
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn log_pipeline_info(_pipeline: vk::Pipeline) {}

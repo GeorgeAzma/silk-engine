@@ -46,25 +46,24 @@ pub struct Mem {
     bytes: usize,
 }
 
-#[allow(unused)]
 impl Mem {
-    pub fn b(bytes: usize) -> Self {
+    pub const fn b(bytes: usize) -> Self {
         Self { bytes }
     }
 
-    pub fn kb(kb: usize) -> Self {
+    pub const fn kb(kb: usize) -> Self {
         Self { bytes: kb << 10 }
     }
 
-    pub fn mb(mb: usize) -> Self {
+    pub const fn mb(mb: usize) -> Self {
         Self { bytes: mb << 20 }
     }
 
-    pub fn gb(gb: usize) -> Self {
+    pub const fn gb(gb: usize) -> Self {
         Self { bytes: gb << 30 }
     }
 
-    pub fn tb(tb: usize) -> Self {
+    pub const fn tb(tb: usize) -> Self {
         Self { bytes: tb << 40 }
     }
 
@@ -74,27 +73,27 @@ impl Mem {
         }
     }
 
-    pub fn as_bytes(&self) -> usize {
+    pub const fn as_bytes(&self) -> usize {
         self.bytes
     }
 
-    pub fn as_b(&self) -> usize {
+    pub const fn as_b(&self) -> usize {
         self.bytes
     }
 
-    pub fn as_kb(&self) -> usize {
+    pub const fn as_kb(&self) -> usize {
         self.bytes >> 10
     }
 
-    pub fn as_mb(&self) -> usize {
+    pub const fn as_mb(&self) -> usize {
         self.bytes >> 20
     }
 
-    pub fn as_gb(&self) -> usize {
+    pub const fn as_gb(&self) -> usize {
         self.bytes >> 30
     }
 
-    pub fn as_tb(&self) -> usize {
+    pub const fn as_tb(&self) -> usize {
         self.bytes >> 40
     }
 }

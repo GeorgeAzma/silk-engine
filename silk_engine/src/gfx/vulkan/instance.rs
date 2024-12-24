@@ -13,13 +13,19 @@ unsafe extern "system" fn vulkan_debug_callback(
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
     _user_data: *mut std::os::raw::c_void,
 ) -> vk::Bool32 {
+    let callback_data = *p_callback_data;
+    let msg_id = callback_data.message_id_number;
     if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
         || (message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::INFO
             && message_type == vk::DebugUtilsMessageTypeFlagsEXT::GENERAL)
+        || msg_id == 601872502  // validation active warn
+        || msg_id == 615892639 // GPU assisted validation active warn
+        || msg_id == 2132353751 // GPU assisted + core validation active warn
+        // pipeline exec props ext active warn
+        || msg_id == 1734198062
     {
         return vk::FALSE;
     }
-    let callback_data = *p_callback_data;
     let mut message = callback_data
         .message_as_c_str()
         .unwrap_or_default()
@@ -29,7 +35,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     if let Some(i) = message.find(" (http") {
         message.truncate(i);
     }
-    let match_str = format!("MessageID = 0x{:x} | ", callback_data.message_id_number);
+    let match_str = format!("MessageID = 0x{:x} | ", msg_id);
     if let Some(i) = message.find(&match_str) {
         message = message[i + match_str.len()..].to_string();
     }
@@ -61,8 +67,7 @@ unsafe extern "system" fn vulkan_debug_callback(
             eprintln!("{print_str}");
             let err_cnt = ERROR_COUNT.fetch_add(1, Ordering::SeqCst);
             if err_cnt > 8 {
-                eprintln!("{}", print::fatal("too many vulkan errors"));
-                std::process::abort();
+                panic!("too many vulkan errors");
             }
         }
         Severity::WARNING => {

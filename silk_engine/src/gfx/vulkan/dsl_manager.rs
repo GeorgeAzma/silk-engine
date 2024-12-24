@@ -1,5 +1,5 @@
 use super::{alloc_callbacks, gpu};
-use ash::vk;
+use ash::vk::{self, Handle};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ptr::null;
@@ -56,8 +56,10 @@ impl DSLManager {
 
 impl Drop for DSLManager {
     fn drop(&mut self) {
-        for dsl in self.dsls.values() {
-            unsafe { gpu().destroy_descriptor_set_layout(*dsl, alloc_callbacks()) };
+        for &dsl in self.dsls.values() {
+            if !dsl.is_null() {
+                unsafe { gpu().destroy_descriptor_set_layout(dsl, alloc_callbacks()) };
+            }
         }
     }
 }

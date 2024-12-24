@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+#[cfg(debug_assertions)]
 use std::ffi::c_void;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 pub use ash::vk;
-mod buffer_alloc;
-pub(super) use buffer_alloc::BufferAlloc;
+mod gpu_alloc;
+pub(super) use gpu_alloc::GpuAlloc;
 mod cmd_alloc;
 pub(super) use cmd_alloc::CmdAlloc;
 mod desc_alloc;
@@ -22,119 +22,155 @@ pub mod pipeline;
 pub use pipeline::*;
 mod render_pass;
 pub(super) use render_pass::RenderPass;
+mod image;
+pub use image::*;
 
-use crate::log;
-
-static ALLOCS: LazyLock<Mutex<HashMap<usize, std::alloc::Layout>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+use crate::{err, log};
 
 #[cfg(debug_assertions)]
-fn sys_alloc_scope_str(sys_alloc_scope: vk::SystemAllocationScope) -> String {
-    match sys_alloc_scope {
-        vk::SystemAllocationScope::COMMAND => "command",
-        vk::SystemAllocationScope::OBJECT => "object",
-        vk::SystemAllocationScope::CACHE => "cache",
-        vk::SystemAllocationScope::DEVICE => "device",
-        vk::SystemAllocationScope::INSTANCE => "instance",
-        _ => "unknown",
-    }
-    .to_string()
+struct UserData {
+    allocs: crate::HashMap<usize, (std::alloc::Layout, vk::SystemAllocationScope)>,
 }
 
+#[cfg(debug_assertions)]
+impl UserData {
+    const PRINT_SIZE: usize = 512 * 1024;
+    fn new() -> Self {
+        Self {
+            allocs: Default::default(),
+        }
+    }
+
+    fn sys_alloc_scope_str(sys_alloc_scope: vk::SystemAllocationScope) -> String {
+        match sys_alloc_scope {
+            vk::SystemAllocationScope::COMMAND => "command",
+            vk::SystemAllocationScope::OBJECT => "object",
+            vk::SystemAllocationScope::CACHE => "cache",
+            vk::SystemAllocationScope::DEVICE => "device",
+            vk::SystemAllocationScope::INSTANCE => "instance",
+            _ => "unknown",
+        }
+        .to_string()
+    }
+
+    fn log_alloc(
+        &mut self,
+        layout: std::alloc::Layout,
+        sas: vk::SystemAllocationScope,
+        ptr: *mut u8,
+    ) {
+        if layout.size() > Self::PRINT_SIZE {
+            log!(
+                "vkAlloc: {:?}, align({}), {}, {:016x}",
+                crate::util::Mem::b(layout.size()),
+                layout.align(),
+                Self::sys_alloc_scope_str(sas),
+                ptr as usize,
+            );
+        }
+        self.allocs.insert(ptr as usize, (layout, sas));
+    }
+
+    fn log_free(&mut self, ptr: *mut std::ffi::c_void) -> std::alloc::Layout {
+        let (layout, sas) = self.allocs.remove(&(ptr as usize)).unwrap();
+        if layout.size() > Self::PRINT_SIZE {
+            log!(
+                "vkFree: {:?}, align({}), {}, {:016x}",
+                crate::util::Mem::b(layout.size()),
+                layout.align(),
+                Self::sys_alloc_scope_str(sas),
+                ptr as usize,
+            );
+        }
+        layout
+    }
+
+    fn log_alloc_internal(size: usize, sas: vk::SystemAllocationScope) {
+        if size > Self::PRINT_SIZE {
+            log!(
+                "vkAlloc(internal): {}, {}",
+                crate::util::Mem::b(size),
+                Self::sys_alloc_scope_str(sas),
+            );
+        }
+    }
+
+    fn log_free_internal(size: usize, sas: vk::SystemAllocationScope) {
+        if size > Self::PRINT_SIZE {
+            log!(
+                "vkFree(internal): {}, {}",
+                crate::util::Mem::b(size),
+                Self::sys_alloc_scope_str(sas),
+            );
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
 unsafe extern "system" fn alloc(
-    _user_data: *mut c_void,
+    user_data: *mut c_void,
     size: usize,
     alignment: usize,
-    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+    sas: vk::SystemAllocationScope,
 ) -> *mut c_void {
     let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
     let ptr = std::alloc::alloc_zeroed(layout);
-    if size > 1024 {
-        log!(
-            "vkAlloc: {:?}, align({alignment}), {}, {ptr:?}",
-            crate::util::Mem::b(size),
-            sys_alloc_scope_str(sys_alloc_scope)
-        );
-    }
-    ALLOCS.lock().unwrap().insert(ptr as usize, layout);
+    let user_data = &mut *(user_data as *mut UserData);
+    user_data.log_alloc(layout, sas, ptr);
     ptr as *mut _
 }
 
-unsafe extern "system" fn free(_user_data: *mut c_void, ptr: *mut c_void) {
+#[cfg(debug_assertions)]
+unsafe extern "system" fn free(user_data: *mut c_void, ptr: *mut c_void) {
     if ptr.is_null() {
         return;
     }
-    let layout = ALLOCS.lock().unwrap().remove(&(ptr as usize)).unwrap();
-    if layout.size() > 1024 {
-        log!(
-            "vkFree: {}, align({}), {ptr:?}",
-            crate::util::Mem::b(layout.size()),
-            layout.align()
-        );
-    }
+    let user_data = &mut *(user_data as *mut UserData);
+    let layout = user_data.log_free(ptr);
     std::alloc::dealloc(ptr as *mut _, layout)
 }
 
+#[cfg(debug_assertions)]
 unsafe extern "system" fn realloc(
     _user_data: *mut c_void,
     ptr: *mut c_void,
     size: usize,
     alignment: usize,
-    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+    _sas: vk::SystemAllocationScope,
 ) -> *mut c_void {
     let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
-    ALLOCS
-        .lock()
-        .unwrap()
-        .entry(ptr as usize)
-        .and_modify(|l| *l = layout)
-        .or_insert(layout);
     let new_ptr = std::alloc::realloc(ptr as *mut _, layout, size);
     if new_ptr.is_null() {
         std::alloc::dealloc(ptr as *mut _, layout);
         return std::ptr::null_mut();
     }
-    if size > 1024 {
-        log!(
-            "vkRealloc: {}, align({alignment}), {}, {new_ptr:?}",
-            crate::util::Mem::b(size),
-            sys_alloc_scope_str(sys_alloc_scope)
-        );
-    }
     new_ptr as *mut _
 }
 
+#[cfg(debug_assertions)]
 unsafe extern "system" fn internal_alloc(
     _user_data: *mut c_void,
     size: usize,
     _alloc_type: vk::InternalAllocationType,
-    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+    sas: vk::SystemAllocationScope,
 ) {
-    if size > 1024 {
-        log!(
-            "vkAlloc(internal): {}, {}",
-            crate::util::Mem::b(size),
-            sys_alloc_scope_str(sys_alloc_scope)
-        );
-    }
+    UserData::log_alloc_internal(size, sas);
 }
 
+#[cfg(debug_assertions)]
 unsafe extern "system" fn internal_free(
     _user_data: *mut c_void,
     size: usize,
     _alloc_type: vk::InternalAllocationType,
-    #[allow(unused)] sys_alloc_scope: vk::SystemAllocationScope,
+    sas: vk::SystemAllocationScope,
 ) {
-    if size > 1024 {
-        log!(
-            "vkFree(internal): {}, {}",
-            crate::util::Mem::b(size),
-            sys_alloc_scope_str(sys_alloc_scope)
-        );
-    }
+    UserData::log_free_internal(size, sas);
 }
 
+#[cfg(debug_assertions)]
 static ALLOC_CALLBACKS: LazyLock<Option<vk::AllocationCallbacks<'static>>> = LazyLock::new(|| {
+    let user_data = Box::new(UserData::new());
+    let user_data_ptr = Box::into_raw(user_data) as *mut c_void;
     Some(
         vk::AllocationCallbacks::default()
             .pfn_allocation(Some(alloc))
@@ -142,12 +178,17 @@ static ALLOC_CALLBACKS: LazyLock<Option<vk::AllocationCallbacks<'static>>> = Laz
             .pfn_internal_allocation(Some(internal_alloc))
             .pfn_internal_free(Some(internal_free))
             .pfn_reallocation(Some(realloc))
-            .user_data(std::ptr::null_mut()),
+            .user_data(user_data_ptr),
     )
 });
 
 pub fn alloc_callbacks() -> Option<&'static vk::AllocationCallbacks<'static>> {
-    ALLOC_CALLBACKS.as_ref()
+    #[cfg(debug_assertions)]
+    {
+        ALLOC_CALLBACKS.as_ref()
+    }
+    #[cfg(not(debug_assertions))]
+    None
 }
 
 static ENTRY: LazyLock<ash::Entry> =
@@ -181,10 +222,12 @@ static QUEUE: LazyLock<vk::Queue> =
     LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
 
 pub fn gpu_idle() {
+    log!("GPU idle |> {}", crate::backtrace_last(1));
     unsafe { gpu().device_wait_idle().unwrap() };
 }
 
 pub fn queue_idle() {
+    log!("Queue idle |> {}", crate::backtrace_last(1));
     unsafe { gpu().queue_wait_idle(*QUEUE).unwrap() };
 }
 
@@ -198,6 +241,22 @@ pub fn queue_family_index() -> u32 {
 
 pub fn queue() -> vk::Queue {
     *QUEUE
+}
+
+pub fn samples_u32_to_vk(samples: u32) -> vk::SampleCountFlags {
+    match samples {
+        1 => vk::SampleCountFlags::TYPE_1,
+        2 => vk::SampleCountFlags::TYPE_2,
+        4 => vk::SampleCountFlags::TYPE_4,
+        8 => vk::SampleCountFlags::TYPE_8,
+        16 => vk::SampleCountFlags::TYPE_16,
+        32 => vk::SampleCountFlags::TYPE_32,
+        64 => vk::SampleCountFlags::TYPE_64,
+        _ => {
+            err!("invalid sample count");
+            vk::SampleCountFlags::TYPE_1
+        }
+    }
 }
 
 pub fn format_size(format: vk::Format) -> u32 {

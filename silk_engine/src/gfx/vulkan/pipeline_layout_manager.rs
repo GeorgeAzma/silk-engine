@@ -42,6 +42,18 @@ impl PipelineLayoutManager {
     }
 }
 
+impl Drop for PipelineLayoutManager {
+    fn drop(&mut self) {
+        for &pl in self.pipeline_layouts.values() {
+            if !pl.is_null() {
+                unsafe {
+                    gpu().destroy_pipeline_layout(pl, alloc_callbacks());
+                }
+            }
+        }
+    }
+}
+
 struct PipelineLayoutInfo {
     pub set_layouts: Vec<vk::DescriptorSetLayout>,
 }
