@@ -125,7 +125,7 @@ impl MemPool {
             self.mems.push(MemBlock::new(
                 new_mem_off as vk::DeviceSize,
                 new_mem_size as vk::DeviceSize,
-                self.mem_type_idx as u32,
+                self.mem_type_idx,
             ));
             (0, &self.mems[self.mems.len() - 1])
         } else {

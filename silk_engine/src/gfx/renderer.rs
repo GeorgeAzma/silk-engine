@@ -89,7 +89,7 @@ impl Renderer {
             ctx.add_buffer(
                 "batch vbo",
                 (vertices.len() * size_of::<Vertex>()) as vk::DeviceSize,
-                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
                 vk::MemoryPropertyFlags::HOST_VISIBLE
                     | vk::MemoryPropertyFlags::HOST_COHERENT
                     | vk::MemoryPropertyFlags::HOST_CACHED,
@@ -97,7 +97,7 @@ impl Renderer {
             ctx.add_buffer(
                 "instance vbo",
                 (instances.len() * size_of::<Vertex>()) as vk::DeviceSize,
-                vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST,
+                vk::BufferUsageFlags::VERTEX_BUFFER,
                 vk::MemoryPropertyFlags::HOST_VISIBLE
                     | vk::MemoryPropertyFlags::HOST_COHERENT
                     | vk::MemoryPropertyFlags::HOST_CACHED,
@@ -114,6 +114,16 @@ impl Renderer {
                     .topology(vk::PrimitiveTopology::TRIANGLE_STRIP), // .samples(8)
                 &[(true, vec![])],
             );
+            ctx.add_desc_set("render ds", "render", 0);
+            ctx.add_buffer(
+                "render ubo",
+                2 * size_of::<f32>() as vk::DeviceSize,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                vk::MemoryPropertyFlags::HOST_VISIBLE
+                    | vk::MemoryPropertyFlags::HOST_COHERENT
+                    | vk::MemoryPropertyFlags::HOST_CACHED,
+            );
+            ctx.write_ds("render ds", "render ubo", 0);
         }
         Self {
             render_ctx,
@@ -180,6 +190,20 @@ impl Renderer {
         self.rect_center(x - w * 0.5, y - h * 0.5, w * 0.5, h * 0.5);
     }
 
+    pub fn rrect_center(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        let old = self.roundness;
+        self.roundness = r;
+        self.rect_center(x, y, w, h);
+        self.roundness = old;
+    }
+
+    pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+        let old = self.roundness;
+        self.roundness = r;
+        self.rect(x, y, w, h);
+        self.roundness = old;
+    }
+
     pub fn aabb(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) {
         self.rect(x0, y0, x1 - x0, y1 - y0);
     }
@@ -192,18 +216,26 @@ impl Renderer {
     }
 
     pub fn render(&mut self) {
+        if self.vert_cnt != 0 && self.inst_cnt == 0 {
+            return;
+        }
+        let mut ctx = self.render_ctx.lock().unwrap();
+        ctx.bind_pipeline("render");
+        ctx.bind_desc_set("render ds");
         if self.vert_cnt != 0 {
-            let mut ctx = self.render_ctx.lock().unwrap();
-            ctx.bind_pipeline("render");
             ctx.bind_vbo("batch vbo");
             ctx.draw(self.vert_cnt as u32, 1);
         }
         if self.inst_cnt != 0 {
-            let mut ctx = self.render_ctx.lock().unwrap();
-            ctx.bind_pipeline("render");
             ctx.bind_vbo("instance vbo");
             ctx.draw(4, self.inst_cnt as u32);
         }
+    }
+
+    pub fn on_resize(&mut self, width: u32, height: u32) {
+        let mut ctx = self.render_ctx.lock().unwrap();
+        let resolution = [width as f32, height as f32];
+        ctx.write_buffer("render ubo", &resolution);
     }
 
     pub fn flush(&mut self) {

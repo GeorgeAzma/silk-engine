@@ -21,15 +21,14 @@ impl App for MyApp<'_> {
                     .blend_attachment_empty(),
                 &[],
             );
-            let desc_set = ctx.add_desc_set("global uniform ds", "shader", 0);
-
-            let uniform_buffer = ctx.add_buffer(
+            ctx.add_desc_set("global uniform ds", "shader", 0);
+            ctx.add_buffer(
                 "global uniform",
                 size_of::<GlobalUniform>() as u64,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
-            write_desc_set_uniform_buffer_whole(desc_set, uniform_buffer, 0);
+            ctx.write_ds("global uniform ds", "global uniform", 0);
         }
         Self {
             app,
@@ -66,8 +65,8 @@ impl App for MyApp<'_> {
             }
         }
         gfx.color = [255, 32, 100, 255];
-        // gfx.circle(0.0, 0.0, 0.3);
-        gfx.rect_center(0.0, 0.0, 0.5, 0.2);
+        gfx.circle(0.0, 0.4, 0.2);
+        gfx.rrect_center(0.0, 0.0, 0.9, 0.3, 0.5);
 
         let mut ctx = self.app.ctx();
         ctx.bind_pipeline("pipeline");

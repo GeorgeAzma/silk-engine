@@ -5,15 +5,16 @@ use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
-use crate::util::Mem;
-use crate::{gpu, gpu_idle, scope_time};
+use crate::{gpu, gpu_idle, scope_time, util::Mem};
 
-use super::shader::Shader;
-use super::vulkan::pipeline::{GraphicsPipelineInfo, PipelineStageInfo};
-use super::vulkan::ImageInfo;
 use super::{
-    alloc_callbacks, entry, instance, physical_gpu, queue, CmdAlloc, DSLManager, DescAlloc,
-    GpuAlloc, PipelineLayoutManager, RenderPass,
+    alloc_callbacks, entry, instance, physical_gpu, queue,
+    shader::Shader,
+    vulkan::{
+        pipeline::{GraphicsPipelineInfo, PipelineStageInfo},
+        DSLBinding, ImageInfo,
+    },
+    CmdAlloc, DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, RenderPass,
 };
 
 #[cfg(debug_assertions)]
@@ -22,7 +23,6 @@ static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
 
 struct ShaderData {
     shader: Shader,
-    dsls: Vec<vk::DescriptorSetLayout>,
     pipeline_layout: vk::PipelineLayout,
     pipeline_stages: Vec<PipelineStageInfo>,
 }
@@ -52,6 +52,11 @@ struct FenceData {
     signaled: bool,
 }
 
+struct DescSetData {
+    desc_set: vk::DescriptorSet,
+    binds: Vec<DSLBinding>,
+}
+
 unsafe impl Sync for RenderContext {}
 unsafe impl Send for RenderContext {}
 
@@ -67,7 +72,7 @@ pub struct RenderContext {
     // named cached objects
     shaders: HashMap<String, ShaderData>,
     pipelines: HashMap<String, PipelineData>,
-    desc_sets: HashMap<String, vk::DescriptorSet>,
+    desc_sets: HashMap<String, DescSetData>,
     cmds: HashMap<String, vk::CommandBuffer>,
     buffers: HashMap<String, vk::Buffer>,
     render_passes: HashMap<String, RenderPass>,
@@ -163,15 +168,18 @@ impl RenderContext {
         slf
     }
 
-    pub(crate) fn begin_frame(&mut self) {
+    // might cause a swapchain resize so returns new size
+    pub(crate) fn begin_frame(&mut self) -> vk::Extent2D {
         self.wait_fence("prev frame finished");
         self.cmd_alloc.reset();
-        self.acquire_img(self.semaphore("img available"));
+        let swapchain_size = self.acquire_img(self.semaphore("img available"));
 
         self.begin_cmd("render", true);
+        swapchain_size
     }
 
-    pub(crate) fn end_frame(&mut self, window: &Window) {
+    // might cause swapchain resize so returns new optimal size
+    pub(crate) fn end_frame(&mut self, window: &Window) -> vk::Extent2D {
         self.submit_cmd(
             "render",
             queue(),
@@ -182,7 +190,7 @@ impl RenderContext {
         );
 
         window.pre_present_notify();
-        self.present(&[self.semaphore("render finished")]);
+        self.present(&[self.semaphore("render finished")])
     }
 
     pub fn begin_render_swapchain(&mut self) {
@@ -209,24 +217,24 @@ impl RenderContext {
     }
 
     pub fn shader(&self, name: &str) -> &Shader {
-        &self.shaders[name].shader
+        &self
+            .shaders
+            .get(name)
+            .unwrap_or_else(|| panic!("shader not found: {name}"))
+            .shader
     }
 
     pub fn add_shader(&mut self, name: &str) -> &Shader {
         let shader_data = {
             let shader = Shader::new(name);
-            let dsls = shader
-                .get_dsl_bindings()
-                .iter()
-                .map(|dslb| self.dsl_manager.get(dslb))
-                .collect::<Vec<_>>();
+            let dsls = self.dsl_manager.gets(shader.dsl_infos());
             let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
+            debug_name(name, pipeline_layout);
             let module = shader.create_module();
             debug_name(name, module);
             let pipeline_stages = shader.get_pipeline_stages(module);
             ShaderData {
                 shader,
-                dsls,
                 pipeline_layout,
                 pipeline_stages,
             }
@@ -259,7 +267,10 @@ impl RenderContext {
     }
 
     pub fn render_pass(&mut self, name: &str) -> vk::RenderPass {
-        self.render_passes[name].render_pass
+        self.render_passes
+            .get(name)
+            .unwrap_or_else(|| panic!("render pass not found: {name}"))
+            .render_pass
     }
 
     pub fn add_fence(&mut self, name: &str, signaled: bool) {
@@ -300,7 +311,10 @@ impl RenderContext {
     }
 
     pub fn fence(&self, name: &str) -> vk::Fence {
-        self.fences[name].fence
+        self.fences
+            .get(name)
+            .unwrap_or_else(|| panic!("fence not found: {name}"))
+            .fence
     }
 
     pub fn reset_fence(&mut self, name: &str) -> vk::Fence {
@@ -354,14 +368,17 @@ impl RenderContext {
         let semaphore = self
             .semaphores
             .remove(name)
-            .unwrap_or_else(|| panic!("no semaphore found: {name}"));
+            .unwrap_or_else(|| panic!("semaphore not found: {name}"));
         unsafe {
             gpu().destroy_semaphore(semaphore, alloc_callbacks());
         }
     }
 
     pub fn semaphore(&self, name: &str) -> vk::Semaphore {
-        self.semaphores[name]
+        *self
+            .semaphores
+            .get(name)
+            .unwrap_or_else(|| panic!("semaphore not found: {name}"))
     }
 
     pub fn add_image(
@@ -385,13 +402,13 @@ impl RenderContext {
         let (image, img_views) = self
             .images
             .remove(name)
-            .unwrap_or_else(|| panic!("no image found: {name}"));
+            .unwrap_or_else(|| panic!("image not found: {name}"));
         self.gpu_alloc.dealloc_img(image);
         for img_view in img_views {
             let (img_view, _) = self
                 .img_views
                 .remove(&img_view)
-                .unwrap_or_else(|| panic!("no image view found: {img_view}, for image({name})"));
+                .unwrap_or_else(|| panic!("img view({img_view}) not found, for img({name})"));
             unsafe {
                 gpu().destroy_image_view(img_view, alloc_callbacks());
             }
@@ -399,7 +416,10 @@ impl RenderContext {
     }
 
     pub fn image(&self, name: &str) -> vk::Image {
-        self.images[name].0
+        self.images
+            .get(name)
+            .unwrap_or_else(|| panic!("img not found: {name}"))
+            .0
     }
 
     pub fn add_img_view(&mut self, name: &str, img_name: &str) -> vk::ImageView {
@@ -429,7 +449,7 @@ impl RenderContext {
                         .image(*img),
                     alloc_callbacks(),
                 )
-                .unwrap_or_else(|_| panic!("failed to create image view: {name}"))
+                .unwrap_or_else(|_| panic!("failed to create img view: {name}"))
         };
         self.img_views
             .insert(name.to_string(), (img_view, img_name.to_string()));
@@ -444,7 +464,7 @@ impl RenderContext {
             img_views
                 .iter()
                 .position(|s| s.as_str() == name)
-                .unwrap_or_else(|| panic!("image view({name}) not found for image({img_name})")),
+                .unwrap_or_else(|| panic!("img view({name}) not found for img({img_name})")),
         );
         unsafe {
             gpu().destroy_image_view(img_view, alloc_callbacks());
@@ -452,7 +472,10 @@ impl RenderContext {
     }
 
     pub fn img_view(&self, name: &str) -> vk::ImageView {
-        self.img_views[name].0
+        self.img_views
+            .get(name)
+            .unwrap_or_else(|| panic!("img view not found: {name}"))
+            .0
     }
 
     pub fn add_pipeline(
@@ -463,7 +486,10 @@ impl RenderContext {
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
         scope_time!("Create pipeline({name})");
-        let shader_data = &self.shaders[shader_name];
+        let shader_data = &self
+            .shaders
+            .get(shader_name)
+            .unwrap_or_else(|| panic!("no shader found: {shader_name}"));
         let pipeline_info = pipeline_info
             .layout(shader_data.pipeline_layout)
             .stages(&shader_data.pipeline_stages)
@@ -492,10 +518,19 @@ impl RenderContext {
         shader_name: &str,
         group: usize,
     ) -> vk::DescriptorSet {
-        let dsl = self.shaders[shader_name].dsls[group];
+        let binds = self
+            .shaders
+            .get(shader_name)
+            .unwrap_or_else(|| panic!("no shader found: {shader_name}"))
+            .shader
+            .dsl_infos()[group]
+            .clone();
+        let dsl = self.dsl_manager.get(&binds);
         let desc_set = self.desc_alloc.alloc_one(dsl);
         assert!(
-            self.desc_sets.insert(name.to_string(), desc_set).is_none(),
+            self.desc_sets
+                .insert(name.to_string(), DescSetData { desc_set, binds })
+                .is_none(),
             "desc set already exists: {name}"
         );
         debug_name(name, desc_set);
@@ -503,11 +538,17 @@ impl RenderContext {
     }
 
     pub fn add_desc_sets(&mut self, names: &[&str], shader_name: &str) -> Vec<vk::DescriptorSet> {
-        let dsls = &self.shaders[shader_name].dsls;
-        let desc_sets = self.desc_alloc.alloc(dsls);
-        for (name, &desc_set) in names.iter().zip(desc_sets.iter()) {
+        let dsl_infos = self.shaders[shader_name].shader.dsl_infos();
+        let dsls = self.dsl_manager.gets(dsl_infos);
+        let desc_sets = self.desc_alloc.alloc(&dsls);
+        for (name, (&desc_set, binds)) in names
+            .iter()
+            .zip(desc_sets.iter().zip(dsl_infos.iter().cloned()))
+        {
             assert!(
-                self.desc_sets.insert(name.to_string(), desc_set).is_none(),
+                self.desc_sets
+                    .insert(name.to_string(), DescSetData { desc_set, binds })
+                    .is_none(),
                 "desc set already exists: {name}"
             );
             debug_name(name, desc_set);
@@ -516,7 +557,10 @@ impl RenderContext {
     }
 
     pub fn desc_set(&self, name: &str) -> vk::DescriptorSet {
-        self.desc_sets[name]
+        self.desc_sets
+            .get(name)
+            .unwrap_or_else(|| panic!("descriptor set not found: {name}"))
+            .desc_set
     }
 
     pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
@@ -597,7 +641,10 @@ impl RenderContext {
     }
 
     pub fn buffer(&self, name: &str) -> vk::Buffer {
-        self.buffers[name]
+        *self
+            .buffers
+            .get(name)
+            .unwrap_or_else(|| panic!("buffer not found: {name}"))
     }
 
     pub fn buffer_size(&self, name: &str) -> u64 {
@@ -605,7 +652,10 @@ impl RenderContext {
     }
 
     pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
-        self.cmds[name]
+        *self
+            .cmds
+            .get(name)
+            .unwrap_or_else(|| panic!("cmd buffer not found: {name}"))
     }
 
     pub fn cmd(&self) -> vk::CommandBuffer {
@@ -839,7 +889,11 @@ impl RenderContext {
     }
 
     pub fn bind_pipeline(&mut self, name: &str) {
-        let pipeline_data = self.pipelines[name].clone();
+        let pipeline_data = self
+            .pipelines
+            .get(name)
+            .unwrap_or_else(|| panic!("pipeline not found: {name}"))
+            .clone();
         if pipeline_data.pipeline == self.cmd_state.pipeline_data.pipeline {
             return;
         }
@@ -873,7 +927,7 @@ impl RenderContext {
     }
 
     pub fn bind_desc_set(&mut self, name: &str) {
-        self.cmd_state.desc_sets = vec![self.desc_sets[name]];
+        self.cmd_state.desc_sets = vec![self.desc_set(name)];
         unsafe {
             gpu().cmd_bind_descriptor_sets(
                 self.cmd(),
@@ -888,22 +942,22 @@ impl RenderContext {
 
     pub fn bind_vbo(&self, name: &str) {
         unsafe {
-            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffer(name)], &[0]);
         }
     }
 
     pub fn bind_ebo(&self, name: &str) {
         unsafe {
-            gpu().cmd_bind_index_buffer(self.cmd(), self.buffers[name], 0, vk::IndexType::UINT32);
+            gpu().cmd_bind_index_buffer(self.cmd(), self.buffer(name), 0, vk::IndexType::UINT32);
         }
     }
 
     pub fn bind_vao(&self, name: &str, index_buffer_offset: vk::DeviceSize) {
         unsafe {
-            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffers[name]], &[0]);
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffer(name)], &[0]);
             gpu().cmd_bind_index_buffer(
                 self.cmd(),
-                self.buffers[name],
+                self.buffer(name),
                 index_buffer_offset,
                 vk::IndexType::UINT32,
             );
@@ -1051,6 +1105,40 @@ impl RenderContext {
         self.read_buffer_off(name, data, 0);
     }
 
+    pub fn write_ds_range(
+        &self,
+        name: &str,
+        buffer_name: &str,
+        range: std::ops::Range<vk::DeviceSize>,
+        binding: u32,
+    ) {
+        let DescSetData { desc_set, binds } = &self.desc_sets[name];
+        let buffer = self.buffer(buffer_name);
+        let ds_type = binds[binding as usize].descriptor_type;
+        unsafe {
+            gpu().update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .buffer_info(&[vk::DescriptorBufferInfo::default()
+                        .buffer(buffer)
+                        .offset(range.start)
+                        .range(if range.end == vk::WHOLE_SIZE {
+                            vk::WHOLE_SIZE
+                        } else {
+                            range.end - range.start
+                        })])
+                    .descriptor_count(1)
+                    .descriptor_type(ds_type)
+                    .dst_binding(binding)
+                    .dst_set(*desc_set)],
+                &[],
+            )
+        }
+    }
+
+    pub fn write_ds(&self, name: &str, buffer_name: &str, binding: u32) {
+        self.write_ds_range(name, buffer_name, 0..vk::WHOLE_SIZE, binding)
+    }
+
     pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
         unsafe {
             gpu().cmd_clear_color_image(
@@ -1066,7 +1154,7 @@ impl RenderContext {
         }
     }
 
-    pub fn recreate_swapchain(&mut self) {
+    pub fn recreate_swapchain(&mut self) -> vk::Extent2D {
         let surface_capabilities = self.surface_capabilities();
         let size = self.swapchain_size;
         let surface_resolution = match surface_capabilities.current_extent.width {
@@ -1080,7 +1168,7 @@ impl RenderContext {
             || surface_resolution.height == 0
             || surface_resolution == size
         {
-            return;
+            return surface_resolution;
         }
         self.swapchain_size = surface_resolution;
         scope_time!(
@@ -1163,12 +1251,16 @@ impl RenderContext {
         }
 
         gpu_idle();
+        surface_resolution
     }
 
-    pub fn acquire_img(&mut self, signal: vk::Semaphore) {
-        if self.swapchain == vk::SwapchainKHR::null() {
-            self.recreate_swapchain();
-        }
+    // might cause resize so returns optimal swapchain size
+    pub fn acquire_img(&mut self, signal: vk::Semaphore) -> vk::Extent2D {
+        let extent = if self.swapchain == vk::SwapchainKHR::null() {
+            self.recreate_swapchain()
+        } else {
+            self.swapchain_size
+        };
         unsafe {
             self.swapchain_img_idx = self
                 .swapchain_loader
@@ -1176,9 +1268,11 @@ impl RenderContext {
                 .unwrap()
                 .0 as usize;
         }
+        extent
     }
 
-    pub fn present(&mut self, wait: &[vk::Semaphore]) {
+    // might cause resize so returns optimal swapchain size
+    pub fn present(&mut self, wait: &[vk::Semaphore]) -> vk::Extent2D {
         unsafe {
             self.swapchain_loader
                 .queue_present(
@@ -1188,11 +1282,9 @@ impl RenderContext {
                         .swapchains(&[self.swapchain])
                         .image_indices(&[self.swapchain_img_idx as u32]),
                 )
-                .unwrap_or_else(|_| {
-                    self.recreate_swapchain();
-                    false
-                })
-        };
+                .map(|_| self.swapchain_size)
+                .unwrap_or_else(|_| self.recreate_swapchain())
+        }
     }
 
     pub fn cur_img(&self) -> vk::Image {
@@ -1423,76 +1515,3 @@ pub fn debug_tag<T: vk::Handle>(name: u64, tag: &[u8], obj: T) {
 pub fn debug_name<T: vk::Handle>(_name: &str, _obj: T) {}
 #[cfg(not(debug_assertions))]
 pub fn debug_tag<T: vk::Handle>(_name: u64, _tag: &[u8], _obj: T) {}
-
-pub fn write_desc_set(
-    desc_set: vk::DescriptorSet,
-    desc_type: vk::DescriptorType,
-    buffer: vk::Buffer,
-    range: std::ops::Range<vk::DeviceSize>,
-    binding: u32,
-) {
-    unsafe {
-        gpu().update_descriptor_sets(
-            &[vk::WriteDescriptorSet::default()
-                .buffer_info(&[vk::DescriptorBufferInfo::default()
-                    .buffer(buffer)
-                    .offset(range.start)
-                    .range(if range.end == vk::WHOLE_SIZE {
-                        vk::WHOLE_SIZE
-                    } else {
-                        range.end - range.start
-                    })])
-                .descriptor_count(1)
-                .descriptor_type(desc_type)
-                .dst_binding(binding)
-                .dst_set(desc_set)],
-            &[],
-        )
-    }
-}
-
-pub fn write_desc_set_uniform_buffer(
-    desc_set: vk::DescriptorSet,
-    buffer: vk::Buffer,
-    range: std::ops::Range<vk::DeviceSize>,
-    binding: u32,
-) {
-    write_desc_set(
-        desc_set,
-        vk::DescriptorType::UNIFORM_BUFFER,
-        buffer,
-        range,
-        binding,
-    )
-}
-
-pub fn write_desc_set_uniform_buffer_whole(
-    desc_set: vk::DescriptorSet,
-    buffer: vk::Buffer,
-    binding: u32,
-) {
-    write_desc_set_uniform_buffer(desc_set, buffer, 0..vk::WHOLE_SIZE, binding)
-}
-
-pub fn write_desc_set_storage_buffer(
-    desc_set: vk::DescriptorSet,
-    buffer: vk::Buffer,
-    range: std::ops::Range<vk::DeviceSize>,
-    binding: u32,
-) {
-    write_desc_set(
-        desc_set,
-        vk::DescriptorType::STORAGE_BUFFER,
-        buffer,
-        range,
-        binding,
-    )
-}
-
-pub fn write_desc_set_storage_buffer_whole(
-    desc_set: vk::DescriptorSet,
-    buffer: vk::Buffer,
-    binding: u32,
-) {
-    write_desc_set_storage_buffer(desc_set, buffer, 0..vk::WHOLE_SIZE, binding)
-}

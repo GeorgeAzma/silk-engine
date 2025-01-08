@@ -73,7 +73,6 @@ pub static INIT_LOG_FOLDER: LazyLock<()> = LazyLock::new(|| {
 });
 
 pub fn backtrace_callers() -> Vec<String> {
-    *INIT_LOG_FOLDER;
     let mut backtrace = std::backtrace::Backtrace::force_capture()
         .to_string()
         .replace("\\", "/");

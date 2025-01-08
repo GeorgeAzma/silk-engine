@@ -55,7 +55,7 @@ pub struct AppContext<A: App> {
     pub mouse_scroll: f32,
     pub surface_format: vk::Format,
     render_ctx: Arc<Mutex<RenderContext>>,
-    batch_renderer: Renderer,
+    renderer: Renderer,
 }
 
 impl<A: App> AppContext<A> {
@@ -93,7 +93,7 @@ impl<A: App> AppContext<A> {
             mouse_scroll: 0.0,
             render_ctx: render_ctx.clone(),
             surface_format: surf_format,
-            batch_renderer: Renderer::new(render_ctx.clone()),
+            renderer: Renderer::new(render_ctx.clone()),
         }));
         {
             let app_mut = &mut *app.lock().unwrap();
@@ -115,24 +115,26 @@ impl<A: App> AppContext<A> {
         if self.width != 0 && self.height != 0 {
             scope_time!("render {}", self.frame; self.frame < 4);
 
-            self.ctx().begin_frame();
+            let optimal_size = self.ctx().begin_frame();
+            self.resize(optimal_size.width, optimal_size.height);
 
             self.ctx().begin_render_swapchain();
             self.my_app().render(); // to [swap img render area]
-            self.batch_renderer.flush();
-            self.batch_renderer.render(); // in [written vbo (vs)] | to [swap img render area]
+            self.renderer.flush();
+            self.renderer.render(); // in [written vbo (vs)] | to [swap img render area]
             self.ctx().end_render_swapchain();
 
-            self.render_ctx.lock().unwrap().end_frame(&self.window);
+            let optimal_size = self.render_ctx.lock().unwrap().end_frame(&self.window);
+            self.resize(optimal_size.width, optimal_size.height);
         }
-        self.batch_renderer.reset();
+        self.renderer.reset();
 
         self.input.reset();
         self.frame += 1;
     }
 
     fn resize(&mut self, width: u32, height: u32) {
-        if width == self.width || height == self.height {
+        if width == self.width && height == self.height {
             return;
         }
         self.width = width;
@@ -140,7 +142,9 @@ impl<A: App> AppContext<A> {
         if width == 0 || height == 0 {
             return;
         }
-        self.ctx().recreate_swapchain();
+        self.renderer.on_resize(width, height);
+        let optimal_size = self.ctx().recreate_swapchain();
+        self.resize(optimal_size.width, optimal_size.height);
     }
 
     fn event(&mut self, event_loop: &ActiveEventLoop, event: Event, window_id: WindowId) {
@@ -187,7 +191,7 @@ impl<A: App> AppContext<A> {
     }
 
     pub fn gfx(&mut self) -> &mut Renderer {
-        &mut self.batch_renderer
+        &mut self.renderer
     }
 
     pub fn center_window(&self) {
@@ -234,7 +238,7 @@ static PANIC_HOOK: LazyLock<()> = LazyLock::new(|| {
             println!(
                 "panicked: \x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m",
                 s,
-                crate::backtrace(1)
+                crate::backtrace(2)
             );
         };
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {

@@ -4,8 +4,9 @@ use super::{
     alloc_callbacks,
     vulkan::{pipeline::PipelineStageInfo, DSLBinding},
 };
-use crate::{fatal, format_size, gpu, log};
+use crate::{format_size, gpu, log};
 use ash::vk;
+use naga::Module;
 
 #[cfg(not(debug_assertions))]
 pub static INIT_CACHE_PATH: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
@@ -23,14 +24,15 @@ fn shader_cache_path(name: &str) -> String {
 pub struct Shader {
     spirv: Vec<u32>,
     ir_module: naga::Module,
+    dsl_infos: Vec<Vec<DSLBinding>>, // [group, binding]
 }
 
 impl Shader {
     pub fn new(name: &str) -> Self {
         // TODO: save/load reflection (using naga's serde serialize feature) (only if bottlenecked)
         let source = std::fs::read_to_string(shader_path(name)).unwrap();
-        let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| {
-            fatal!("WGSL Error:\n{}", e.emit_to_string(&source));
+        let ir_module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| {
+            panic!("WGSL {}", e.emit_to_string(&source));
         });
 
         // read spirv cache
@@ -44,7 +46,7 @@ impl Shader {
                 naga::valid::ValidationFlags::all(),
                 naga::valid::Capabilities::all(),
             )
-            .validate(&module)
+            .validate(&ir_module)
             .expect("validation failed");
 
             // generate spirv
@@ -55,7 +57,7 @@ impl Shader {
             };
             let mut writer = naga::back::spv::Writer::new(&opts).unwrap();
             writer
-                .write(&module, &info, None, &None, &mut spirv)
+                .write(&ir_module, &info, None, &None, &mut spirv)
                 .unwrap();
 
             // write spirv cache
@@ -67,10 +69,99 @@ impl Shader {
             spirv
         };
 
+        fn get_dsl_infos(ir_module: &Module) -> Vec<Vec<DSLBinding>> {
+            let mut bindings: HashMap<u32, Vec<DSLBinding>> = HashMap::new();
+            let mut resource_access_stages: HashMap<u32, vk::ShaderStageFlags> = HashMap::new();
+            for entry in ir_module.entry_points.iter() {
+                for (expr_hnd, expr) in entry.function.expressions.iter() {
+                    if matches!(
+                        expr,
+                        naga::Expression::Access { .. }
+                            | naga::Expression::AccessIndex { .. }
+                            | naga::Expression::FunctionArgument(_)
+                            | naga::Expression::GlobalVariable(_)
+                            | naga::Expression::LocalVariable(_)
+                    ) {
+                        if let Some(gvar_hnd) = entry.function.originating_global(expr_hnd) {
+                            let gvar = &ir_module.global_variables[gvar_hnd];
+                            if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
+                                let resource_key = group << 16 | binding;
+                                let stage = stage_to_vk(&entry.stage);
+                                resource_access_stages
+                                    .entry(resource_key)
+                                    .and_modify(|stages| *stages |= stage)
+                                    .or_insert(stage);
+                            }
+                        }
+                    }
+                }
+            }
+            for (_, gvar) in ir_module.global_variables.iter() {
+                if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
+                    let resource_key = group << 16 | binding;
+                    let array_size = match ir_module.types[gvar.ty].inner.clone() {
+                        naga::TypeInner::Array {
+                            size, stride: _, ..
+                        }
+                        | naga::TypeInner::BindingArray { size, .. } => {
+                            if let naga::ArraySize::Constant(size) = size {
+                                size.get()
+                            } else {
+                                1
+                            }
+                        }
+                        _ => 1,
+                    };
+                    let desc_type = match (gvar.space, ir_module.types[gvar.ty].inner.clone()) {
+                        (naga::AddressSpace::Handle, naga::TypeInner::Sampler { .. }) => {
+                            vk::DescriptorType::SAMPLER
+                        }
+                        (naga::AddressSpace::Handle, naga::TypeInner::Image { .. }) => {
+                            vk::DescriptorType::SAMPLED_IMAGE
+                        }
+                        (naga::AddressSpace::Storage { .. }, naga::TypeInner::Image { .. }) => {
+                            vk::DescriptorType::STORAGE_IMAGE
+                        }
+                        (naga::AddressSpace::Uniform, _) => vk::DescriptorType::UNIFORM_BUFFER,
+                        (naga::AddressSpace::Storage { .. }, _) => {
+                            vk::DescriptorType::STORAGE_BUFFER
+                        }
+                        (_, _) => vk::DescriptorType::from_raw(-1),
+                    };
+                    let binding = DSLBinding {
+                        binding,
+                        descriptor_type: desc_type,
+                        descriptor_count: array_size,
+                        stage_flags: *resource_access_stages
+                            .get(&resource_key)
+                            .unwrap_or(&vk::ShaderStageFlags::empty()),
+                    };
+                    bindings.entry(group).or_default().push(binding);
+                }
+            }
+            let bindings = bindings.into_iter().collect::<Vec<_>>();
+            let max_group = bindings
+                .iter()
+                .map(|(group, _)| group)
+                .cloned()
+                .max()
+                .unwrap_or(0) as usize;
+            let mut bindings_vec = vec![Default::default(); max_group + 1];
+            for (group, binding) in bindings {
+                bindings_vec[group as usize] = binding;
+            }
+            bindings_vec
+        }
+        let dsl_infos = get_dsl_infos(&ir_module);
         Self {
             spirv,
-            ir_module: module,
+            ir_module,
+            dsl_infos,
         }
+    }
+
+    pub fn dsl_infos(&self) -> &[Vec<DSLBinding>] {
+        &self.dsl_infos
     }
 
     pub fn create_module(&self) -> vk::ShaderModule {
@@ -86,88 +177,6 @@ impl Shader {
 
     pub fn workgroup_size(&self) -> [u32; 3] {
         self.ir_module.entry_points[0].workgroup_size
-    }
-
-    pub fn get_dsl_bindings(&self) -> Vec<Vec<DSLBinding>> {
-        let mut bindings: HashMap<u32, Vec<DSLBinding>> = HashMap::new();
-        let mut resource_access_stages: HashMap<u32, vk::ShaderStageFlags> = HashMap::new();
-        for entry in self.ir_module.entry_points.iter() {
-            for (expr_hnd, expr) in entry.function.expressions.iter() {
-                if matches!(
-                    expr,
-                    naga::Expression::Access { .. }
-                        | naga::Expression::AccessIndex { .. }
-                        | naga::Expression::FunctionArgument(_)
-                        | naga::Expression::GlobalVariable(_)
-                        | naga::Expression::LocalVariable(_)
-                ) {
-                    if let Some(gvar_hnd) = entry.function.originating_global(expr_hnd) {
-                        let gvar = &self.ir_module.global_variables[gvar_hnd];
-                        if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
-                            let resource_key = group << 16 | binding;
-                            let stage = stage_to_vk(&entry.stage);
-                            resource_access_stages
-                                .entry(resource_key)
-                                .and_modify(|stages| *stages |= stage)
-                                .or_insert(stage);
-                        }
-                    }
-                }
-            }
-        }
-        for (_, gvar) in self.ir_module.global_variables.iter() {
-            if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
-                let resource_key = group << 16 | binding;
-                let array_size = match self.ir_module.types[gvar.ty].inner.clone() {
-                    naga::TypeInner::Array {
-                        size, stride: _, ..
-                    }
-                    | naga::TypeInner::BindingArray { size, .. } => {
-                        if let naga::ArraySize::Constant(size) = size {
-                            size.get()
-                        } else {
-                            1
-                        }
-                    }
-                    _ => 1,
-                };
-                let desc_type = match (gvar.space, self.ir_module.types[gvar.ty].inner.clone()) {
-                    (naga::AddressSpace::Handle, naga::TypeInner::Sampler { .. }) => {
-                        vk::DescriptorType::SAMPLER
-                    }
-                    (naga::AddressSpace::Handle, naga::TypeInner::Image { .. }) => {
-                        vk::DescriptorType::SAMPLED_IMAGE
-                    }
-                    (naga::AddressSpace::Storage { .. }, naga::TypeInner::Image { .. }) => {
-                        vk::DescriptorType::STORAGE_IMAGE
-                    }
-                    (naga::AddressSpace::Uniform, _) => vk::DescriptorType::UNIFORM_BUFFER,
-                    (naga::AddressSpace::Storage { .. }, _) => vk::DescriptorType::STORAGE_BUFFER,
-                    (_, _) => vk::DescriptorType::from_raw(-1),
-                };
-                let binding = DSLBinding {
-                    binding,
-                    descriptor_type: desc_type,
-                    descriptor_count: array_size,
-                    stage_flags: *resource_access_stages
-                        .get(&resource_key)
-                        .unwrap_or(&vk::ShaderStageFlags::empty()),
-                };
-                bindings.entry(group).or_default().push(binding);
-            }
-        }
-        let bindings = bindings.into_iter().collect::<Vec<_>>();
-        let max_group = bindings
-            .iter()
-            .map(|(group, _)| group)
-            .cloned()
-            .max()
-            .unwrap_or(0) as usize;
-        let mut bindings_vec = vec![Default::default(); max_group + 1];
-        for (group, binding) in bindings {
-            bindings_vec[group as usize] = binding;
-        }
-        bindings_vec
     }
 
     /// Arguments:

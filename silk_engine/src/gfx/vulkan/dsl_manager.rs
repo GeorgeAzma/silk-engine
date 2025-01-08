@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ptr::null;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DSLBinding {
     pub binding: u32,
     pub descriptor_type: vk::DescriptorType,
@@ -51,6 +51,13 @@ impl DSLManager {
                 .create_descriptor_set_layout(&info, alloc_callbacks())
                 .unwrap()
         })
+    }
+
+    pub fn gets(&mut self, dsl_bindings: &[Vec<DSLBinding>]) -> Vec<vk::DescriptorSetLayout> {
+        dsl_bindings
+            .iter()
+            .map(|bindings| self.get(bindings))
+            .collect()
     }
 }
 
