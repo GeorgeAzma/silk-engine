@@ -222,12 +222,12 @@ static QUEUE: LazyLock<vk::Queue> =
     LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
 
 pub fn gpu_idle() {
-    log!("GPU idle |> {}", crate::backtrace_last(1));
+    crate::scope_time!("GPU idle");
     unsafe { gpu().device_wait_idle().unwrap() };
 }
 
 pub fn queue_idle() {
-    log!("Queue idle |> {}", crate::backtrace_last(1));
+    crate::scope_time!("Queue idle");
     unsafe { gpu().queue_wait_idle(*QUEUE).unwrap() };
 }
 

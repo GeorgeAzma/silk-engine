@@ -73,6 +73,24 @@ impl<A: App> AppContext<A> {
         let render_ctx = Arc::new(Mutex::new(RenderContext::new(&window)));
         let surf_format = render_ctx.lock().unwrap().surface_format.format;
 
+        render_ctx.lock().unwrap().add_image(
+            "sampled",
+            &ImageInfo::new()
+                .width(width)
+                .height(height)
+                .format(surf_format)
+                .samples(8)
+                .usage(
+                    vk::ImageUsageFlags::COLOR_ATTACHMENT
+                        | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+                ),
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+        render_ctx
+            .lock()
+            .unwrap()
+            .add_img_view("sampled view", "sampled");
+
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
@@ -118,7 +136,11 @@ impl<A: App> AppContext<A> {
             let optimal_size = self.ctx().begin_frame();
             self.resize(optimal_size.width, optimal_size.height);
 
-            self.ctx().begin_render_swapchain();
+            let sampled_view = self.render_ctx.lock().unwrap().img_view("sampled view");
+            self.render_ctx
+                .lock()
+                .unwrap()
+                .begin_render_swapchain(sampled_view);
             self.my_app().render(); // to [swap img render area]
             self.renderer.flush();
             self.renderer.render(); // in [written vbo (vs)] | to [swap img render area]
@@ -142,8 +164,24 @@ impl<A: App> AppContext<A> {
         if width == 0 || height == 0 {
             return;
         }
+        let surf_format = self.surface_format;
         self.renderer.on_resize(width, height);
         let optimal_size = self.ctx().recreate_swapchain();
+        self.ctx().remove_image("sampled");
+        self.ctx().add_image(
+            "sampled",
+            &ImageInfo::new()
+                .width(width)
+                .height(height)
+                .format(surf_format)
+                .samples(8)
+                .usage(
+                    vk::ImageUsageFlags::COLOR_ATTACHMENT
+                        | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
+                ),
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        );
+        self.ctx().add_img_view("sampled view", "sampled");
         self.resize(optimal_size.width, optimal_size.height);
     }
 

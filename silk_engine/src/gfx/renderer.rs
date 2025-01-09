@@ -111,7 +111,8 @@ impl Renderer {
                     .blend_attachment_standard()
                     .dyn_size()
                     .color_attachment(format)
-                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP), // .samples(8)
+                    .samples(8)
+                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
                 &[(true, vec![])],
             );
             ctx.add_desc_set("render ds", "render", 0);

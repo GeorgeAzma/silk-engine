@@ -173,7 +173,6 @@ impl RenderContext {
         self.wait_fence("prev frame finished");
         self.cmd_alloc.reset();
         let swapchain_size = self.acquire_img(self.semaphore("img available"));
-
         self.begin_cmd("render", true);
         swapchain_size
     }
@@ -193,7 +192,7 @@ impl RenderContext {
         self.present(&[self.semaphore("render finished")])
     }
 
-    pub fn begin_render_swapchain(&mut self) {
+    pub fn begin_render_swapchain(&mut self, resolve_img_view: vk::ImageView) {
         self.transition_image_layout(
             self.cur_img(),
             vk::ImageLayout::UNDEFINED,
@@ -203,7 +202,7 @@ impl RenderContext {
         let width = self.swapchain_size.width;
         let height = self.swapchain_size.height;
         let img_view = self.cur_img_view();
-        self.begin_render(width, height, img_view);
+        self.begin_render(width, height, img_view, resolve_img_view);
     }
 
     pub fn end_render_swapchain(&mut self) {
@@ -776,14 +775,14 @@ impl RenderContext {
         width: u32,
         height: u32,
         image_view: vk::ImageView,
-        // resolve_image_view: vk::ImageView,
+        sampled_img_view: vk::ImageView,
     ) {
-        let resolve_image_view = vk::ImageView::null();
         self.cmd_state.render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: vk::Extent2D { width, height },
         };
         self.debug_begin(&format!("Begin Render({width}x{height})"));
+        let sampled = !sampled_img_view.is_null();
         unsafe {
             gpu().cmd_begin_rendering(
                 self.cmd(),
@@ -791,22 +790,30 @@ impl RenderContext {
                     .render_area(self.cmd_state.render_area)
                     .layer_count(1)
                     .color_attachments(&[vk::RenderingAttachmentInfo::default()
-                        .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                        .load_op(vk::AttachmentLoadOp::CLEAR)
                         .store_op(vk::AttachmentStoreOp::STORE)
                         .clear_value(vk::ClearValue {
                             color: vk::ClearColorValue {
                                 float32: [0.0, 0.0, 0.0, 0.0],
                             },
                         })
-                        .resolve_mode(if resolve_image_view.is_null() {
-                            vk::ResolveModeFlags::NONE
-                        } else {
+                        .resolve_mode(if sampled {
                             vk::ResolveModeFlags::AVERAGE
+                        } else {
+                            vk::ResolveModeFlags::NONE
                         })
-                        .resolve_image_view(resolve_image_view)
+                        .resolve_image_view(if sampled {
+                            image_view
+                        } else {
+                            vk::ImageView::null()
+                        })
                         .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image_view(image_view)]),
+                        .image_view(if sampled {
+                            sampled_img_view
+                        } else {
+                            image_view
+                        })]),
             )
         };
     }
@@ -1449,19 +1456,6 @@ impl Drop for RenderContext {
             if !img_view.is_null() {
                 unsafe {
                     gpu().destroy_image_view(img_view, alloc_callbacks());
-                }
-            }
-        }
-        for img in self.images.iter().filter_map(|(img_name, (img, _))| {
-            if !img_name.contains("swapchain image") {
-                Some(*img)
-            } else {
-                None
-            }
-        }) {
-            if !img.is_null() {
-                unsafe {
-                    gpu().destroy_image(img, alloc_callbacks());
                 }
             }
         }

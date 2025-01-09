@@ -10,8 +10,8 @@ pub struct ImageInfo {
     pub depth: u32,
     pub layers: u32,
     pub levels: u32,
-    pub format: vk::Format,
     pub samples: u32,
+    pub format: vk::Format,
     pub flags: vk::ImageCreateFlags,
     pub usage: vk::ImageUsageFlags,
     pub init_layout: vk::ImageLayout,
@@ -26,12 +26,12 @@ impl Default for ImageInfo {
 impl ImageInfo {
     pub fn new() -> Self {
         Self {
-            width: 1,
-            height: 1,
-            depth: 1,
-            layers: 1,
-            levels: 1,
-            samples: 1,
+            width: 0,
+            height: 0,
+            depth: 0,
+            layers: 0,
+            levels: 0,
+            samples: 0,
             format: vk::Format::B8G8R8A8_UNORM,
             flags: vk::ImageCreateFlags::empty(),
             usage: vk::ImageUsageFlags::empty(),
@@ -88,7 +88,7 @@ impl ImageInfo {
     }
 
     pub fn usage(mut self, usage: vk::ImageUsageFlags) -> Self {
-        assert!(!self.usage.is_empty(), "image usage is empty");
+        assert!(!usage.is_empty(), "image usage is empty");
         self.usage |= usage;
         self
     }
@@ -104,18 +104,18 @@ impl ImageInfo {
                 .create_image(
                     &vk::ImageCreateInfo::default()
                         .extent(vk::Extent3D {
-                            width: self.width,
-                            height: self.height,
-                            depth: self.depth,
+                            width: self.width.max(1),
+                            height: self.height.max(1),
+                            depth: self.depth.max(1),
                         })
                         .image_type(match (self.width, self.height, self.depth) {
-                            (1, 1, _) => vk::ImageType::TYPE_1D,
-                            (1, _, _) => vk::ImageType::TYPE_2D,
+                            (_, 0, 0) => vk::ImageType::TYPE_1D,
+                            (_, _, 0) => vk::ImageType::TYPE_2D,
                             (_, _, _) => vk::ImageType::TYPE_3D,
                         })
-                        .array_layers(self.layers)
-                        .mip_levels(self.levels)
-                        .samples(samples_u32_to_vk(self.samples))
+                        .array_layers(self.layers.max(1))
+                        .mip_levels(self.levels.max(1))
+                        .samples(samples_u32_to_vk(self.samples.max(1)))
                         .format(self.format)
                         .flags(self.flags)
                         .usage(self.usage)

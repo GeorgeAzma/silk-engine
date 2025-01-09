@@ -17,6 +17,7 @@ impl App for MyApp<'_> {
                 "shader",
                 GraphicsPipelineInfo::new()
                     .dyn_size()
+                    .samples(8)
                     .color_attachment(surf_format)
                     .blend_attachment_empty(),
                 &[],
@@ -53,25 +54,26 @@ impl App for MyApp<'_> {
 
     fn render(&mut self) {
         let gfx = self.app.gfx();
-        gfx.color = [0, 32, 55, 255];
-        for x in 0..256 {
-            for y in 0..256 {
-                gfx.rect(
-                    -0.99 + x as f32 / 256.0 * 1.98,
-                    -0.99 + y as f32 / 256.0 * 1.98,
-                    0.005,
-                    0.005,
-                );
-            }
-        }
+        // gfx.color = [0, 32, 55, 255];
+        // for x in 0..256 {
+        //     for y in 0..256 {
+        //         gfx.rect(
+        //             -0.99 + x as f32 / 256.0 * 1.98,
+        //             -0.99 + y as f32 / 256.0 * 1.98,
+        //             0.005,
+        //             0.005,
+        //         );
+        //     }
+        // }
+        gfx.rotation = 0.1;
         gfx.color = [255, 32, 100, 255];
         gfx.circle(0.0, 0.4, 0.2);
         gfx.rrect_center(0.0, 0.0, 0.9, 0.3, 0.5);
 
-        let mut ctx = self.app.ctx();
-        ctx.bind_pipeline("pipeline");
-        ctx.bind_desc_set("global uniform ds");
-        ctx.draw(3, 1);
+        // let mut ctx = self.app.ctx();
+        // ctx.bind_pipeline("pipeline");
+        // ctx.bind_desc_set("global uniform ds");
+        // ctx.draw(3, 1);
     }
 
     fn event(&mut self, _e: Event) {}
