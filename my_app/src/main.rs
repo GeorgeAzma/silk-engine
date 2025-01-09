@@ -65,8 +65,10 @@ impl App for MyApp<'_> {
         //         );
         //     }
         // }
-        gfx.rotation = 0.1;
+        gfx.rotation = 0.2;
         gfx.color = [255, 32, 100, 255];
+        gfx.stroke_width = 0.5;
+        gfx.stroke_color = [22, 132, 0, 255];
         gfx.circle(0.0, 0.4, 0.2);
         gfx.rrect_center(0.0, 0.0, 0.9, 0.3, 0.5);
 

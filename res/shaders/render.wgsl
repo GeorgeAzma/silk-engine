@@ -25,7 +25,7 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     var out: VSOut;
     out.uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u)) * 2.0 - 1.0;
     let suv = out.uv * in.scale;
-    let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * sin(in.rotation);
+    let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * res.yx / res * sin(in.rotation);
     out.pos = vec4f(in.pos + rot_uv, 0, 1);
     out.color = unpack4x8unorm(in.color);
     out.roundness = in.roundness;
@@ -50,6 +50,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
     } else {
         rr = length(in.uv) - 1.0;
     }
-    let edge = clamp(1.0 - rr / max(abs(dpdx(rr)), abs(dpdy(rr))), 0.0, 1.0);
-    return vec4f(in.color.rgb, in.color.a * edge);
+    let maxd = max(abs(dpdx(rr)), abs(dpdy(rr)));
+    let edge = clamp(1.0 - rr / maxd, 0.0, 1.0);
+    let strk = clamp(1.0 - (rr + in.stroke_width) / maxd, 0.0, 1.0);
+    let col = mix(in.stroke_color, in.color, strk); 
+    return col * vec4f(1, 1, 1, edge);
 }
