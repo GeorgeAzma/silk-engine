@@ -25,7 +25,9 @@ pub(super) use render_pass::RenderPass;
 mod image;
 pub use image::*;
 
-use crate::{err, log};
+use crate::err;
+#[cfg(debug_assertions)]
+use crate::log;
 
 #[cfg(debug_assertions)]
 struct UserData {

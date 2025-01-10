@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 pub use std::{
     collections::{HashMap, HashSet},
+    fs,
     process::abort,
     ptr::{self, null, null_mut},
     rc::Rc,
@@ -17,16 +18,39 @@ use winit::{event_loop::ControlFlow, window::WindowId};
 use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
 mod input;
-pub mod print;
+mod print;
+mod qoi;
 use input::*;
 pub use input::{Event, Key, Mouse};
 pub use print::*;
+pub use qoi::*;
 mod gfx;
 pub use gfx::*;
 mod util;
 pub use util::*;
 mod buddy_alloc;
 mod contain_range;
+
+#[cfg(not(test))]
+pub const RES_PATH: &str = "res";
+#[cfg(test)]
+pub const RES_PATH: &str = "../target/test_res";
+
+#[cfg(not(debug_assertions))]
+pub static INIT_CACHE_PATH: LazyLock<()> = LazyLock::new(|| {
+    fs::create_dir_all(format!("{RES_PATH}/cache/shaders")).unwrap_or_default();
+});
+
+pub static INIT_IMG_PATH: LazyLock<()> = LazyLock::new(|| {
+    fs::create_dir_all(format!("{RES_PATH}/images")).unwrap_or_default();
+});
+
+pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
+    fs::create_dir_all("{RES_PATH}").unwrap_or_default();
+    *INIT_IMG_PATH;
+    #[cfg(not(debug_assertions))]
+    *INIT_CACHE_PATH;
+});
 
 pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
@@ -61,6 +85,7 @@ pub struct AppContext<A: App> {
 impl<A: App> AppContext<A> {
     pub fn new(window: Window, monitor: MonitorHandle) -> Arc<Mutex<Self>> {
         scope_time!("init");
+        *INIT_PATHS;
         let PhysicalSize { width, height } = window.inner_size();
         let PhysicalSize {
             width: monitor_width,

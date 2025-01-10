@@ -4,21 +4,16 @@ use super::{
     alloc_callbacks,
     vulkan::{pipeline::PipelineStageInfo, DSLBinding},
 };
-use crate::{format_size, gpu, log};
+use crate::{format_size, gpu, log, RES_PATH};
 use ash::vk;
 use naga::Module;
 
-#[cfg(not(debug_assertions))]
-pub static INIT_CACHE_PATH: std::sync::LazyLock<()> = std::sync::LazyLock::new(|| {
-    std::fs::create_dir_all("res/cache/shaders").unwrap_or_default();
-});
-
 fn shader_path(name: &str) -> String {
-    format!("res/shaders/{name}.wgsl")
+    format!("{RES_PATH}/shaders/{name}.wgsl")
 }
 
 fn shader_cache_path(name: &str) -> String {
-    format!("res/cache/shaders/{name}.spv")
+    format!("{RES_PATH}/cache/shaders/{name}.spv")
 }
 
 pub struct Shader {
@@ -62,7 +57,7 @@ impl Shader {
 
             // write spirv cache
             #[cfg(not(debug_assertions))]
-            *INIT_CACHE_PATH;
+            *crate::INIT_CACHE_PATH;
             #[cfg(not(debug_assertions))]
             std::fs::write(&shader_cache_path(name), crate::util::as_slice(&spirv[..])).unwrap();
 

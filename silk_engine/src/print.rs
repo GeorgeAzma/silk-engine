@@ -1,3 +1,4 @@
+use crate::RES_PATH;
 use std::sync::LazyLock;
 
 pub fn col(text: &str, col: [u8; 3]) -> String {
@@ -67,9 +68,13 @@ macro_rules! trace {
     };
 }
 
+pub fn log_path() -> String {
+    format!("{RES_PATH}/../logs")
+}
+
 pub static INIT_LOG_FOLDER: LazyLock<()> = LazyLock::new(|| {
-    std::fs::remove_dir_all("logs").unwrap_or_default();
-    std::fs::create_dir("logs").unwrap_or_default();
+    std::fs::remove_dir_all(log_path()).unwrap_or_default();
+    std::fs::create_dir(log_path()).unwrap_or_default();
 });
 
 pub fn backtrace_callers() -> Vec<String> {
@@ -115,7 +120,7 @@ pub fn backtrace_last(skips: usize) -> String {
 #[macro_export]
 macro_rules! log_file {
     ($file:expr, $($args:tt)*) => {
-        #[cfg(debug_assertions)]
+        #[cfg(any(debug_assertions, test))]
         {
             use $crate::print::INIT_LOG_FOLDER;
             use std::io::{Read, Seek, Write};
@@ -146,7 +151,7 @@ macro_rules! log_file {
 #[macro_export]
 macro_rules! log {
     ($($args:tt)*) => {
-        $crate::log_file!("logs/debug.log", $($args)*);
+        $crate::log_file!([crate::log_path() + "/debug.log"].concat(), $($args)*);
     }
 }
 
@@ -164,23 +169,23 @@ macro_rules! scope_time {
     };
 }
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 pub struct ScopeTime;
 
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 impl ScopeTime {
     pub fn new(_name: &str) -> Self {
         Self
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 pub struct ScopeTime {
     start: std::time::Instant,
     name: String,
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 impl ScopeTime {
     pub fn new(name: &str) -> Self {
         Self {
@@ -190,14 +195,21 @@ impl ScopeTime {
     }
 }
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 impl Drop for ScopeTime {
     fn drop(&mut self) {
-        crate::log!(
-            "[{}] {}: {:?}",
-            backtrace_last(1),
-            self.name,
-            self.start.elapsed()
-        );
+        let elapsed = self.start.elapsed();
+        crate::log!("[{}] {}: {:?}", backtrace_last(1), self.name, elapsed);
+    }
+}
+
+pub fn print_img(img: &[u8], width: u32, height: u32, channels: u8) {
+    for y in 0..height {
+        for x in 0..width {
+            let i = (y * width + x) as usize * channels as usize;
+            let (r, g, b) = (img[i], img[i + 1], img[i + 2]);
+            print!("\x1b[48;2;{r};{g};{b}m  \x1b[0m");
+        }
+        println!();
     }
 }
