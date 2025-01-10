@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
-use crate::{
-    buddy_alloc::BuddyAlloc, contain_range::ContainRange, debug_name, gpu_mem_props, ImageInfo,
-};
+use crate::{buddy_alloc::BuddyAlloc, contain_range::ContainRange, gpu_mem_props, ImageInfo};
 use ash::vk;
 use vk::Handle;
 
@@ -44,7 +42,7 @@ impl MemBlock {
             } else {
                 ""
             };
-            debug_name(
+            crate::debug_name(
                 &format!("{ty}{cached} mem block({})", crate::Mem::b(size as usize)),
                 mem,
             );

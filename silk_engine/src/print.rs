@@ -203,12 +203,29 @@ impl Drop for ScopeTime {
     }
 }
 
+pub fn print_rgb(rgb: [u8; 3]) {
+    let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
+    print!("\x1b[48;2;{r};{g};{b}m  \x1b[0m");
+}
+
+pub fn print_rgba(mut rgba: [u8; 4]) {
+    let a = rgba[3] as f32 / 255.0;
+    rgba[0] = (rgba[0] as f32 * a).round() as u8;
+    rgba[1] = (rgba[1] as f32 * a).round() as u8;
+    rgba[2] = (rgba[2] as f32 * a).round() as u8;
+    print_rgb([rgba[0], rgba[1], rgba[2]]);
+}
+
 pub fn print_img(img: &[u8], width: u32, height: u32, channels: u8) {
     for y in 0..height {
         for x in 0..width {
             let i = (y * width + x) as usize * channels as usize;
             let (r, g, b) = (img[i], img[i + 1], img[i + 2]);
-            print!("\x1b[48;2;{r};{g};{b}m  \x1b[0m");
+            if channels == 4 {
+                print_rgba([r, g, b, img[i + 3]]);
+            } else {
+                print_rgb([r, g, b]);
+            }
         }
         println!();
     }
