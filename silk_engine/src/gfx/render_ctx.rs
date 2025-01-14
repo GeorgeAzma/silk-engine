@@ -57,10 +57,7 @@ struct DescSetData {
     binds: Vec<DSLBinding>,
 }
 
-unsafe impl Sync for RenderContext {}
-unsafe impl Send for RenderContext {}
-
-pub struct RenderContext {
+pub struct RenderCtx {
     cmd_state: CmdState,
     // allocators
     desc_alloc: DescAlloc,
@@ -91,7 +88,7 @@ pub struct RenderContext {
     pub swapchain_img_idx: usize,
 }
 
-impl RenderContext {
+impl RenderCtx {
     pub fn new(window: &Window) -> Self {
         let surface_loader = ash::khr::surface::Instance::new(entry(), instance());
         let surface_caps2 = ash::khr::get_surface_capabilities2::Instance::new(entry(), instance());
@@ -1318,15 +1315,15 @@ impl RenderContext {
 }
 
 pub struct DebugScope<'a> {
-    render_ctx: &'a RenderContext,
+    render_ctx: &'a RenderCtx,
 }
 
 impl<'a> DebugScope<'a> {
-    fn new(render_ctx: &'a RenderContext, name: &str) -> Self {
+    fn new(render_ctx: &'a RenderCtx, name: &str) -> Self {
         render_ctx.debug_begin(name);
         Self { render_ctx }
     }
-    fn new_colored(render_ctx: &'a RenderContext, name: &str, color: [f32; 4]) -> Self {
+    fn new_colored(render_ctx: &'a RenderCtx, name: &str, color: [f32; 4]) -> Self {
         render_ctx.debug_begin_colored(name, color);
         Self { render_ctx }
     }
@@ -1339,7 +1336,7 @@ impl Drop for DebugScope<'_> {
 }
 
 #[cfg(debug_assertions)]
-impl RenderContext {
+impl RenderCtx {
     pub fn debug_begin(&self, label: &str) {
         unsafe {
             DEBUG_UTILS_LOADER.cmd_begin_debug_utils_label(
@@ -1397,7 +1394,7 @@ impl RenderContext {
     }
 }
 
-impl Drop for RenderContext {
+impl Drop for RenderCtx {
     fn drop(&mut self) {
         gpu_idle();
         for pipeline in self.pipelines.values() {
@@ -1463,7 +1460,7 @@ impl Drop for RenderContext {
 }
 
 #[cfg(not(debug_assertions))]
-impl RenderContext {
+impl RenderCtx {
     pub fn debug_begin_colored(&self, _label: &str, _color: [f32; 4]) {}
     pub fn debug_begin(&self, _label: &str) {}
     pub fn debug_end(&self) {}

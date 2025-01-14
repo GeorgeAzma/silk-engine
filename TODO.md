@@ -3,7 +3,8 @@
 - shader derivative stroke bug
 
 # Functionality
-- image loading
+- font loading
+- image loading (png/jpg/webp)
 - simple scene
 - render graph
 - multiple windows

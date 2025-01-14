@@ -151,7 +151,7 @@ macro_rules! log_file {
 #[macro_export]
 macro_rules! log {
     ($($args:tt)*) => {
-        $crate::log_file!([crate::log_path() + "/debug.log"].concat(), $($args)*);
+        $crate::log_file!([$crate::log_path() + "/debug.log"].concat(), $($args)*);
     }
 }
 

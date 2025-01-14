@@ -80,7 +80,7 @@ impl Shader {
                         if let Some(gvar_hnd) = entry.function.originating_global(expr_hnd) {
                             let gvar = &ir_module.global_variables[gvar_hnd];
                             if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
-                                let resource_key = group << 16 | binding;
+                                let resource_key = (group << 16) | binding;
                                 let stage = stage_to_vk(&entry.stage);
                                 resource_access_stages
                                     .entry(resource_key)
@@ -93,7 +93,7 @@ impl Shader {
             }
             for (_, gvar) in ir_module.global_variables.iter() {
                 if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
-                    let resource_key = group << 16 | binding;
+                    let resource_key = (group << 16) | binding;
                     let array_size = match ir_module.types[gvar.ty].inner.clone() {
                         naga::TypeInner::Array {
                             size, stride: _, ..

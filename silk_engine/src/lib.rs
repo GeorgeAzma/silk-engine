@@ -1,27 +1,29 @@
-use std::sync::LazyLock;
+#![feature(mapped_lock_guards, once_cell_get_mut)]
+use std::any::TypeId;
 pub use std::{
     collections::{HashMap, HashSet},
     fs,
     process::abort,
     ptr::{self, null, null_mut},
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
+    event::WindowEvent,
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
     window::Window,
+    {event_loop::ControlFlow, window::WindowId},
+    {platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes},
 };
-use winit::{event_loop::ControlFlow, window::WindowId};
-use winit::{platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes};
 
 mod input;
 mod print;
 mod qoi;
 use input::*;
-pub use input::{Event, Key, Mouse};
+pub use input::{Key, Mouse};
 pub use print::*;
 pub use qoi::*;
 mod gfx;
@@ -30,6 +32,8 @@ mod util;
 pub use util::*;
 mod buddy_alloc;
 mod contain_range;
+mod event;
+pub use event::*;
 
 #[cfg(not(test))]
 pub const RES_PATH: &str = "res";
@@ -46,7 +50,7 @@ pub static INIT_IMG_PATH: LazyLock<()> = LazyLock::new(|| {
 });
 
 pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
-    fs::create_dir_all("{RES_PATH}").unwrap_or_default();
+    fs::create_dir(RES_PATH).unwrap_or_default();
     *INIT_IMG_PATH;
     #[cfg(not(debug_assertions))]
     *INIT_CACHE_PATH;
@@ -56,7 +60,7 @@ pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
     fn update(&mut self);
     fn render(&mut self);
-    fn event(&mut self, _e: Event) {}
+    fn event(&mut self, _e: WindowEvent) {}
 }
 
 pub struct AppContext<A: App> {
@@ -78,8 +82,9 @@ pub struct AppContext<A: App> {
     pub mouse_y: f32,
     pub mouse_scroll: f32,
     pub surface_format: vk::Format,
-    render_ctx: Arc<Mutex<RenderContext>>,
+    ctx: Arc<Mutex<RenderCtx>>,
     renderer: Renderer,
+    dispatchers: HashMap<TypeId, Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl<A: App> AppContext<A> {
@@ -95,27 +100,22 @@ impl<A: App> AppContext<A> {
             (monitor.refresh_rate_millihertz().unwrap_or(60) as f32 / 1000.0).round() as u32;
         log!("Monitor: {}", monitor.name().unwrap_or_default());
 
-        let render_ctx = Arc::new(Mutex::new(RenderContext::new(&window)));
-        let surf_format = render_ctx.lock().unwrap().surface_format.format;
-
-        render_ctx.lock().unwrap().add_image(
-            "sampled",
+        let ctx = Arc::new(Mutex::new(RenderCtx::new(&window)));
+        let surf_fmt = ctx.lock().unwrap().surface_format.format;
+        ctx.lock().unwrap().add_image(
+            "final image",
             &ImageInfo::new()
                 .width(width)
                 .height(height)
-                .format(surf_format)
-                .samples(8)
-                .usage(
-                    vk::ImageUsageFlags::COLOR_ATTACHMENT
-                        | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
-                ),
+                .format(surf_fmt)
+                .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED),
             vk::MemoryPropertyFlags::DEVICE_LOCAL,
         );
-        render_ctx
-            .lock()
+        ctx.lock()
             .unwrap()
-            .add_img_view("sampled view", "sampled");
+            .add_img_view("final image view", "final image");
 
+        let renderer = Renderer::new(ctx.clone());
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
@@ -134,13 +134,21 @@ impl<A: App> AppContext<A> {
             mouse_x: 0.0,
             mouse_y: 0.0,
             mouse_scroll: 0.0,
-            render_ctx: render_ctx.clone(),
-            surface_format: surf_format,
-            renderer: Renderer::new(render_ctx.clone()),
+            ctx: ctx.clone(),
+            surface_format: surf_fmt,
+            renderer,
+            dispatchers: Default::default(),
         }));
         {
-            let app_mut = &mut *app.lock().unwrap();
-            app_mut.my_app = Some(A::new(app_mut as *mut _));
+            let app_ptr = &*app.lock().unwrap() as *const AppContext<A>;
+            unsafe { app_ptr.cast_mut().as_mut().unwrap() }
+                .dispatcher()
+                .sub_method_mut(
+                    &mut unsafe { app_ptr.cast_mut().as_mut().unwrap() }.renderer,
+                    Renderer::on_resize,
+                );
+            unsafe { app_ptr.cast_mut().as_mut().unwrap() }.my_app =
+                Some(A::new(app_ptr as *mut _));
         }
         app
     }
@@ -161,17 +169,13 @@ impl<A: App> AppContext<A> {
             let optimal_size = self.ctx().begin_frame();
             self.resize(optimal_size.width, optimal_size.height);
 
-            let sampled_view = self.render_ctx.lock().unwrap().img_view("sampled view");
-            self.render_ctx
-                .lock()
-                .unwrap()
-                .begin_render_swapchain(sampled_view);
+            self.ctx().begin_render_swapchain(vk::ImageView::null());
             self.my_app().render(); // to [swap img render area]
             self.renderer.flush();
             self.renderer.render(); // in [written vbo (vs)] | to [swap img render area]
             self.ctx().end_render_swapchain();
 
-            let optimal_size = self.render_ctx.lock().unwrap().end_frame(&self.window);
+            let optimal_size = self.ctx.lock().unwrap().end_frame(&self.window);
             self.resize(optimal_size.width, optimal_size.height);
         }
         self.renderer.reset();
@@ -186,50 +190,32 @@ impl<A: App> AppContext<A> {
         }
         self.width = width;
         self.height = height;
-        if width == 0 || height == 0 {
-            return;
-        }
-        let surf_format = self.surface_format;
-        self.renderer.on_resize(width, height);
-        let optimal_size = self.ctx().recreate_swapchain();
-        self.ctx().remove_image("sampled");
-        self.ctx().add_image(
-            "sampled",
-            &ImageInfo::new()
-                .width(width)
-                .height(height)
-                .format(surf_format)
-                .samples(8)
-                .usage(
-                    vk::ImageUsageFlags::COLOR_ATTACHMENT
-                        | vk::ImageUsageFlags::TRANSIENT_ATTACHMENT,
-                ),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        );
-        self.ctx().add_img_view("sampled view", "sampled");
+        let optimal_size = self.ctx.lock().unwrap().recreate_swapchain();
+        self.dispatcher()
+            .post(&WindowResize::new(optimal_size.width, optimal_size.height));
         self.resize(optimal_size.width, optimal_size.height);
     }
 
-    fn event(&mut self, event_loop: &ActiveEventLoop, event: Event, window_id: WindowId) {
+    fn event(&mut self, event_loop: &ActiveEventLoop, event: WindowEvent, window_id: WindowId) {
         if window_id == self.window.id() {
             self.input.event(&event, self.width, self.height);
             self.mouse_x = self.input.mouse_x();
             self.mouse_y = self.input.mouse_y();
             self.mouse_scroll = self.input.mouse_scroll();
             match &event {
-                Event::Resized(size) => {
+                WindowEvent::Resized(size) => {
                     self.resize(size.width, size.height);
                 }
-                Event::RedrawRequested => {
+                WindowEvent::RedrawRequested => {
                     self.update();
                     self.render();
                 }
-                Event::Focused(focused) => {
+                WindowEvent::Focused(focused) => {
                     if !*focused {
                         self.input.reset();
                     }
                 }
-                Event::Destroyed | Event::CloseRequested => {
+                WindowEvent::Destroyed | WindowEvent::CloseRequested => {
                     event_loop.exit();
                 }
                 _ => {}
@@ -249,12 +235,12 @@ impl<A: App> AppContext<A> {
     expose!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
     expose!(input.focused() -> bool);
 
-    pub fn ctx(&mut self) -> std::sync::MutexGuard<'_, RenderContext> {
-        self.render_ctx.lock().unwrap()
-    }
-
     pub fn gfx(&mut self) -> &mut Renderer {
         &mut self.renderer
+    }
+
+    pub fn ctx(&mut self) -> std::sync::MutexGuard<'_, RenderCtx> {
+        self.ctx.lock().unwrap()
     }
 
     pub fn center_window(&self) {
@@ -262,6 +248,35 @@ impl<A: App> AppContext<A> {
             (self.monitor_width as i32 - self.width as i32) / 2,
             (self.monitor_height as i32 - self.height as i32) / 2,
         ));
+    }
+
+    fn dispatcher<T: Event + 'static>(&mut self) -> &mut Dispatcher<T> {
+        let tid = TypeId::of::<T>();
+        self.dispatchers
+            .entry(tid)
+            .or_insert_with(|| Box::new(Dispatcher::<T>::new()))
+            .downcast_mut()
+            .unwrap()
+    }
+
+    pub fn sub<T: Event + 'static>(&mut self, f: fn(&T)) {
+        self.dispatcher().sub(f);
+    }
+
+    pub fn unsub<T: Event + 'static>(&mut self, f: fn(&T)) {
+        self.dispatcher().unsub(f);
+    }
+
+    pub fn sub_method<T: Event + 'static, U>(&mut self, slf: &U, f: fn(&U, &T)) {
+        self.dispatcher().sub_method(slf, f);
+    }
+
+    pub fn sub_method_mut<T: Event + 'static, U>(&mut self, slf: &mut U, f: fn(&mut U, &T)) {
+        self.dispatcher().sub_method_mut(slf, f);
+    }
+
+    pub fn unsub_method<T: Event + 'static, U, V>(&mut self, slf: &U, f: fn(V, &T)) {
+        self.dispatcher().unsub_method(slf, f);
     }
 }
 
@@ -369,7 +384,7 @@ impl<T: App> winit::application::ApplicationHandler for Engine<T> {
         &mut self,
         event_loop: &ActiveEventLoop,
         window_id: winit::window::WindowId,
-        event: Event,
+        event: WindowEvent,
     ) {
         if let Some(app) = &self.app {
             app.lock().unwrap().event(event_loop, event, window_id);

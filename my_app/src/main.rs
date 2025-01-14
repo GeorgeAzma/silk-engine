@@ -17,7 +17,6 @@ impl App for MyApp<'_> {
                 "shader",
                 GraphicsPipelineInfo::new()
                     .dyn_size()
-                    .samples(8)
                     .color_attachment(surf_format)
                     .blend_attachment_empty(),
                 &[],
@@ -53,6 +52,7 @@ impl App for MyApp<'_> {
     }
 
     fn render(&mut self) {
+        let t = (self.app.time * 3.0).sin() * 0.02;
         let gfx = self.app.gfx();
         // gfx.color = [0, 32, 55, 255];
         // for x in 0..256 {
@@ -65,7 +65,7 @@ impl App for MyApp<'_> {
         //         );
         //     }
         // }
-        gfx.rotation = 0.2;
+        gfx.rotation = 0.2 + t;
         gfx.color = [255, 32, 100, 255];
         gfx.stroke_width = 0.5;
         gfx.stroke_color = [22, 132, 0, 255];
@@ -77,8 +77,6 @@ impl App for MyApp<'_> {
         // ctx.bind_desc_set("global uniform ds");
         // ctx.draw(3, 1);
     }
-
-    fn event(&mut self, _e: Event) {}
 }
 
 #[repr(C)]

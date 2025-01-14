@@ -1,6 +1,6 @@
-pub type Event = winit::event::WindowEvent;
 pub type Key = winit::keyboard::KeyCode;
 pub type Mouse = winit::event::MouseButton;
+type Event = winit::event::WindowEvent;
 
 pub struct Input {
     mouse: [bool; 5],

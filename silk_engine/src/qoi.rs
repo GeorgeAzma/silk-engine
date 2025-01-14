@@ -60,10 +60,7 @@ impl Qoi {
             "invalid channel count: {channels}"
         );
         let img_len = pixels as usize * channels;
-        let mut img = Vec::with_capacity(img_len);
-        unsafe {
-            img.set_len(img_len);
-        }
+        let mut img = vec![0; img_len];
         let colorspace = qoi[13];
         assert!(
             colorspace == SRGB || colorspace == LINEAR,
@@ -89,10 +86,7 @@ impl Qoi {
                     rgb
                 }
                 tag => match tag & 0xC0 {
-                    INDEX_MASK => {
-                        let s = seen[tag as usize];
-                        s
-                    }
+                    INDEX_MASK => seen[tag as usize],
                     DIFF_MASK => {
                         let dr = (tag >> 4) & 0b11;
                         let dg = (tag >> 2) & 0b11;
@@ -228,14 +222,14 @@ impl Qoi {
                         let dgu = dg.wrapping_add(2);
                         let dbu = db.wrapping_add(2);
                         if dru <= 3 && dgu <= 3 && dbu <= 3 {
-                            qoi.push(DIFF_MASK | dru << 4 | dgu << 2 | dbu);
+                            qoi.push(DIFF_MASK | (dru << 4) | (dgu << 2) | dbu);
                         } else {
                             let dgu = dg.wrapping_add(32);
                             let dru = dr.wrapping_sub(dg).wrapping_add(8);
                             let dbu = db.wrapping_sub(dg).wrapping_add(8);
                             if dgu <= 63 && dru <= 15 && dbu <= 15 {
                                 qoi.push(LUMA_MASK | dgu);
-                                qoi.push(dru << 4 | dbu);
+                                qoi.push((dru << 4) | dbu);
                             } else {
                                 qoi.push(RGB_MASK);
                                 qoi.push(rgba[0]);

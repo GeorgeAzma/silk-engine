@@ -1,7 +1,7 @@
 mod vulkan;
 pub use vulkan::*;
-mod render_context;
+mod render_ctx;
 mod shader;
-pub use render_context::*;
+pub use render_ctx::*;
 mod renderer;
 pub use renderer::*;

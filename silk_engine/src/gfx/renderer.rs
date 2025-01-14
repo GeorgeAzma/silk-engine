@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use super::{GraphicsPipelineInfo, RenderContext};
+use crate::WindowResize;
+
+use super::{GraphicsPipelineInfo, RenderCtx};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -68,7 +70,7 @@ impl Vertex {
 
 // modify this in batch.wgsl too
 pub struct Renderer {
-    render_ctx: Arc<Mutex<RenderContext>>,
+    ctx: Arc<Mutex<RenderCtx>>,
     vertices: Vec<Vertex>,
     vert_cnt: usize,
     instances: Vec<Vertex>,
@@ -81,11 +83,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(render_ctx: Arc<Mutex<RenderContext>>) -> Self {
+    pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {
         let vertices = vec![Vertex::default(); 1024];
         let instances = vec![Vertex::default(); 1024];
         {
-            let mut ctx = render_ctx.lock().unwrap();
+            let mut ctx = ctx.lock().unwrap();
             ctx.add_buffer(
                 "batch vbo",
                 (vertices.len() * size_of::<Vertex>()) as vk::DeviceSize,
@@ -111,7 +113,6 @@ impl Renderer {
                     .blend_attachment_standard()
                     .dyn_size()
                     .color_attachment(format)
-                    .samples(8)
                     .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
                 &[(true, vec![])],
             );
@@ -127,7 +128,7 @@ impl Renderer {
             ctx.write_ds("render ds", "render ubo", 0);
         }
         Self {
-            render_ctx,
+            ctx,
             vertices,
             vert_cnt: 0,
             instances,
@@ -220,7 +221,7 @@ impl Renderer {
         if self.vert_cnt != 0 && self.inst_cnt == 0 {
             return;
         }
-        let mut ctx = self.render_ctx.lock().unwrap();
+        let mut ctx = self.ctx.lock().unwrap();
         ctx.bind_pipeline("render");
         ctx.bind_desc_set("render ds");
         if self.vert_cnt != 0 {
@@ -233,15 +234,20 @@ impl Renderer {
         }
     }
 
-    pub fn on_resize(&mut self, width: u32, height: u32) {
-        let mut ctx = self.render_ctx.lock().unwrap();
-        let resolution = [width as f32, height as f32];
-        ctx.write_buffer("render ubo", &resolution);
+    pub(crate) fn on_resize(&mut self, e: &WindowResize) {
+        if e.width == 0 || e.height == 0 {
+            return;
+        }
+        let resolution = [e.width as f32, e.height as f32];
+        self.ctx
+            .lock()
+            .unwrap()
+            .write_buffer("render ubo", &resolution);
     }
 
     pub fn flush(&mut self) {
         if self.vert_cnt != 0 {
-            let mut ctx = self.render_ctx.lock().unwrap();
+            let mut ctx = self.ctx.lock().unwrap();
             let vbo_size = (self.vertices.len() * size_of::<Vertex>()) as vk::DeviceSize;
             if ctx.buffer_size("batch vbo") < vbo_size {
                 ctx.recreate_buffer("batch vbo", vbo_size);
@@ -249,7 +255,7 @@ impl Renderer {
             ctx.write_buffer("batch vbo", &self.vertices[..self.vert_cnt]);
         }
         if self.inst_cnt != 0 {
-            let mut ctx = self.render_ctx.lock().unwrap();
+            let mut ctx = self.ctx.lock().unwrap();
             let inst_vbo_size = (self.instances.len() * size_of::<Vertex>()) as vk::DeviceSize;
             if ctx.buffer_size("instance vbo") < inst_vbo_size {
                 ctx.recreate_buffer("instance vbo", inst_vbo_size);

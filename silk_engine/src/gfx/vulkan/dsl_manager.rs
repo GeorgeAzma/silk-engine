@@ -78,9 +78,9 @@ impl Hash for DSLBindings {
         let mut combined_hash = 0;
         for dslb in self.0.iter() {
             combined_hash ^= dslb.binding as u64
-                | (dslb.descriptor_type.as_raw() as u64) << 6
-                | (dslb.descriptor_count as u64) << 12
-                | (dslb.stage_flags.as_raw() as u64) << 18;
+                | ((dslb.descriptor_type.as_raw() as u64) << 6)
+                | ((dslb.descriptor_count as u64) << 12)
+                | ((dslb.stage_flags.as_raw() as u64) << 18);
         }
         state.write_u64(combined_hash);
     }

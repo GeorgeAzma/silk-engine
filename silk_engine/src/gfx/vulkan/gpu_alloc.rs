@@ -5,6 +5,9 @@ use crate::{buddy_alloc::BuddyAlloc, contain_range::ContainRange, gpu_mem_props,
 use ash::vk;
 use vk::Handle;
 
+unsafe impl Send for MemBlock {}
+unsafe impl Sync for MemBlock {}
+
 #[derive(Clone)]
 struct MemBlock {
     off: vk::DeviceSize,
