@@ -93,8 +93,8 @@ impl ImageInfo {
         self
     }
 
-    pub fn init_layout(mut self, init_layout: vk::ImageLayout) -> Self {
-        self.init_layout = init_layout;
+    pub fn layout(mut self, layout: vk::ImageLayout) -> Self {
+        self.init_layout = layout;
         self
     }
 

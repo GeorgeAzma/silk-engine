@@ -95,7 +95,7 @@ impl MemPool {
         if !self.mems.is_empty() {
             return;
         }
-        const BLOCK_SIZE: vk::DeviceSize = 1024 * 1024; // 1 MiB
+        const BLOCK_SIZE: vk::DeviceSize = 1024 * 1024 * 32; // 1 MiB
         let block_size = BLOCK_SIZE.next_power_of_two();
         self.mems = vec![MemBlock::new(0, block_size, self.mem_type_idx)];
         self.buddy = BuddyAlloc::new(block_size as usize);
@@ -104,8 +104,14 @@ impl MemPool {
     fn find_off_mem_block(&mut self, off: vk::DeviceSize) -> &mut MemBlock {
         let mut last_mem_block_idx = 0;
         for i in 1..self.mems.len() {
-            let last_mem_block = &self.mems[i - 1];
-            if off >= last_mem_block.off && off < self.mems[i].off {
+            assert_eq!(
+                (self.mems[i].off - self.mems[i - 1].off).next_power_of_two(),
+                self.mems[i].off - self.mems[i - 1].off,
+                "{} != {}",
+                self.mems[i].off,
+                self.mems[i - 1].off,
+            );
+            if off >= self.mems[i - 1].off && off < self.mems[i].off {
                 return &mut self.mems[i - 1];
             }
             last_mem_block_idx = i;
@@ -113,29 +119,27 @@ impl MemPool {
         &mut self.mems[last_mem_block_idx]
     }
 
+    // TODO: make resizing work
     fn alloc(&mut self, size: vk::DeviceSize) -> (vk::DeviceSize, &MemBlock) {
         self.init();
         let off = self.buddy.alloc(size as usize);
-        if off == usize::MAX {
-            let old_len = self.buddy.len();
-            let size2 = (old_len + size as usize).next_power_of_two();
-            crate::log!("Mem pool resized: {}", crate::Mem::b(size2));
-            self.buddy.resize(size2);
-            let new_mem_off = self.buddy.alloc(size as usize);
-            let new_mem_size = size2 - old_len;
-            self.mems.push(MemBlock::new(
-                new_mem_off as vk::DeviceSize,
-                new_mem_size as vk::DeviceSize,
-                self.mem_type_idx,
-            ));
-            (0, &self.mems[self.mems.len() - 1])
-        } else {
-            let mem_block = self.find_off_mem_block(off as vk::DeviceSize);
-            (off as vk::DeviceSize - mem_block.off, mem_block)
-        }
+        crate::log!(
+            "Mem Pool({:?}) Alloc: off({}), size({})",
+            self.props,
+            crate::Mem::b(off as usize),
+            crate::Mem::b(size as usize)
+        );
+        assert_ne!(off, usize::MAX);
+        (off as vk::DeviceSize, &self.mems[0])
     }
 
     fn dealloc(&mut self, offset: vk::DeviceSize, size: vk::DeviceSize) {
+        crate::log!(
+            "Mem Pool({:?}) Dealloc: off({}), size({})",
+            self.props,
+            crate::Mem::b(offset as usize),
+            crate::Mem::b(size as usize)
+        );
         self.buddy.dealloc(offset as usize, size as usize)
     }
 }
@@ -153,8 +157,8 @@ impl Drop for MemPool {
 #[derive(Clone, Copy)]
 struct BufferAlloc {
     mem_type_idx: u32,
-    offset: vk::DeviceSize,
-    buddy_offset: vk::DeviceSize,
+    off: vk::DeviceSize,
+    buddy_off: vk::DeviceSize,
     size: vk::DeviceSize,
     aligned_size: vk::DeviceSize,
     usage: vk::BufferUsageFlags,
@@ -164,7 +168,7 @@ struct BufferAlloc {
 #[derive(Clone)]
 struct ImageAlloc {
     mem_type_idx: u32,
-    offset: vk::DeviceSize,
+    buddy_off: vk::DeviceSize,
     aligned_size: vk::DeviceSize,
     #[allow(unused)] // will use later
     img_info: ImageInfo,
@@ -216,7 +220,7 @@ impl GpuAlloc {
             image.as_raw(),
             ImageAlloc {
                 mem_type_idx,
-                offset: alloc_off,
+                buddy_off: alloc_off + mem_block.off,
                 aligned_size,
                 img_info: img_info.clone(),
             },
@@ -227,7 +231,7 @@ impl GpuAlloc {
     pub fn dealloc_img(&mut self, image: vk::Image) {
         let img_alloc = self.img_allocs.remove(&image.as_raw()).unwrap();
         self.mem_pools[img_alloc.mem_type_idx as usize]
-            .dealloc(img_alloc.offset, img_alloc.aligned_size);
+            .dealloc(img_alloc.buddy_off, img_alloc.aligned_size);
         unsafe {
             gpu().destroy_image(image, alloc_callbacks());
         }
@@ -272,8 +276,8 @@ impl GpuAlloc {
             buffer.as_raw(),
             BufferAlloc {
                 mem_type_idx,
-                offset: alloc_off,
-                buddy_offset: mem_block.off + alloc_off,
+                off: alloc_off,
+                buddy_off: mem_block.off + alloc_off,
                 size,
                 aligned_size,
                 usage,
@@ -286,7 +290,7 @@ impl GpuAlloc {
     pub fn dealloc_buf(&mut self, buffer: vk::Buffer) {
         let buf_alloc = self.buf_allocs.remove(&buffer.as_raw()).unwrap();
         self.mem_pools[buf_alloc.mem_type_idx as usize]
-            .dealloc(buf_alloc.offset, buf_alloc.aligned_size);
+            .dealloc(buf_alloc.off, buf_alloc.aligned_size);
         unsafe {
             gpu().destroy_buffer(buffer, alloc_callbacks());
         }
@@ -312,9 +316,9 @@ impl GpuAlloc {
     ) -> *mut u8 {
         let buf_alloc = self.buf_allocs.get_mut(&buffer.as_raw()).unwrap();
         let pool = &mut self.mem_pools[buf_alloc.mem_type_idx as usize];
-        let mem_block = pool.find_off_mem_block(buf_alloc.buddy_offset);
+        let mem_block = pool.find_off_mem_block(buf_alloc.buddy_off);
         let mapped_range = mem_block.mapped_ranges.range();
-        let off = off + buf_alloc.offset;
+        let off = off + buf_alloc.off;
         let size = if size == vk::WHOLE_SIZE {
             buf_alloc.size
         } else {
@@ -360,10 +364,10 @@ impl GpuAlloc {
     pub fn unmap(&mut self, buffer: vk::Buffer) {
         let buf_alloc = self.buf_allocs.get_mut(&buffer.as_raw()).unwrap();
         let pool = &mut self.mem_pools[buf_alloc.mem_type_idx as usize];
-        let mem_block = pool.find_off_mem_block(buf_alloc.buddy_offset);
+        let mem_block = pool.find_off_mem_block(buf_alloc.buddy_off);
         mem_block.mapped_ranges.remove(
-            buf_alloc.offset as usize,
-            (buf_alloc.offset + buf_alloc.size) as usize,
+            buf_alloc.off as usize,
+            (buf_alloc.off + buf_alloc.size) as usize,
         );
         let mapped_range = mem_block.mapped_ranges.range();
         if mapped_range.start == 0 && mapped_range.end == 0 {

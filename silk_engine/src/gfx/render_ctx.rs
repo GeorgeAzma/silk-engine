@@ -12,7 +12,7 @@ use super::{
     shader::Shader,
     vulkan::{
         pipeline::{GraphicsPipelineInfo, PipelineStageInfo},
-        DSLBinding, ImageInfo,
+        DSLBinding, ImageInfo, SamplerManager,
     },
     CmdAlloc, DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, RenderPass,
 };
@@ -66,6 +66,7 @@ pub struct RenderCtx {
     // managers (hashmap cached)
     dsl_manager: DSLManager,
     pipeline_layout_manager: PipelineLayoutManager,
+    sampler_manager: SamplerManager,
     // named cached objects
     shaders: HashMap<String, ShaderData>,
     pipelines: HashMap<String, PipelineData>,
@@ -77,6 +78,7 @@ pub struct RenderCtx {
     semaphores: HashMap<String, vk::Semaphore>,
     images: HashMap<String, (vk::Image, Vec<String>)>,
     img_views: HashMap<String, (vk::ImageView, String)>,
+    samplers: HashMap<String, vk::Sampler>,
     // window context
     surface_caps2_loader: ash::khr::get_surface_capabilities2::Instance,
     pub surface: vk::SurfaceKHR,
@@ -129,6 +131,7 @@ impl RenderCtx {
             gpu_alloc: GpuAlloc::default(),
             dsl_manager: DSLManager::default(),
             pipeline_layout_manager: PipelineLayoutManager::default(),
+            sampler_manager: SamplerManager::default(),
             shaders: Default::default(),
             pipelines: Default::default(),
             desc_sets: Default::default(),
@@ -139,6 +142,7 @@ impl RenderCtx {
             semaphores: Default::default(),
             images: Default::default(),
             img_views: Default::default(),
+            samplers: Default::default(),
             surface_caps2_loader: surface_caps2,
             surface,
             surface_format,
@@ -190,10 +194,14 @@ impl RenderCtx {
     }
 
     pub fn begin_render_swapchain(&mut self, resolve_img_view: vk::ImageView) {
-        self.transition_image_layout(
+        self.transition_img_layout(
             self.cur_img(),
             vk::ImageLayout::UNDEFINED,
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            vk::PipelineStageFlags2::TOP_OF_PIPE,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::NONE,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
         );
 
         let width = self.swapchain_size.width;
@@ -205,10 +213,14 @@ impl RenderCtx {
     pub fn end_render_swapchain(&mut self) {
         self.end_render();
 
-        self.transition_image_layout(
+        self.transition_img_layout(
             self.cur_img(),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::ImageLayout::PRESENT_SRC_KHR,
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+            vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            vk::AccessFlags2::NONE,
         );
     }
 
@@ -377,7 +389,7 @@ impl RenderCtx {
             .unwrap_or_else(|| panic!("semaphore not found: {name}"))
     }
 
-    pub fn add_image(
+    pub fn add_img(
         &mut self,
         name: &str,
         img_info: &ImageInfo,
@@ -394,11 +406,11 @@ impl RenderCtx {
         img
     }
 
-    pub fn remove_image(&mut self, name: &str) {
+    pub fn try_remove_img(&mut self, name: &str) -> Result<(), String> {
         let (image, img_views) = self
             .images
             .remove(name)
-            .unwrap_or_else(|| panic!("image not found: {name}"));
+            .ok_or(format!("image not found: {name}"))?;
         self.gpu_alloc.dealloc_img(image);
         for img_view in img_views {
             let (img_view, _) = self
@@ -409,9 +421,14 @@ impl RenderCtx {
                 gpu().destroy_image_view(img_view, alloc_callbacks());
             }
         }
+        Ok(())
     }
 
-    pub fn image(&self, name: &str) -> vk::Image {
+    pub fn remove_img(&mut self, name: &str) {
+        self.try_remove_img(name).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    pub fn img(&self, name: &str) -> vk::Image {
         self.images
             .get(name)
             .unwrap_or_else(|| panic!("img not found: {name}"))
@@ -472,6 +489,39 @@ impl RenderCtx {
             .get(name)
             .unwrap_or_else(|| panic!("img view not found: {name}"))
             .0
+    }
+
+    pub fn add_sampler(
+        &mut self,
+        name: &str,
+        addr_mode_u: vk::SamplerAddressMode,
+        addr_mode_v: vk::SamplerAddressMode,
+        min_filter: vk::Filter,
+        mag_filter: vk::Filter,
+        mip_filter: vk::SamplerMipmapMode,
+    ) -> vk::Sampler {
+        let sampler =
+            self.sampler_manager
+                .get(addr_mode_u, addr_mode_v, min_filter, mag_filter, mip_filter);
+        assert!(
+            self.samplers.insert(name.to_string(), sampler).is_none(),
+            "sampler already exists: {name}"
+        );
+        debug_name(name, sampler);
+        sampler
+    }
+
+    pub fn remove_sampler(&mut self, name: &str) -> vk::Sampler {
+        self.samplers
+            .remove(name)
+            .unwrap_or_else(|| panic!("sampler not found: {name}"))
+    }
+
+    pub fn sampler(&self, name: &str) -> vk::Sampler {
+        *self
+            .samplers
+            .get(name)
+            .unwrap_or_else(|| panic!("sampler not found: {name}"))
     }
 
     pub fn add_pipeline(
@@ -771,7 +821,7 @@ impl RenderCtx {
         &mut self,
         width: u32,
         height: u32,
-        image_view: vk::ImageView,
+        img_view: vk::ImageView,
         sampled_img_view: vk::ImageView,
     ) {
         self.cmd_state.render_area = vk::Rect2D {
@@ -800,17 +850,13 @@ impl RenderCtx {
                             vk::ResolveModeFlags::NONE
                         })
                         .resolve_image_view(if sampled {
-                            image_view
+                            img_view
                         } else {
                             vk::ImageView::null()
                         })
                         .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image_view(if sampled {
-                            sampled_img_view
-                        } else {
-                            image_view
-                        })]),
+                        .image_view(if sampled { sampled_img_view } else { img_view })]),
             )
         };
     }
@@ -820,8 +866,6 @@ impl RenderCtx {
             self.cmd_state.render_area != Default::default(),
             "can't end rendering that has not begun"
         );
-        let width = self.cmd_state.render_area.extent.width;
-        let height = self.cmd_state.render_area.extent.height;
         self.cmd_state.render_area = Default::default();
         unsafe {
             if self.cmd_state.render_pass.render_pass == Default::default() {
@@ -831,7 +875,7 @@ impl RenderCtx {
                 self.cmd_state.render_pass = Default::default();
             }
         }
-        self.debug_begin(&format!("End Render({width}x{height})"));
+        self.debug_end();
     }
 
     // TODO:
@@ -980,35 +1024,23 @@ impl RenderCtx {
         }
     }
 
-    pub fn transition_image_layout(
+    pub fn transition_img_layout(
         &self,
         image: vk::Image,
         old_layout: vk::ImageLayout,
         new_layout: vk::ImageLayout,
+        src_stage: vk::PipelineStageFlags2,
+        dst_stage: vk::PipelineStageFlags2,
+        src_access: vk::AccessFlags2,
+        dst_access: vk::AccessFlags2,
     ) {
-        let (src_stage, src_access_mask, dst_stage, dst_access_mask) =
-            match (old_layout, new_layout) {
-                (vk::ImageLayout::UNDEFINED, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL) => (
-                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                    vk::AccessFlags2::NONE,
-                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                    vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                ),
-                (vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL, vk::ImageLayout::PRESENT_SRC_KHR) => (
-                    vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                    vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                    vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
-                    vk::AccessFlags2::NONE,
-                ),
-                _ => panic!("Unsupported layout transition!"),
-            };
         unsafe {
             gpu().cmd_pipeline_barrier2(
                 self.cmd(),
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
-                        .dst_access_mask(dst_access_mask)
-                        .src_access_mask(src_access_mask)
+                        .dst_access_mask(dst_access)
+                        .src_access_mask(src_access)
                         .src_stage_mask(src_stage)
                         .dst_stage_mask(dst_stage)
                         .image(image)
@@ -1116,7 +1148,10 @@ impl RenderCtx {
         range: std::ops::Range<vk::DeviceSize>,
         binding: u32,
     ) {
-        let DescSetData { desc_set, binds } = &self.desc_sets[name];
+        let DescSetData { desc_set, binds } = &self
+            .desc_sets
+            .get(name)
+            .unwrap_or_else(|| panic!("descriptor not found: {name}"));
         let buffer = self.buffer(buffer_name);
         let ds_type = binds[binding as usize].descriptor_type;
         unsafe {
@@ -1132,6 +1167,53 @@ impl RenderCtx {
                         })])
                     .descriptor_count(1)
                     .descriptor_type(ds_type)
+                    .dst_binding(binding)
+                    .dst_set(*desc_set)],
+                &[],
+            )
+        }
+    }
+
+    pub fn write_ds_img(
+        &self,
+        name: &str,
+        img_view_name: &str,
+        img_layout: vk::ImageLayout,
+        binding: u32,
+    ) {
+        let DescSetData { desc_set, binds } = &self
+            .desc_sets
+            .get(name)
+            .unwrap_or_else(|| panic!("descriptor not found: {name}"));
+        let img_view = self.img_view(img_view_name);
+        let ds_type = binds[binding as usize].descriptor_type;
+        unsafe {
+            gpu().update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .image_info(&[vk::DescriptorImageInfo::default()
+                        .image_layout(img_layout)
+                        .image_view(img_view)])
+                    .descriptor_count(1)
+                    .descriptor_type(ds_type)
+                    .dst_binding(binding)
+                    .dst_set(*desc_set)],
+                &[],
+            )
+        }
+    }
+
+    pub fn write_ds_sampler(&self, name: &str, sampler_name: &str, binding: u32) {
+        let DescSetData { desc_set, .. } = &self
+            .desc_sets
+            .get(name)
+            .unwrap_or_else(|| panic!("descriptor not found: {name}"));
+        let sampler = self.sampler(sampler_name);
+        unsafe {
+            gpu().update_descriptor_sets(
+                &[vk::WriteDescriptorSet::default()
+                    .image_info(&[vk::DescriptorImageInfo::default().sampler(sampler)])
+                    .descriptor_count(1)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
                     .dst_binding(binding)
                     .dst_set(*desc_set)],
                 &[],
@@ -1212,7 +1294,10 @@ impl RenderCtx {
                         .image_format(self.surface_format.format)
                         .image_extent(surface_resolution)
                         .image_array_layers(1)
-                        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+                        .image_usage(
+                            vk::ImageUsageFlags::COLOR_ATTACHMENT
+                                | vk::ImageUsageFlags::TRANSFER_DST,
+                        )
                         .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                         .pre_transform(pre_transform)
                         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -1292,7 +1377,7 @@ impl RenderCtx {
     }
 
     pub fn cur_img(&self) -> vk::Image {
-        self.image(&format!("swapchain image {}", self.swapchain_img_idx))
+        self.img(&format!("swapchain image {}", self.swapchain_img_idx))
     }
 
     pub fn cur_img_view(&self) -> vk::ImageView {

@@ -91,36 +91,49 @@ impl<A: App> AppContext<A> {
     pub fn new(window: Window, monitor: MonitorHandle) -> Arc<Mutex<Self>> {
         scope_time!("init");
         *INIT_PATHS;
-        let PhysicalSize { width, height } = window.inner_size();
         let PhysicalSize {
             width: monitor_width,
             height: monitor_height,
         } = monitor.size();
+        let PhysicalSize { width, height } = window.inner_size();
         let refresh_rate =
             (monitor.refresh_rate_millihertz().unwrap_or(60) as f32 / 1000.0).round() as u32;
-        log!("Monitor: {}", monitor.name().unwrap_or_default());
+        log!(
+            "Monitor: {} {monitor_width}x{monitor_height} {refresh_rate}hz",
+            monitor.name().unwrap_or_default(),
+        );
 
         let ctx = Arc::new(Mutex::new(RenderCtx::new(&window)));
         let surf_fmt = ctx.lock().unwrap().surface_format.format;
-        ctx.lock().unwrap().add_image(
-            "final image",
-            &ImageInfo::new()
-                .width(width)
-                .height(height)
-                .format(surf_fmt)
-                .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        );
-        ctx.lock()
-            .unwrap()
-            .add_img_view("final image view", "final image");
-
-        let renderer = Renderer::new(ctx.clone());
+        {
+            let mut ctx = ctx.lock().unwrap();
+            ctx.add_sampler(
+                "rendered image sampler",
+                vk::SamplerAddressMode::REPEAT,
+                vk::SamplerAddressMode::REPEAT,
+                vk::Filter::LINEAR,
+                vk::Filter::LINEAR,
+                vk::SamplerMipmapMode::NEAREST,
+            );
+            ctx.add_shader("fxaa");
+            ctx.add_pipeline(
+                "fxaa",
+                "fxaa",
+                GraphicsPipelineInfo::default()
+                    .blend_attachment_empty()
+                    .dyn_size()
+                    .color_attachment(surf_fmt)
+                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
+                &[],
+            );
+            ctx.add_desc_set("rendered image ds", "fxaa", 0);
+            ctx.write_ds_sampler("rendered image ds", "rendered image sampler", 1);
+        }
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
-            width,
-            height,
+            width: 0,
+            height: 0,
             monitor,
             monitor_width,
             monitor_height,
@@ -136,19 +149,14 @@ impl<A: App> AppContext<A> {
             mouse_scroll: 0.0,
             ctx: ctx.clone(),
             surface_format: surf_fmt,
-            renderer,
+            renderer: Renderer::new(ctx.clone()),
             dispatchers: Default::default(),
         }));
         {
             let app_ptr = &*app.lock().unwrap() as *const AppContext<A>;
-            unsafe { app_ptr.cast_mut().as_mut().unwrap() }
-                .dispatcher()
-                .sub_method_mut(
-                    &mut unsafe { app_ptr.cast_mut().as_mut().unwrap() }.renderer,
-                    Renderer::on_resize,
-                );
-            unsafe { app_ptr.cast_mut().as_mut().unwrap() }.my_app =
-                Some(A::new(app_ptr as *mut _));
+            let app_mut = unsafe { app_ptr.cast_mut().as_mut().unwrap() };
+            app_mut.my_app = Some(A::new(app_ptr as *mut _));
+            app_mut.dispatcher().post(&WindowResize::new(width, height));
         }
         app
     }
@@ -169,11 +177,113 @@ impl<A: App> AppContext<A> {
             let optimal_size = self.ctx().begin_frame();
             self.resize(optimal_size.width, optimal_size.height);
 
-            self.ctx().begin_render_swapchain(vk::ImageView::null());
+            // make sure rendered_img is ready to be written in fs color output
+            let rendered_img = self.ctx().img("rendered image");
+            self.ctx().transition_img_layout(
+                rendered_img,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::PipelineStageFlags2::TOP_OF_PIPE,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            );
+
+            // Render (write rendered_img color output at fs shader)
+            let (width, height) = (self.width, self.height);
+            let rendered_img_view = self.ctx.lock().unwrap().img_view("rendered image view");
+            self.ctx()
+                .begin_render(width, height, rendered_img_view, vk::ImageView::null());
             self.my_app().render(); // to [swap img render area]
             self.renderer.flush();
             self.renderer.render(); // in [written vbo (vs)] | to [swap img render area]
-            self.ctx().end_render_swapchain();
+            self.ctx().end_render();
+
+            // make sure rendered_img color output is written to read in fxaa fs shader
+            self.ctx().transition_img_layout(
+                rendered_img,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags2::FRAGMENT_SHADER,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags2::SHADER_READ,
+            );
+
+            // make sure fxaa_img is ready to be written in fs color output
+            let fxaa_img = self.ctx.lock().unwrap().img("fxaa image");
+            self.ctx().transition_img_layout(
+                fxaa_img,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::PipelineStageFlags2::TOP_OF_PIPE,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            );
+
+            // FXAA
+            let fxaa_img_view = self.ctx.lock().unwrap().img_view("fxaa image view");
+            self.ctx()
+                .begin_render(width, height, fxaa_img_view, vk::ImageView::null());
+            self.ctx().bind_pipeline("fxaa");
+            self.ctx().bind_desc_set("rendered image ds");
+            self.ctx().draw(3, 1);
+            self.ctx().end_render();
+
+            // make sure fxaa_img color output is written
+            self.ctx().transition_img_layout(
+                fxaa_img,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags2::BLIT,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+                vk::AccessFlags2::TRANSFER_READ,
+            );
+
+            // make sure swap_img is ready to be blitted to
+            let swap_img = self.ctx().cur_img();
+            self.ctx().transition_img_layout(
+                swap_img,
+                vk::ImageLayout::UNDEFINED,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags2::BLIT,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::TRANSFER_WRITE,
+            );
+            let min = vk::Offset3D::default().x(0).y(0).z(0);
+            let max = min.x(width as i32).y(height as i32).z(1);
+            let subres = vk::ImageSubresourceLayers::default()
+                .aspect_mask(vk::ImageAspectFlags::COLOR)
+                .layer_count(1);
+            // blit fxaa_img into swap_img for presenting
+            unsafe {
+                gpu().cmd_blit_image(
+                    self.ctx().cmd(),
+                    fxaa_img,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    swap_img,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &[vk::ImageBlit::default()
+                        .src_offsets([min, max])
+                        .src_subresource(subres)
+                        .dst_offsets([min, max])
+                        .dst_subresource(subres)],
+                    vk::Filter::NEAREST,
+                )
+            };
+            // make sure swap_img is ready for presenting
+            self.ctx().transition_img_layout(
+                swap_img,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+                vk::PipelineStageFlags2::BLIT,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::AccessFlags2::NONE,
+            );
 
             let optimal_size = self.ctx.lock().unwrap().end_frame(&self.window);
             self.resize(optimal_size.width, optimal_size.height);
@@ -184,15 +294,57 @@ impl<A: App> AppContext<A> {
         self.frame += 1;
     }
 
-    fn resize(&mut self, width: u32, height: u32) {
+    fn resize(&mut self, mut width: u32, mut height: u32) {
+        if width == self.width && height == self.height {
+            return;
+        }
+        let optimal_size = self.ctx.lock().unwrap().recreate_swapchain();
+        width = optimal_size.width;
+        height = optimal_size.height;
         if width == self.width && height == self.height {
             return;
         }
         self.width = width;
         self.height = height;
-        let optimal_size = self.ctx.lock().unwrap().recreate_swapchain();
-        self.dispatcher()
-            .post(&WindowResize::new(optimal_size.width, optimal_size.height));
+        let e = WindowResize::new(width, height);
+        self.renderer.on_resize(&e);
+        self.dispatcher().post(&e);
+        if width != 0 && height != 0 {
+            let mut ctx = self.ctx.lock().unwrap();
+            // resize rendered image
+            ctx.try_remove_img("rendered image").unwrap_or_default();
+            ctx.add_img(
+                "rendered image",
+                &ImageInfo::new()
+                    .width(width)
+                    .height(height)
+                    .format(self.surface_format)
+                    .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED),
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            );
+            ctx.add_img_view("rendered image view", "rendered image");
+            // rewrite rendered ds image
+            ctx.write_ds_img(
+                "rendered image ds",
+                "rendered image view",
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                0,
+            );
+            // resize fxaa image
+            ctx.try_remove_img("fxaa image").unwrap_or_default();
+            ctx.add_img(
+                "fxaa image",
+                &ImageInfo::new()
+                    .width(width)
+                    .height(height)
+                    .format(self.surface_format)
+                    .usage(
+                        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
+                    ),
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            );
+            ctx.add_img_view("fxaa image view", "fxaa image");
+        }
         self.resize(optimal_size.width, optimal_size.height);
     }
 

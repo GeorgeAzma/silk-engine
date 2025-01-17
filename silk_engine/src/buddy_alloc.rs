@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BuddyAlloc {
     size: usize,
     /// 2^i -> [offsets]
@@ -14,11 +14,13 @@ impl BuddyAlloc {
         Self { size, free_lists }
     }
 
-    /// `O(log N)`, where N is pool size
-    /// non pow2 sizes are rounded up causing fragmentation
-    /// finds smallest block that can contain size
-    /// if block is bigger than size * 2, splits it
-    /// returns usize::MAX when out of space
+    /// `O(log N)`, where N is pool size\
+    /// non pow2 sizes are rounded up causing fragmentation\
+    /// finds smallest block that can contain size\
+    /// if block is bigger than size * 2, splits it\
+    /// ### Returns
+    /// - offset of newly alloced memory
+    /// - `usize::MAX` when out of space
     pub fn alloc(&mut self, size: usize) -> usize {
         let size2 = size.next_power_of_two();
         let mut i = size2.trailing_zeros() as usize;
@@ -42,16 +44,15 @@ impl BuddyAlloc {
         offset
     }
 
-    /// `O(log N)`, where `N` is allocations
+    /// `O(log N)`, where `N` is allocations\
     /// worst case `O(n)` where n is allocations
     pub fn dealloc(&mut self, offset: usize, size: usize) {
         let size2 = size.next_power_of_two();
         self.merge(size2, offset);
     }
 
-    /// shrink and remove outside ranges
-    /// or grow and add/extend free ranges
-    /// TODO: needs testing, might have heap corruption rarely
+    /// grow and add/extend free ranges\
+    /// or shrink and remove outside ranges
     pub fn resize(&mut self, new_size: usize) {
         self.size = new_size;
         let new_size2 = new_size.next_power_of_two();
@@ -61,18 +62,15 @@ impl BuddyAlloc {
         match new_len.cmp(&old_len) {
             // shrink and remove
             std::cmp::Ordering::Less => {
-                self.free_lists.resize(new_len, Vec::new());
-                let mut empty = true;
-                for (i, fl) in self.free_lists[..new_len - 1].iter_mut().enumerate() {
-                    fl.retain(|x| *x + (1 << i) <= new_size2);
-                    empty &= fl.is_empty();
-                }
-                if empty {
-                    if self.free_lists[new_len - 1].is_empty() {
+                for fl in self.free_lists.iter().skip(new_len) {
+                    if fl.contains(&0) {
                         self.free_lists[new_len - 1].push(0);
-                    } else if self.free_lists[new_len - 1][0] == 1 << (new_len - 1) {
-                        self.free_lists[new_len - 1] = vec![];
+                        break;
                     }
+                }
+                self.free_lists.resize(new_len, Vec::new());
+                for (i, fl) in self.free_lists[..new_len].iter_mut().enumerate() {
+                    fl.retain(|x| *x + (1 << i) <= new_size2);
                 }
             }
             std::cmp::Ordering::Greater => {
@@ -81,11 +79,8 @@ impl BuddyAlloc {
                     self.free_lists[old_len - 1] = vec![];
                     self.free_lists[new_len - 1] = vec![0];
                 } else {
-                    let empty = self.free_lists[..old_len].iter().all(|x| x.is_empty());
-                    if !empty {
-                        self.free_lists[old_len].push(1 << old_len);
-                    } else {
-                        self.free_lists[old_len - 1].push(1 << (old_len - 1));
+                    for i in old_len..new_len {
+                        self.free_lists[i - 1].push(1 << (i - 1));
                     }
                 }
             }

@@ -50,9 +50,8 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
     } else {
         rr = length(in.uv) - 1.0;
     }
-    let maxd = max(abs(dpdx(rr)), abs(dpdy(rr)));
-    let edge = clamp(1.0 - rr / maxd, 0.0, 1.0);
-    let strk = clamp(1.0 - (rr + in.stroke_width) / maxd, 0.0, 1.0);
+    let edge = step(rr, 0.0);
+    let strk = step(rr + in.stroke_width, 0.0);
     let col = mix(in.stroke_color, in.color, strk); 
     return col * vec4f(1, 1, 1, edge);
 }

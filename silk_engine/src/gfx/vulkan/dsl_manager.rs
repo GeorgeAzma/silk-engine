@@ -25,23 +25,12 @@ impl From<&DSLBinding> for vk::DescriptorSetLayoutBinding<'_> {
     }
 }
 
+#[derive(Default)]
 pub struct DSLManager {
     dsls: HashMap<DSLBindings, vk::DescriptorSetLayout>,
 }
 
-impl Default for DSLManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DSLManager {
-    pub fn new() -> Self {
-        Self {
-            dsls: Default::default(),
-        }
-    }
-
     pub fn get(&mut self, bindings: &[DSLBinding]) -> vk::DescriptorSetLayout {
         let dslbs = bindings.iter().map(|b| b.into()).collect::<Vec<_>>();
         let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&dslbs);

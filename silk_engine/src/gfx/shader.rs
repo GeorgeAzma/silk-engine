@@ -68,28 +68,43 @@ impl Shader {
             let mut bindings: HashMap<u32, Vec<DSLBinding>> = HashMap::new();
             let mut resource_access_stages: HashMap<u32, vk::ShaderStageFlags> = HashMap::new();
             for entry in ir_module.entry_points.iter() {
-                for (expr_hnd, expr) in entry.function.expressions.iter() {
-                    if matches!(
-                        expr,
-                        naga::Expression::Access { .. }
-                            | naga::Expression::AccessIndex { .. }
-                            | naga::Expression::FunctionArgument(_)
-                            | naga::Expression::GlobalVariable(_)
-                            | naga::Expression::LocalVariable(_)
-                    ) {
-                        if let Some(gvar_hnd) = entry.function.originating_global(expr_hnd) {
-                            let gvar = &ir_module.global_variables[gvar_hnd];
-                            if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
-                                let resource_key = (group << 16) | binding;
-                                let stage = stage_to_vk(&entry.stage);
-                                resource_access_stages
-                                    .entry(resource_key)
-                                    .and_modify(|stages| *stages |= stage)
-                                    .or_insert(stage);
+                fn fn_exprs(
+                    func: &naga::Function,
+                    resource_access_stages: &mut HashMap<u32, vk::ShaderStageFlags>,
+                    entry: &naga::EntryPoint,
+                    ir_module: &Module,
+                ) {
+                    for (expr_hnd, expr) in func.expressions.iter() {
+                        match expr {
+                            naga::Expression::GlobalVariable(_) => {
+                                if let Some(gvar_hnd) = func.originating_global(expr_hnd) {
+                                    let gvar = &ir_module.global_variables[gvar_hnd];
+                                    if let Some(naga::ResourceBinding { group, binding }) =
+                                        gvar.binding
+                                    {
+                                        let resource_key = (group << 16) | binding;
+                                        let stage = stage_to_vk(&entry.stage);
+                                        resource_access_stages
+                                            .entry(resource_key)
+                                            .and_modify(|stages| *stages |= stage)
+                                            .or_insert(stage);
+                                    }
+                                }
                             }
+                            naga::Expression::CallResult(f) => {
+                                let f = &ir_module.functions[*f];
+                                fn_exprs(f, resource_access_stages, entry, ir_module);
+                            }
+                            _ => {}
                         }
                     }
                 }
+                fn_exprs(
+                    &entry.function,
+                    &mut resource_access_stages,
+                    entry,
+                    ir_module,
+                );
             }
             for (_, gvar) in ir_module.global_variables.iter() {
                 if let Some(naga::ResourceBinding { group, binding }) = gvar.binding {
@@ -112,7 +127,7 @@ impl Shader {
                             vk::DescriptorType::SAMPLER
                         }
                         (naga::AddressSpace::Handle, naga::TypeInner::Image { .. }) => {
-                            vk::DescriptorType::SAMPLED_IMAGE
+                            vk::DescriptorType::SAMPLED_IMAGE // wgsl doesn't support combined image samplers
                         }
                         (naga::AddressSpace::Storage { .. }, naga::TypeInner::Image { .. }) => {
                             vk::DescriptorType::STORAGE_IMAGE
