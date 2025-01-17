@@ -26,7 +26,7 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     out.uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u)) * 2.0 - 1.0;
     let suv = out.uv * in.scale;
     let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * res.yx / res * sin(in.rotation);
-    out.pos = vec4f(in.pos + rot_uv, 0, 1);
+    out.pos = vec4f((in.pos * 2.0 - 1.0) + rot_uv * 2.0, 0, 1);
     out.color = unpack4x8unorm(in.color);
     out.roundness = in.roundness;
     out.stroke_width = in.stroke_width;

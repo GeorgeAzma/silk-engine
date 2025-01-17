@@ -34,6 +34,8 @@ mod buddy_alloc;
 mod contain_range;
 mod event;
 pub use event::*;
+mod rand;
+pub use rand::*;
 
 #[cfg(not(test))]
 pub const RES_PATH: &str = "res";
@@ -59,7 +61,7 @@ pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
 pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
     fn update(&mut self);
-    fn render(&mut self);
+    fn render(&mut self, gfx: &mut Renderer);
     fn event(&mut self, _e: WindowEvent) {}
 }
 
@@ -194,7 +196,7 @@ impl<A: App> AppContext<A> {
             let rendered_img_view = self.ctx.lock().unwrap().img_view("rendered image view");
             self.ctx()
                 .begin_render(width, height, rendered_img_view, vk::ImageView::null());
-            self.my_app().render(); // to [swap img render area]
+            self.my_app.as_mut().unwrap().render(&mut self.renderer); // to [swap img render area]
             self.renderer.flush();
             self.renderer.render(); // in [written vbo (vs)] | to [swap img render area]
             self.ctx().end_render();

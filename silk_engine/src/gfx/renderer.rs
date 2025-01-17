@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::WindowResize;
 
-use super::{GraphicsPipelineInfo, RenderCtx};
+use super::{GraphicsPipelineInfo, RenderCtx, Unit};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -80,6 +80,8 @@ pub struct Renderer {
     pub rotation: f32,
     pub stroke_width: f32,
     pub stroke_color: [u8; 4],
+    width: f32,
+    height: f32,
 }
 
 impl Renderer {
@@ -138,6 +140,8 @@ impl Renderer {
             rotation: 0.0,
             stroke_width: 0.0,
             stroke_color: [0, 0, 0, 0],
+            width: 0.0,
+            height: 0.0,
         }
     }
 
@@ -179,7 +183,25 @@ impl Renderer {
         self.verts(&[vert]);
     }
 
-    pub fn rect_center(&mut self, x: f32, y: f32, w: f32, h: f32) {
+    fn to_x(&self, unit: Unit) -> f32 {
+        match unit {
+            Unit::Px(px) => px as f32 / self.width,
+            Unit::Mn(mn) => mn * self.height / self.width.max(self.height),
+            Unit::Mx(mx) => mx * self.height / self.width.min(self.height),
+            Unit::Pc(pc) => pc,
+        }
+    }
+
+    fn to_y(&self, unit: Unit) -> f32 {
+        match unit {
+            Unit::Px(px) => px as f32 / self.height,
+            Unit::Mn(mn) => mn * self.width / self.width.max(self.height),
+            Unit::Mx(mx) => mx * self.width / self.width.min(self.height),
+            Unit::Pc(pc) => pc,
+        }
+    }
+
+    fn inst(&mut self, x: f32, y: f32, w: f32, h: f32) {
         self.instances[self.inst_cnt] = Vertex::with(self).pos(x, y).scale(w, h);
         self.inst_cnt += 1;
         if self.inst_cnt >= self.instances.len() {
@@ -188,32 +210,49 @@ impl Renderer {
         }
     }
 
-    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        self.rect_center(x - w * 0.5, y - h * 0.5, w * 0.5, h * 0.5);
+    /// centered rect
+    pub fn rectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        let (x, y, w, h) = (self.to_x(x), self.to_y(y), self.to_x(w), self.to_y(h));
+        self.inst(x, y, w, h)
     }
 
-    pub fn rrect_center(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+    pub fn rect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        let (x, y, w, h) = (
+            self.to_x(x),
+            self.to_y(y),
+            self.to_x(w) * 0.5,
+            self.to_y(h) * 0.5,
+        );
+        self.inst(x + w, y + h, w, h)
+    }
+
+    /// rounded centered rect
+    pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
         let old = self.roundness;
         self.roundness = r;
-        self.rect_center(x, y, w, h);
+        self.rectc(x, y, w, h);
         self.roundness = old;
     }
 
-    pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32) {
+    /// rounded rect
+    pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
         let old = self.roundness;
         self.roundness = r;
         self.rect(x, y, w, h);
         self.roundness = old;
     }
 
-    pub fn aabb(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) {
-        self.rect(x0, y0, x1 - x0, y1 - y0);
+    pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) {
+        let (x0, y0, x1, y1) = (self.to_x(x0), self.to_y(y0), self.to_x(x1), self.to_y(y1));
+        let (w, h) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
+        let (x, y) = (x0 - h, y0 - w);
+        self.inst(x, y, w, h);
     }
 
-    pub fn circle(&mut self, x: f32, y: f32, r: f32) {
+    pub fn circle(&mut self, x: Unit, y: Unit, r: Unit) {
         let old = self.roundness;
         self.roundness = 1.0;
-        self.rect_center(x, y, r, r);
+        self.rectc(x, y, r, r);
         self.roundness = old;
     }
 
@@ -238,6 +277,8 @@ impl Renderer {
         if e.width == 0 || e.height == 0 {
             return;
         }
+        self.width = e.width as f32;
+        self.height = e.height as f32;
         let resolution = [e.width as f32, e.height as f32];
         self.ctx
             .lock()
