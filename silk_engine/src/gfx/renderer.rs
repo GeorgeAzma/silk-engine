@@ -1,10 +1,17 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use ash::vk;
 
-use crate::WindowResize;
+use crate::{Tracked, WindowResize};
 
-use super::{GraphicsPipelineInfo, RenderCtx, Unit};
+use super::{
+    GraphicsPipelineInfo, ImageInfo, RenderCtx, Unit,
+    packer::{Packer, Rect},
+    render_ctx::BufferImageCopy,
+};
 
 #[repr(C)]
 #[derive(Default, Clone, Copy)]
@@ -16,6 +23,7 @@ pub struct Vertex {
     pub rotation: f32,
     pub stroke_width: f32,
     pub stroke_color: [u8; 4],
+    tex_coord: [u32; 2], // packed whxy
 }
 // TODO: tex_idx and textures
 #[allow(unused)]
@@ -64,6 +72,7 @@ impl Vertex {
             rotation: renderer.rotation,
             stroke_width: renderer.stroke_width,
             stroke_color: renderer.stroke_color,
+            tex_coord: renderer.tex_coord,
         }
     }
 }
@@ -80,17 +89,24 @@ pub struct Renderer {
     pub rotation: f32,
     pub stroke_width: f32,
     pub stroke_color: [u8; 4],
+    tex_coord: [u32; 2], // packed whxy
     width: f32,
     height: f32,
+    packer: Packer,
+    imgs: HashMap<String, (Tracked<Vec<u8>>, Rect)>,
 }
 
 impl Renderer {
     pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {
         let vertices = vec![Vertex::default(); 1024];
         let instances = vec![Vertex::default(); 1024];
+
+        // TODO: resizable packer
+        let packer = Packer::new(1024, 1024);
+
         {
             let mut ctx = ctx.lock().unwrap();
-            ctx.add_buffer(
+            ctx.add_buf(
                 "batch vbo",
                 (vertices.len() * size_of::<Vertex>()) as vk::DeviceSize,
                 vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -98,7 +114,7 @@ impl Renderer {
                     | vk::MemoryPropertyFlags::HOST_COHERENT
                     | vk::MemoryPropertyFlags::HOST_CACHED,
             );
-            ctx.add_buffer(
+            ctx.add_buf(
                 "instance vbo",
                 (instances.len() * size_of::<Vertex>()) as vk::DeviceSize,
                 vk::BufferUsageFlags::VERTEX_BUFFER,
@@ -119,7 +135,7 @@ impl Renderer {
                 &[(true, vec![])],
             );
             ctx.add_desc_set("render ds", "render", 0);
-            ctx.add_buffer(
+            ctx.add_buf(
                 "render ubo",
                 2 * size_of::<f32>() as vk::DeviceSize,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -128,6 +144,23 @@ impl Renderer {
                     | vk::MemoryPropertyFlags::HOST_CACHED,
             );
             ctx.write_ds("render ds", "render ubo", 0);
+            ctx.add_img(
+                "atlas",
+                &ImageInfo::new()
+                    .width(packer.width() as u32)
+                    .height(packer.height() as u32)
+                    .format(vk::Format::R8G8B8A8_UNORM)
+                    .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED),
+                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            );
+            ctx.add_img_view("atlas view", "atlas");
+
+            ctx.write_ds_img(
+                "render ds",
+                "atlas view",
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                1,
+            );
         }
         Self {
             ctx,
@@ -140,8 +173,11 @@ impl Renderer {
             rotation: 0.0,
             stroke_width: 0.0,
             stroke_color: [0, 0, 0, 0],
+            tex_coord: [0, 0],
             width: 0.0,
             height: 0.0,
+            packer,
+            imgs: HashMap::new(),
         }
     }
 
@@ -167,6 +203,33 @@ impl Renderer {
 
     pub fn stroke_hex(&mut self, hex: u32) {
         self.color = hex.to_be_bytes()
+    }
+
+    pub fn add_img(&mut self, name: &str, width: u32, height: u32) -> &mut Tracked<Vec<u8>> {
+        assert!(!self.imgs.contains_key(name), "img already in atlas");
+        if let Some((x, y)) = self.packer.pack(width as u16, height as u16) {
+            let tracked_img_data = &mut self
+                .imgs
+                .entry(name.to_string())
+                .or_insert((
+                    Tracked::new(vec![0; width as usize * height as usize * 4]),
+                    Rect::new(x, y, width as u16, height as u16),
+                ))
+                .0;
+            tracked_img_data
+        } else {
+            panic!("failed to add img to atlas, out of space")
+        }
+    }
+
+    pub fn img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
+        let img_data = self
+            .imgs
+            .get_mut(name)
+            .unwrap_or_else(|| panic!("img not found in atlas: {name}"));
+        let r = img_data.1.packed_whxy();
+        self.tex_coord = [(r >> 32) as u32, r as u32];
+        &mut img_data.0
     }
 
     pub fn verts(&mut self, verts: &[Vertex]) {
@@ -283,25 +346,74 @@ impl Renderer {
         self.ctx
             .lock()
             .unwrap()
-            .write_buffer("render ubo", &resolution);
+            .write_buf("render ubo", &resolution);
     }
 
     pub fn flush(&mut self) {
+        // update instance buffers
+        let mut ctx = self.ctx.lock().unwrap();
         if self.vert_cnt != 0 {
-            let mut ctx = self.ctx.lock().unwrap();
             let vbo_size = (self.vertices.len() * size_of::<Vertex>()) as vk::DeviceSize;
-            if ctx.buffer_size("batch vbo") < vbo_size {
-                ctx.recreate_buffer("batch vbo", vbo_size);
+            if ctx.buf_size("batch vbo") < vbo_size {
+                ctx.recreate_buf("batch vbo", vbo_size);
             }
-            ctx.write_buffer("batch vbo", &self.vertices[..self.vert_cnt]);
+            ctx.write_buf("batch vbo", &self.vertices[..self.vert_cnt]);
         }
         if self.inst_cnt != 0 {
-            let mut ctx = self.ctx.lock().unwrap();
             let inst_vbo_size = (self.instances.len() * size_of::<Vertex>()) as vk::DeviceSize;
-            if ctx.buffer_size("instance vbo") < inst_vbo_size {
-                ctx.recreate_buffer("instance vbo", inst_vbo_size);
+            if ctx.buf_size("instance vbo") < inst_vbo_size {
+                ctx.recreate_buf("instance vbo", inst_vbo_size);
             }
-            ctx.write_buffer("instance vbo", &self.instances[..self.inst_cnt]);
+            ctx.write_buf("instance vbo", &self.instances[..self.inst_cnt]);
+        }
+        // update atlas
+        let img_datas = self.imgs.values_mut().filter(|i| i.0.is_dirty());
+        let mut off = 0;
+        let buf_copies = img_datas
+            .map(|i| {
+                let (x, y, w, h) = i.1.xywh();
+                let buf_width = w as u32;
+                let copy = BufferImageCopy {
+                    buf_off: off,
+                    img_off_x: x as u32,
+                    img_off_y: y as u32,
+                    buf_width,
+                    buf_height: h as u32,
+                };
+                off += 4 * buf_width as vk::DeviceSize * h as vk::DeviceSize;
+                crate::log!("Img => Atlas Copy {w}x{h} ({x}, {y})");
+                i.0.reset();
+                (copy, &i.0)
+            })
+            .collect::<Vec<_>>();
+        let staging = &ctx.staging_buf(off);
+        for (copy, data) in buf_copies.iter() {
+            ctx.write_buf_off(staging, &data[..], copy.buf_off);
+        }
+        if !buf_copies.is_empty() {
+            ctx.begin_cmd();
+            ctx.set_img_layout(
+                "atlas",
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::AccessFlags2::NONE,
+                vk::AccessFlags2::TRANSFER_WRITE,
+            );
+            ctx.copy_buf_to_img(
+                staging,
+                "atlas",
+                &buf_copies.into_iter().map(|(c, _)| c).collect::<Vec<_>>(),
+            );
+            ctx.set_img_layout(
+                "atlas",
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::PipelineStageFlags2::TRANSFER,
+                vk::PipelineStageFlags2::VERTEX_SHADER,
+                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::AccessFlags2::SHADER_READ,
+            );
+            ctx.finish_cmd();
         }
     }
 
@@ -313,5 +425,6 @@ impl Renderer {
         self.stroke_width = 0.0;
         self.roundness = 0.0;
         self.rotation = 0.0;
+        self.tex_coord = [0, 0];
     }
 }

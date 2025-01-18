@@ -1,4 +1,6 @@
-use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
+use crate::debug_name;
+
+use super::{QUEUE_FAMILY_INDEX, alloc_callbacks, gpu};
 use ash::vk::{self, Handle};
 
 pub struct CmdAlloc {
@@ -15,13 +17,13 @@ impl CmdAlloc {
     pub fn new() -> Self {
         let pool_info =
             vk::CommandPoolCreateInfo::default().queue_family_index(*QUEUE_FAMILY_INDEX);
-        Self {
-            pool: unsafe {
-                gpu()
-                    .create_command_pool(&pool_info, alloc_callbacks())
-                    .unwrap()
-            },
-        }
+        let pool = unsafe {
+            gpu()
+                .create_command_pool(&pool_info, alloc_callbacks())
+                .unwrap()
+        };
+        debug_name("cmd pool", pool);
+        Self { pool }
     }
 
     pub fn alloc(&self, count: u32) -> Vec<vk::CommandBuffer> {
@@ -30,20 +32,6 @@ impl CmdAlloc {
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_pool(self.pool);
         unsafe { gpu().allocate_command_buffers(&cmd_alloc_info).unwrap() }
-    }
-
-    #[allow(unused)]
-    pub fn alloc_one(&self) -> vk::CommandBuffer {
-        self.alloc(1)[0]
-    }
-
-    pub fn dealloc(&self, cmds: &[vk::CommandBuffer]) {
-        unsafe { gpu().free_command_buffers(self.pool, cmds) };
-    }
-
-    #[allow(unused)]
-    pub fn dealloc_one(&self, cmd: vk::CommandBuffer) {
-        self.dealloc(&[cmd]);
     }
 
     pub fn reset(&self) {

@@ -6,6 +6,7 @@ struct Vertex {
     @location(4) rotation: f32,
     @location(5) stroke_width: f32,
     @location(6) stroke_color: u32,
+    @location(7) tex_coord: vec2u,
 }
 
 struct VSOut {
@@ -15,15 +16,18 @@ struct VSOut {
     @location(2) roundness: f32,    
     @location(3) stroke_color: vec4f,
     @location(4) stroke_width: f32,
-    @location(5) scale: vec2f,
+    @interpolate(flat) @location(5) scale: vec2f,
+    @interpolate(flat) @location(6) tex_coord: vec4u,
 }
 
 @group(0) @binding(0) var<uniform> res: vec2f;
+@group(0) @binding(1) var atlas: texture_2d<f32>;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     var out: VSOut;
-    out.uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u)) * 2.0 - 1.0;
+    let uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u));
+    out.uv = uv * 2.0 - 1.0;
     let suv = out.uv * in.scale;
     let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * res.yx / res * sin(in.rotation);
     out.pos = vec4f((in.pos * 2.0 - 1.0) + rot_uv * 2.0, 0, 1);
@@ -32,6 +36,11 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     out.stroke_width = in.stroke_width;
     out.stroke_color = unpack4x8unorm(in.stroke_color);
     out.scale = in.scale * res;
+    if in.tex_coord.x > 0 {
+        out.tex_coord = vec4u(in.tex_coord.y >> 16, in.tex_coord.y, in.tex_coord.x >> 48, in.tex_coord.x >> 32) & vec4u(0xFFFF);
+    } else {
+        out.tex_coord = vec4u(~0u);
+    }
     return out;
 }
 
@@ -52,6 +61,11 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
     }
     let edge = step(rr, 0.0);
     let strk = step(rr + in.stroke_width, 0.0);
-    let col = mix(in.stroke_color, in.color, strk); 
-    return col * vec4f(1, 1, 1, edge);
+    var col = mix(in.stroke_color, in.color, strk);
+    col.a *= edge;
+    if in.tex_coord.x != ~0u {
+        let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
+        col *= textureLoad(atlas, p, 0);
+    }
+    return col;
 }

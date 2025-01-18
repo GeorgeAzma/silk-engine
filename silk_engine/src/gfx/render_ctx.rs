@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ptr::null;
 
 use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -7,14 +6,15 @@ use winit::window::Window;
 
 use crate::{gpu, gpu_idle, scope_time, util::Mem};
 
+use super::CmdManager;
 use super::{
-    alloc_callbacks, entry, instance, physical_gpu, queue,
+    DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, alloc_callbacks, entry, instance,
+    physical_gpu, queue,
     shader::Shader,
     vulkan::{
-        pipeline::{GraphicsPipelineInfo, PipelineStageInfo},
         DSLBinding, ImageInfo, SamplerManager,
+        pipeline::{GraphicsPipelineInfo, PipelineStageInfo},
     },
-    CmdAlloc, DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, RenderPass,
 };
 
 #[cfg(debug_assertions)]
@@ -35,13 +35,10 @@ struct PipelineData {
 }
 
 #[derive(Default)]
-struct CmdState {
-    cmd: vk::CommandBuffer,
-    cmd_name: String,
+struct CmdInfo {
     pipeline_data: PipelineData,
     desc_sets: Vec<vk::DescriptorSet>,
     render_area: vk::Rect2D,
-    render_pass: RenderPass,
     viewport: vk::Viewport,
     scissor: vk::Rect2D,
 }
@@ -57,26 +54,30 @@ struct DescSetData {
     binds: Vec<DSLBinding>,
 }
 
+pub struct ImageData {
+    pub img: vk::Image,
+    pub views: Vec<String>,
+    pub info: ImageInfo,
+}
+
 pub struct RenderCtx {
-    cmd_state: CmdState,
+    cmd_info: CmdInfo,
     // allocators
     desc_alloc: DescAlloc,
-    cmd_alloc: CmdAlloc,
     pub gpu_alloc: GpuAlloc,
     // managers (hashmap cached)
     dsl_manager: DSLManager,
     pipeline_layout_manager: PipelineLayoutManager,
     sampler_manager: SamplerManager,
+    cmd_manager: CmdManager,
     // named cached objects
     shaders: HashMap<String, ShaderData>,
     pipelines: HashMap<String, PipelineData>,
     desc_sets: HashMap<String, DescSetData>,
-    cmds: HashMap<String, vk::CommandBuffer>,
-    buffers: HashMap<String, vk::Buffer>,
-    render_passes: HashMap<String, RenderPass>,
+    bufs: HashMap<String, vk::Buffer>,
     fences: HashMap<String, FenceData>,
     semaphores: HashMap<String, vk::Semaphore>,
-    images: HashMap<String, (vk::Image, Vec<String>)>,
+    imgs: HashMap<String, ImageData>,
     img_views: HashMap<String, (vk::ImageView, String)>,
     samplers: HashMap<String, vk::Sampler>,
     // window context
@@ -88,6 +89,16 @@ pub struct RenderCtx {
     pub swapchain: vk::SwapchainKHR,
     pub swapchain_size: vk::Extent2D,
     pub swapchain_img_idx: usize,
+    frame_cmd: vk::CommandBuffer,
+}
+
+#[derive(Debug)]
+pub struct BufferImageCopy {
+    pub buf_off: vk::DeviceSize,
+    pub img_off_x: u32,
+    pub img_off_y: u32,
+    pub buf_width: u32,
+    pub buf_height: u32,
 }
 
 impl RenderCtx {
@@ -125,22 +136,20 @@ impl RenderCtx {
         };
         let swapchain_loader = ash::khr::swapchain::Device::new(instance(), gpu());
         let mut slf = Self {
-            cmd_state: CmdState::default(),
+            cmd_info: CmdInfo::default(),
             desc_alloc: DescAlloc::default(),
-            cmd_alloc: CmdAlloc::default(),
             gpu_alloc: GpuAlloc::default(),
             dsl_manager: DSLManager::default(),
             pipeline_layout_manager: PipelineLayoutManager::default(),
             sampler_manager: SamplerManager::default(),
+            cmd_manager: CmdManager::new(),
             shaders: Default::default(),
             pipelines: Default::default(),
             desc_sets: Default::default(),
-            cmds: Default::default(),
-            buffers: Default::default(),
-            render_passes: Default::default(),
+            bufs: Default::default(),
             fences: Default::default(),
             semaphores: Default::default(),
-            images: Default::default(),
+            imgs: Default::default(),
             img_views: Default::default(),
             samplers: Default::default(),
             surface_caps2_loader: surface_caps2,
@@ -151,71 +160,82 @@ impl RenderCtx {
             swapchain: Default::default(),
             swapchain_size: Default::default(),
             swapchain_img_idx: Default::default(),
+            frame_cmd: Default::default(),
         };
         {
-            slf.add_cmd("render");
-            slf.add_cmd("init");
-            slf.add_buffer(
+            slf.add_buf(
                 "staging",
                 *Mem::kb(256) as vk::DeviceSize,
                 vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
                 vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
             );
-            slf.add_fence("cmd wait", false);
             slf.add_semaphore("img available");
             slf.add_semaphore("render finished");
-            slf.add_fence("prev frame finished", true);
+            slf.add_sampler(
+                "linear",
+                vk::SamplerAddressMode::REPEAT,
+                vk::SamplerAddressMode::REPEAT,
+                vk::Filter::LINEAR,
+                vk::Filter::LINEAR,
+                vk::SamplerMipmapMode::LINEAR,
+            );
+            slf.add_sampler(
+                "nearest",
+                vk::SamplerAddressMode::REPEAT,
+                vk::SamplerAddressMode::REPEAT,
+                vk::Filter::NEAREST,
+                vk::Filter::NEAREST,
+                vk::SamplerMipmapMode::NEAREST,
+            );
         }
         slf
     }
 
     // might cause a swapchain resize so returns new size
     pub(crate) fn begin_frame(&mut self) -> vk::Extent2D {
-        self.wait_fence("prev frame finished");
-        self.cmd_alloc.reset();
+        if !self.frame_cmd.is_null() {
+            self.cmd_manager.wait(self.frame_cmd);
+        }
+        self.cmd_info = Default::default();
+        self.cmd_manager.reset();
         let swapchain_size = self.acquire_img(self.semaphore("img available"));
-        self.begin_cmd("render", true);
+        self.frame_cmd = self.begin_cmd();
         swapchain_size
     }
 
     // might cause swapchain resize so returns new optimal size
     pub(crate) fn end_frame(&mut self, window: &Window) -> vk::Extent2D {
+        let cmd = self.cmd_manager.end();
         self.submit_cmd(
-            "render",
-            queue(),
+            cmd,
             &[self.semaphore("img available")],
             &[self.semaphore("render finished")],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
-            self.fence("prev frame finished"),
         );
 
         window.pre_present_notify();
         self.present(&[self.semaphore("render finished")])
     }
 
-    pub fn begin_render_swapchain(&mut self, resolve_img_view: vk::ImageView) {
-        self.transition_img_layout(
-            self.cur_img(),
-            vk::ImageLayout::UNDEFINED,
+    pub fn begin_render_swapchain(&mut self, resolve_img_view_name: &str) {
+        self.set_img_layout(
+            &self.cur_img(),
             vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
             vk::PipelineStageFlags2::TOP_OF_PIPE,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags2::NONE,
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
         );
-
         let width = self.swapchain_size.width;
         let height = self.swapchain_size.height;
         let img_view = self.cur_img_view();
-        self.begin_render(width, height, img_view, resolve_img_view);
+        self.begin_render(width, height, &img_view, resolve_img_view_name);
     }
 
     pub fn end_render_swapchain(&mut self) {
         self.end_render();
-
-        self.transition_img_layout(
-            self.cur_img(),
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        self.set_img_layout(
+            &self.cur_img(),
             vk::ImageLayout::PRESENT_SRC_KHR,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
@@ -251,36 +271,6 @@ impl RenderCtx {
         &shader_data.shader
     }
 
-    // TODO: impl remove_* for all add_*
-    // pub fn remove_shader(&mut self, name: &str) {
-    //     let shader = self.shaders.remove(name).unwrap();
-    // }
-
-    pub fn add_render_pass(&mut self, name: &str, mut render_pass: RenderPass) -> vk::RenderPass {
-        let rp = render_pass.build();
-        assert!(
-            self.render_passes
-                .insert(name.to_string(), render_pass)
-                .is_none(),
-            "render pass already exists: {name}"
-        );
-        debug_name(name, rp);
-        rp
-    }
-
-    pub fn remove_render_pass(&mut self, name: &str) {
-        self.render_passes
-            .remove(name)
-            .unwrap_or_else(|| panic!("render pass not found: {name}"));
-    }
-
-    pub fn render_pass(&mut self, name: &str) -> vk::RenderPass {
-        self.render_passes
-            .get(name)
-            .unwrap_or_else(|| panic!("render pass not found: {name}"))
-            .render_pass
-    }
-
     pub fn add_fence(&mut self, name: &str, signaled: bool) {
         let fence = unsafe {
             gpu()
@@ -297,13 +287,10 @@ impl RenderCtx {
         debug_name(name, fence);
         assert!(
             self.fences
-                .insert(
-                    name.to_string(),
-                    FenceData {
-                        fence,
-                        signaled: false
-                    }
-                )
+                .insert(name.to_string(), FenceData {
+                    fence,
+                    signaled: false
+                })
                 .is_none(),
             "fence already exists: {name}"
         );
@@ -345,7 +332,7 @@ impl RenderCtx {
         let fence = self
             .fences
             .get_mut(name)
-            .unwrap_or_else(|| panic!("failed to wait fence: {name}"));
+            .unwrap_or_else(|| panic!("fence not found: {name}"));
         if !fence.signaled {
             unsafe {
                 gpu()
@@ -392,27 +379,35 @@ impl RenderCtx {
     pub fn add_img(
         &mut self,
         name: &str,
-        img_info: &ImageInfo,
+        info: &ImageInfo,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Image {
-        let img = self.gpu_alloc.alloc_img(img_info, mem_props);
+        let img = self.gpu_alloc.alloc_img(info, mem_props);
         debug_name(name, img);
         assert!(
-            self.images
-                .insert(name.to_string(), (img, vec![]))
+            self.imgs
+                .insert(name.to_string(), ImageData {
+                    img,
+                    views: vec![],
+                    info: info.clone(),
+                })
                 .is_none(),
-            "image already exists: {name}"
+            "img already exists: {name}"
         );
         img
     }
 
     pub fn try_remove_img(&mut self, name: &str) -> Result<(), String> {
-        let (image, img_views) = self
-            .images
+        let ImageData {
+            img,
+            views,
+            info: _,
+        } = self
+            .imgs
             .remove(name)
-            .ok_or(format!("image not found: {name}"))?;
-        self.gpu_alloc.dealloc_img(image);
-        for img_view in img_views {
+            .ok_or(format!("img not found: {name}"))?;
+        self.gpu_alloc.dealloc_img(img);
+        for img_view in views {
             let (img_view, _) = self
                 .img_views
                 .remove(&img_view)
@@ -428,25 +423,24 @@ impl RenderCtx {
         self.try_remove_img(name).unwrap_or_else(|e| panic!("{e}"))
     }
 
-    pub fn img(&self, name: &str) -> vk::Image {
-        self.images
+    pub fn img(&self, name: &str) -> &ImageData {
+        self.imgs
             .get(name)
             .unwrap_or_else(|| panic!("img not found: {name}"))
-            .0
     }
 
     pub fn add_img_view(&mut self, name: &str, img_name: &str) -> vk::ImageView {
-        let (img, img_views) = self
-            .images
+        let ImageData { img, views, info } = self
+            .imgs
             .get_mut(img_name)
-            .unwrap_or_else(|| panic!("no image found: {img_name}"));
-        img_views.push(name.to_string());
+            .unwrap_or_else(|| panic!("img not found: {img_name}"));
+        views.push(name.to_string());
         let img_view = unsafe {
             gpu()
                 .create_image_view(
                     &vk::ImageViewCreateInfo::default()
                         .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(self.surface_format.format)
+                        .format(info.format)
                         .components(vk::ComponentMapping {
                             r: vk::ComponentSwizzle::IDENTITY,
                             g: vk::ComponentSwizzle::IDENTITY,
@@ -472,7 +466,7 @@ impl RenderCtx {
 
     pub fn remove_img_view(&mut self, name: &str) {
         let (img_view, img_name) = self.img_views.remove(name).unwrap();
-        let img_views = &mut self.images.get_mut(&img_name).unwrap().1;
+        let img_views = &mut self.imgs.get_mut(&img_name).unwrap().views;
         img_views.remove(
             img_views
                 .iter()
@@ -543,14 +537,11 @@ impl RenderCtx {
         let pipeline = pipeline_info.build();
         assert!(
             self.pipelines
-                .insert(
-                    name.to_string(),
-                    PipelineData {
-                        pipeline,
-                        info: pipeline_info,
-                        bind_point: vk::PipelineBindPoint::GRAPHICS,
-                    },
-                )
+                .insert(name.to_string(), PipelineData {
+                    pipeline,
+                    info: pipeline_info,
+                    bind_point: vk::PipelineBindPoint::GRAPHICS,
+                },)
                 .is_none(),
             "pipeline already exists: {name}"
         );
@@ -609,50 +600,7 @@ impl RenderCtx {
             .desc_set
     }
 
-    pub fn add_cmds(&mut self, names: &[&str]) -> Vec<vk::CommandBuffer> {
-        let cmds = self.cmd_alloc.alloc(names.len() as u32);
-        for (&cmd, &name) in cmds.iter().zip(names.iter()) {
-            assert!(
-                self.cmds.insert(name.to_string(), cmd).is_none(),
-                "cmd buf already exists: {name}"
-            );
-            debug_name(name, cmd);
-        }
-        cmds
-    }
-
-    pub fn add_cmds_numbered(&mut self, name: &str, count: usize) -> Vec<vk::CommandBuffer> {
-        let names: Vec<_> = (0..count).map(|i| format!("{name}{i}")).collect();
-        self.add_cmds(&names.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-    }
-
-    pub fn add_cmd(&mut self, name: &str) -> vk::CommandBuffer {
-        self.add_cmds(&[name])[0]
-    }
-
-    pub fn remove_cmds(&mut self, names: &[&str]) {
-        let cmds: Vec<_> = names
-            .iter()
-            .map(|name| self.cmds.remove(name.to_owned()).unwrap())
-            .collect();
-        self.cmd_alloc.dealloc(&cmds);
-    }
-
-    pub fn remove_cmd(&mut self, name: &str) {
-        self.remove_cmds(&[name])
-    }
-
-    // pub fn reset_cmds(&mut self, names: &[&str]) {
-    //     for name in names.iter() {
-    //         self.cmd_alloc.reset(self.cmds[&name.to_string()]);
-    //     }
-    // }
-
-    // pub fn reset_cmd(&mut self, name: &str) {
-    //     self.reset_cmds(&[name])
-    // }
-
-    pub fn add_buffer(
+    pub fn add_buf(
         &mut self,
         name: &str,
         size: u64,
@@ -667,174 +615,92 @@ impl RenderCtx {
         );
         let buf = self.gpu_alloc.alloc_buf(size, usage, mem_props);
         assert!(
-            self.buffers.insert(name.to_string(), buf).is_none(),
+            self.bufs.insert(name.to_string(), buf).is_none(),
             "buffer already exists: {name}"
         );
         debug_name(name, buf);
         buf
     }
 
-    pub fn remove_buffer(&mut self, name: &str) {
-        let buf = self.buffers.remove(name).unwrap();
+    pub fn remove_buf(&mut self, name: &str) {
+        let buf = self.bufs.remove(name).unwrap();
         self.gpu_alloc.dealloc_buf(buf);
     }
 
-    pub fn recreate_buffer(&mut self, name: &str, size: u64) -> vk::Buffer {
-        let buffer = self.buffers.get_mut(name).unwrap();
+    pub fn recreate_buf(&mut self, name: &str, size: u64) -> vk::Buffer {
+        let buffer = self.bufs.get_mut(name).unwrap();
         *buffer = self.gpu_alloc.realloc_buf(*buffer, size);
         debug_name(name, *buffer);
         *buffer
     }
 
-    pub fn buffer(&self, name: &str) -> vk::Buffer {
+    pub fn buf(&self, name: &str) -> vk::Buffer {
         *self
-            .buffers
+            .bufs
             .get(name)
             .unwrap_or_else(|| panic!("buffer not found: {name}"))
     }
 
-    pub fn buffer_size(&self, name: &str) -> u64 {
-        self.gpu_alloc.buf_size(self.buffer(name))
-    }
-
-    pub fn get_cmd(&self, name: &str) -> vk::CommandBuffer {
-        *self
-            .cmds
-            .get(name)
-            .unwrap_or_else(|| panic!("cmd buffer not found: {name}"))
+    pub fn buf_size(&self, name: &str) -> u64 {
+        self.gpu_alloc.buf_size(self.buf(name))
     }
 
     pub fn cmd(&self) -> vk::CommandBuffer {
-        let cmd = self.cmd_state.cmd;
-        assert_ne!(cmd, Default::default(), "no active cmd");
-        cmd
+        self.cmd_manager.cmd()
     }
 
-    pub fn cmd_name(&self) -> &str {
-        &self.cmd_state.cmd_name
+    pub fn begin_cmd(&mut self) -> vk::CommandBuffer {
+        self.cmd_manager.begin()
     }
 
-    pub fn begin_cmd(&mut self, name: &str, once: bool) -> vk::CommandBuffer {
-        let cmd = self.get_cmd(name);
-        if self.cmd_state.cmd == cmd {
-            return cmd;
-        }
-        assert!(
-            self.cmd_state.cmd == Default::default(),
-            "cmd begun when other cmd was running: {name}"
-        );
-        self.cmd_state.cmd = cmd;
-        self.cmd_state.cmd_name = name.to_string();
-        unsafe {
-            gpu()
-                .begin_command_buffer(
-                    self.cmd_state.cmd,
-                    &vk::CommandBufferBeginInfo::default().flags(if once {
-                        vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT
-                    } else {
-                        vk::CommandBufferUsageFlags::empty()
-                    }),
-                )
-                .unwrap();
-        }
-        self.debug_begin(&format!("Begin Cmd({name})"));
-        self.cmd_state.cmd
-    }
-
-    pub fn end_cmd(&mut self) {
-        if self.cmd_state.cmd == Default::default() {
-            return;
-        }
-        if self.cmd_state.render_area != Default::default() {
+    pub fn end_cmd(&mut self) -> vk::CommandBuffer {
+        if self.cmd_info.render_area != Default::default() {
             self.end_render();
         }
-        self.debug_end();
-        unsafe {
-            gpu().end_command_buffer(self.cmd()).unwrap();
-        }
-        self.cmd_state = Default::default();
-    }
-
-    pub fn wait_cmd(&mut self) {
-        let cmd = self.cmd_name().to_string();
-        self.submit_cmd(&cmd, queue(), &[], &[], &[], self.fence("cmd wait"));
-        self.wait_fence("cmd wait");
+        self.cmd_info = Default::default();
+        self.cmd_manager.end()
     }
 
     pub fn submit_cmd(
         &mut self,
-        name: &str,
-        queue: vk::Queue,
-        wait: &[vk::Semaphore],
-        signal: &[vk::Semaphore],
+        cmd: vk::CommandBuffer,
+        waits: &[vk::Semaphore],
+        signals: &[vk::Semaphore],
         wait_dst_stage_mask: &[vk::PipelineStageFlags],
-        fence: vk::Fence,
     ) {
-        self.submit_cmds(&[name], queue, wait, signal, wait_dst_stage_mask, fence);
+        self.cmd_manager
+            .submit(cmd, waits, signals, wait_dst_stage_mask)
     }
 
-    pub fn submit_cmds(
-        &mut self,
-        names: &[&str],
-        queue: vk::Queue,
-        wait: &[vk::Semaphore],
-        signal: &[vk::Semaphore],
-        wait_dst_stage_mask: &[vk::PipelineStageFlags],
-        fence: vk::Fence,
-    ) {
-        let cmds = names
-            .iter()
-            .map(|name| self.get_cmd(name))
-            .collect::<Vec<_>>();
-        let needs_end = cmds.iter().any(|&cmd| cmd == self.cmd_state.cmd);
-        if needs_end {
-            self.end_cmd();
-        }
-        unsafe {
-            gpu()
-                .queue_submit(
-                    queue,
-                    &[vk::SubmitInfo {
-                        signal_semaphore_count: signal.len() as u32,
-                        wait_semaphore_count: wait.len() as u32,
-                        p_signal_semaphores: if signal.is_empty() {
-                            null()
-                        } else {
-                            signal.as_ptr()
-                        },
-                        p_wait_semaphores: if wait.is_empty() {
-                            null()
-                        } else {
-                            wait.as_ptr()
-                        },
-                        ..Default::default()
-                    }
-                    .command_buffers(&cmds)
-                    .wait_dst_stage_mask(wait_dst_stage_mask)],
-                    fence,
-                )
-                .unwrap();
-        }
+    pub fn wait_cmd(&mut self, cmd: vk::CommandBuffer) {
+        self.cmd_manager.wait(cmd);
+    }
+
+    pub fn finish_cmd(&mut self) {
+        let cmd = self.cmd_manager.end();
+        self.cmd_manager.submit(cmd, &[], &[], &[]);
+        self.cmd_manager.wait(cmd);
     }
 
     pub fn begin_render(
         &mut self,
         width: u32,
         height: u32,
-        img_view: vk::ImageView,
-        sampled_img_view: vk::ImageView,
+        img_view_name: &str,
+        sampled_img_view_name: &str,
     ) {
-        self.cmd_state.render_area = vk::Rect2D {
+        let sampled = !sampled_img_view_name.is_empty();
+        let img_view = self.img_view(img_view_name);
+        self.cmd_info.render_area = vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
             extent: vk::Extent2D { width, height },
         };
         self.debug_begin(&format!("Begin Render({width}x{height})"));
-        let sampled = !sampled_img_view.is_null();
         unsafe {
             gpu().cmd_begin_rendering(
                 self.cmd(),
                 &vk::RenderingInfo::default()
-                    .render_area(self.cmd_state.render_area)
+                    .render_area(self.cmd_info.render_area)
                     .layer_count(1)
                     .color_attachments(&[vk::RenderingAttachmentInfo::default()
                         .load_op(vk::AttachmentLoadOp::CLEAR)
@@ -856,83 +722,50 @@ impl RenderCtx {
                         })
                         .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
                         .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image_view(if sampled { sampled_img_view } else { img_view })]),
+                        .image_view(if sampled {
+                            self.img_view(sampled_img_view_name)
+                        } else {
+                            img_view
+                        })]),
             )
         };
     }
 
     pub fn end_render(&mut self) {
         assert!(
-            self.cmd_state.render_area != Default::default(),
+            self.cmd_info.render_area != Default::default(),
             "can't end rendering that has not begun"
         );
-        self.cmd_state.render_area = Default::default();
+        self.cmd_info.render_area = Default::default();
         unsafe {
-            if self.cmd_state.render_pass.render_pass == Default::default() {
-                gpu().cmd_end_rendering(self.cmd());
-            } else {
-                gpu().cmd_end_render_pass(self.cmd());
-                self.cmd_state.render_pass = Default::default();
-            }
+            gpu().cmd_end_rendering(self.cmd());
         }
         self.debug_end();
     }
 
-    // TODO:
-    // pub fn begin_rp(&mut self, name: &str, width: u32, height: u32, img_views: &[vk::ImageView]) {
-    //     self.cmd_state.render_area = vk::Rect2D {
-    //         offset: vk::Offset2D { x: 0, y: 0 },
-    //         extent: vk::Extent2D { width, height },
-    //     };
-    //     let img_cnt = SWAPCHAIN_IMAGES.read().unwrap().len();
-    //     let render_pass = self.render_passes.get_mut(name).unwrap();
-    //     if render_pass.framebuffer_size != self.cmd_state.render_area.extent
-    //         || render_pass.framebuffers.len() < img_cnt
-    //     {
-    //         render_pass.recreate_framebuffer(width, height, img_views, img_cnt);
-    //     }
-    //     self.cmd_state.render_pass = render_pass.clone();
-    //     let render_pass = &self.cmd_state.render_pass;
-    //     unsafe {
-    //         gpu().cmd_begin_render_pass(
-    //             self.cmd(),
-    //             &vk::RenderPassBeginInfo::default()
-    //                 .render_area(self.cmd_state.render_area)
-    //                 .clear_values(&[vk::ClearValue {
-    //                     color: vk::ClearColorValue {
-    //                         float32: [0.0, 0.0, 0.0, 0.0],
-    //                     },
-    //                 }])
-    //                 .render_pass(render_pass.render_pass)
-    //                 .framebuffer(render_pass.framebuffers[swap_img_idx()]),
-    //             vk::SubpassContents::INLINE,
-    //         );
-    //     }
-    // }
-
     pub fn set_viewport(&mut self, viewport: vk::Viewport) {
-        if self.cmd_state.viewport.width == viewport.width
-            && self.cmd_state.viewport.height == viewport.height
-            && self.cmd_state.viewport.x == viewport.x
-            && self.cmd_state.viewport.y == viewport.y
-            && self.cmd_state.viewport.min_depth == viewport.min_depth
-            && self.cmd_state.viewport.max_depth == viewport.max_depth
+        if self.cmd_info.viewport.width == viewport.width
+            && self.cmd_info.viewport.height == viewport.height
+            && self.cmd_info.viewport.x == viewport.x
+            && self.cmd_info.viewport.y == viewport.y
+            && self.cmd_info.viewport.min_depth == viewport.min_depth
+            && self.cmd_info.viewport.max_depth == viewport.max_depth
         {
             return;
         }
-        self.cmd_state.viewport = viewport;
+        self.cmd_info.viewport = viewport;
         unsafe { gpu().cmd_set_viewport(self.cmd(), 0, &[viewport]) };
     }
 
     pub fn set_scissor(&mut self, scissor: vk::Rect2D) {
-        if self.cmd_state.scissor.extent.width == scissor.extent.width
-            && self.cmd_state.scissor.extent.height == scissor.extent.height
-            && self.cmd_state.scissor.offset.x == scissor.offset.x
-            && self.cmd_state.scissor.offset.y == scissor.offset.y
+        if self.cmd_info.scissor.extent.width == scissor.extent.width
+            && self.cmd_info.scissor.extent.height == scissor.extent.height
+            && self.cmd_info.scissor.offset.x == scissor.offset.x
+            && self.cmd_info.scissor.offset.y == scissor.offset.y
         {
             return;
         }
-        self.cmd_state.scissor = scissor;
+        self.cmd_info.scissor = scissor;
         unsafe { gpu().cmd_set_scissor(self.cmd(), 0, &[scissor]) };
     }
 
@@ -942,14 +775,14 @@ impl RenderCtx {
             .get(name)
             .unwrap_or_else(|| panic!("pipeline not found: {name}"))
             .clone();
-        if pipeline_data.pipeline == self.cmd_state.pipeline_data.pipeline {
+        if pipeline_data.pipeline == self.cmd_info.pipeline_data.pipeline {
             return;
         }
-        self.cmd_state.pipeline_data = pipeline_data;
+        self.cmd_info.pipeline_data = pipeline_data;
 
         unsafe {
-            let dyn_states = self.cmd_state.pipeline_data.info.dynamic_states.clone();
-            let extent = self.cmd_state.render_area.extent;
+            let dyn_states = self.cmd_info.pipeline_data.info.dynamic_states.clone();
+            let extent = self.cmd_info.render_area.extent;
             if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
                 self.set_viewport(vk::Viewport {
                     x: 0.0,
@@ -959,30 +792,34 @@ impl RenderCtx {
                     min_depth: 0.0,
                     max_depth: 1.0,
                 });
+            } else {
+                self.cmd_info.viewport = Default::default();
             }
             if dyn_states.contains(&vk::DynamicState::SCISSOR) {
                 self.set_scissor(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent,
                 });
+            } else {
+                self.cmd_info.scissor = Default::default();
             }
             gpu().cmd_bind_pipeline(
                 self.cmd(),
-                self.cmd_state.pipeline_data.bind_point,
-                self.cmd_state.pipeline_data.pipeline,
+                self.cmd_info.pipeline_data.bind_point,
+                self.cmd_info.pipeline_data.pipeline,
             )
         }
     }
 
     pub fn bind_desc_set(&mut self, name: &str) {
-        self.cmd_state.desc_sets = vec![self.desc_set(name)];
+        self.cmd_info.desc_sets = vec![self.desc_set(name)];
         unsafe {
             gpu().cmd_bind_descriptor_sets(
                 self.cmd(),
-                self.cmd_state.pipeline_data.bind_point,
-                self.cmd_state.pipeline_data.info.layout,
+                self.cmd_info.pipeline_data.bind_point,
+                self.cmd_info.pipeline_data.info.layout,
                 0,
-                &self.cmd_state.desc_sets,
+                &self.cmd_info.desc_sets,
                 &[],
             );
         }
@@ -990,22 +827,22 @@ impl RenderCtx {
 
     pub fn bind_vbo(&self, name: &str) {
         unsafe {
-            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffer(name)], &[0]);
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buf(name)], &[0]);
         }
     }
 
     pub fn bind_ebo(&self, name: &str) {
         unsafe {
-            gpu().cmd_bind_index_buffer(self.cmd(), self.buffer(name), 0, vk::IndexType::UINT32);
+            gpu().cmd_bind_index_buffer(self.cmd(), self.buf(name), 0, vk::IndexType::UINT32);
         }
     }
 
     pub fn bind_vao(&self, name: &str, index_buffer_offset: vk::DeviceSize) {
         unsafe {
-            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buffer(name)], &[0]);
+            gpu().cmd_bind_vertex_buffers(self.cmd(), 0, &[self.buf(name)], &[0]);
             gpu().cmd_bind_index_buffer(
                 self.cmd(),
-                self.buffer(name),
+                self.buf(name),
                 index_buffer_offset,
                 vk::IndexType::UINT32,
             );
@@ -1024,121 +861,160 @@ impl RenderCtx {
         }
     }
 
-    pub fn transition_img_layout(
-        &self,
-        image: vk::Image,
-        old_layout: vk::ImageLayout,
+    pub fn set_img_layout(
+        &mut self,
+        img_name: &str,
         new_layout: vk::ImageLayout,
         src_stage: vk::PipelineStageFlags2,
         dst_stage: vk::PipelineStageFlags2,
         src_access: vk::AccessFlags2,
         dst_access: vk::AccessFlags2,
     ) {
+        let cmd = self.cmd();
+        let ImageData {
+            img,
+            views: _,
+            info,
+        } = self
+            .imgs
+            .get_mut(img_name)
+            .unwrap_or_else(|| panic!("img not found: {img_name}"));
+        if info.layout == new_layout {
+            return;
+        }
         unsafe {
             gpu().cmd_pipeline_barrier2(
-                self.cmd(),
+                cmd,
                 &vk::DependencyInfo::default().image_memory_barriers(&[
                     vk::ImageMemoryBarrier2::default()
                         .dst_access_mask(dst_access)
                         .src_access_mask(src_access)
                         .src_stage_mask(src_stage)
                         .dst_stage_mask(dst_stage)
-                        .image(image)
+                        .image(*img)
                         .subresource_range(
                             vk::ImageSubresourceRange::default()
                                 .aspect_mask(vk::ImageAspectFlags::COLOR)
                                 .layer_count(1)
                                 .level_count(1),
                         )
-                        .old_layout(old_layout)
+                        .old_layout(info.layout)
                         .new_layout(new_layout),
                 ]),
             );
         }
+        info.layout = new_layout;
     }
 
-    pub fn staging_buffer(&mut self, size: vk::DeviceSize) -> vk::Buffer {
-        if self.buffer_size("staging") >= size {
-            self.buffer("staging")
-        } else {
-            self.recreate_buffer("staging", (size + 1).next_power_of_two())
+    pub fn staging_buf(&mut self, size: vk::DeviceSize) -> String {
+        if self.buf_size("staging") < size {
+            self.recreate_buf("staging", (size + 1).next_power_of_two());
         }
+        "staging".to_string()
     }
 
-    // TODO: don't begin cmd unless have to
-    // TODO: automatic barrier system
-    pub fn copy_buffer_off(
+    // TODO: don't begin cmd if cur cmd ends at convenient time
+    // TODO: automatic pipeline barrier system
+    pub fn copy_buf_off(
         &mut self,
-        src_buffer: vk::Buffer,
-        dst_buffer: vk::Buffer,
+        src_buf_name: &str,
+        dst_buf_name: &str,
         src_off: vk::DeviceSize,
         dst_off: vk::DeviceSize,
     ) {
-        let cmd = self.begin_cmd("init", false);
+        let src_buf = self.buf(src_buf_name);
+        let dst_buf = self.buf(dst_buf_name);
+        let cmd = self.begin_cmd();
         unsafe {
-            // let buffer_usage = self.gpu_alloc.buf_usage(dst_buffer);
-            // if buffer_usage.contains(vk::BufferUsageFlags::VERTEX_BUFFER)
-            //     || buffer_usage.contains(vk::BufferUsageFlags::INDEX_BUFFER)
-            // {
-            //     gpu().cmd_pipeline_barrier(
-            //         cmd,
-            //         vk::PipelineStageFlags::VERTEX_INPUT,
-            //         vk::PipelineStageFlags::TRANSFER,
-            //         vk::DependencyFlags::empty(),
-            //         &[],
-            //         &[vk::BufferMemoryBarrier::default()
-            //             .src_access_mask(vk::AccessFlags::VERTEX_ATTRIBUTE_READ)
-            //             .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
-            //             .buffer(dst_buffer)
-            //             .size(vk::WHOLE_SIZE)],
-            //         &[],
-            //     );
-            // }
             let buf_size = self
                 .gpu_alloc
-                .buf_size(src_buffer)
-                .min(self.gpu_alloc.buf_size(dst_buffer));
+                .buf_size(src_buf)
+                .min(self.gpu_alloc.buf_size(dst_buf));
             let copy_region = vk::BufferCopy::default()
                 .size(buf_size)
                 .src_offset(src_off)
                 .dst_offset(dst_off);
-            gpu().cmd_copy_buffer(cmd, src_buffer, dst_buffer, &[copy_region]);
+            gpu().cmd_copy_buffer(cmd, src_buf, dst_buf, &[copy_region]);
         }
-        self.wait_cmd();
+        self.finish_cmd();
     }
 
-    pub fn copy_buffer(&mut self, src_buffer: vk::Buffer, dst_buffer: vk::Buffer) {
-        self.copy_buffer_off(src_buffer, dst_buffer, 0, 0);
+    pub fn copy_buf(&mut self, src_buf_name: &str, dst_buf_name: &str) {
+        self.copy_buf_off(src_buf_name, dst_buf_name, 0, 0);
     }
 
-    pub fn write_buffer_off<T: ?Sized>(&mut self, name: &str, data: &T, off: vk::DeviceSize) {
-        let buffer = self.buffer(name);
+    pub fn write_buf_off<T: ?Sized>(&mut self, name: &str, data: &T, off: vk::DeviceSize) {
+        let buffer = self.buf(name);
         if self.gpu_alloc.is_mappable(buffer) {
             self.gpu_alloc.write_mapped_off(buffer, data, off);
         } else {
-            let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
-            self.gpu_alloc.write_mapped(staging, data);
-            self.copy_buffer_off(staging, buffer, 0, off);
+            let staging = self.staging_buf(size_of_val(data) as vk::DeviceSize);
+            let staging_buf = self.buf(&staging);
+            self.gpu_alloc.write_mapped(staging_buf, data);
+            self.copy_buf_off(&staging, name, 0, off);
         }
     }
 
-    pub fn read_buffer_off<T: ?Sized>(&mut self, name: &str, data: &mut T, off: vk::DeviceSize) {
-        let buffer = self.buffer(name);
-        if self.gpu_alloc.is_mappable(buffer) {
-            self.gpu_alloc.read_mapped_off(buffer, data, off);
+    pub fn read_buf_off<T: ?Sized>(&mut self, name: &str, data: &mut T, off: vk::DeviceSize) {
+        let buf = self.buf(name);
+        if self.gpu_alloc.is_mappable(buf) {
+            self.gpu_alloc.read_mapped_off(buf, data, off);
         } else {
-            let staging = self.staging_buffer(size_of_val(data) as vk::DeviceSize);
-            self.copy_buffer_off(buffer, staging, off, 0);
-            self.gpu_alloc.read_mapped(staging, data);
+            let staging = self.staging_buf(size_of_val(data) as vk::DeviceSize);
+            let staging_buf = self.buf(&staging);
+            self.copy_buf_off(name, &staging, off, 0);
+            self.gpu_alloc.read_mapped(staging_buf, data);
         }
     }
 
-    pub fn write_buffer<T: ?Sized>(&mut self, name: &str, data: &T) {
-        self.write_buffer_off(name, data, 0);
+    pub fn write_buf<T: ?Sized>(&mut self, name: &str, data: &T) {
+        self.write_buf_off(name, data, 0);
     }
 
-    pub fn read_buffer<T: ?Sized>(&mut self, name: &str, data: &mut T) {
-        self.read_buffer_off(name, data, 0);
+    pub fn read_buf<T: ?Sized>(&mut self, name: &str, data: &mut T) {
+        self.read_buf_off(name, data, 0);
+    }
+
+    pub fn copy_buf_to_img(
+        &mut self,
+        src_buf_name: &str,
+        dst_img_name: &str,
+        copies: &[BufferImageCopy],
+    ) {
+        let src_buf = self.buf(src_buf_name);
+        let dst_img_data = self.img(dst_img_name);
+        unsafe {
+            gpu().cmd_copy_buffer_to_image(
+                self.cmd(),
+                src_buf,
+                dst_img_data.img,
+                dst_img_data.info.layout,
+                &copies
+                    .iter()
+                    .map(|c| {
+                        vk::BufferImageCopy::default()
+                            .buffer_offset(c.buf_off)
+                            .buffer_row_length(c.buf_width)
+                            .buffer_image_height(c.buf_height)
+                            .image_extent(vk::Extent3D {
+                                width: c.buf_width,
+                                height: c.buf_height,
+                                depth: 1,
+                            })
+                            .image_offset(vk::Offset3D {
+                                x: c.img_off_x as i32,
+                                y: c.img_off_y as i32,
+                                z: 0,
+                            })
+                            .image_subresource(
+                                vk::ImageSubresourceLayers::default()
+                                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                    .layer_count(1),
+                            )
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
     }
 
     pub fn write_ds_range(
@@ -1152,7 +1028,7 @@ impl RenderCtx {
             .desc_sets
             .get(name)
             .unwrap_or_else(|| panic!("descriptor not found: {name}"));
-        let buffer = self.buffer(buffer_name);
+        let buffer = self.buf(buffer_name);
         let ds_type = binds[binding as usize].descriptor_type;
         unsafe {
             gpu().update_descriptor_sets(
@@ -1225,11 +1101,11 @@ impl RenderCtx {
         self.write_ds_range(name, buffer_name, 0..vk::WHOLE_SIZE, binding)
     }
 
-    pub fn clear(&self, image: vk::Image, color: [f32; 4]) {
+    pub fn clear(&self, img: vk::Image, color: [f32; 4]) {
         unsafe {
             gpu().cmd_clear_color_image(
                 self.cmd(),
-                image,
+                img,
                 vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
                 &vk::ClearColorValue { float32: color },
                 &[vk::ImageSubresourceRange::default()
@@ -1240,35 +1116,66 @@ impl RenderCtx {
         }
     }
 
+    pub fn blit(&self, src_img_name: &str, dst_img_name: &str) {
+        let ImageData {
+            img: src,
+            views: _,
+            info: src_info,
+        } = self.img(src_img_name);
+        let ImageData {
+            img: dst,
+            views: _,
+            info: dst_info,
+        } = self.img(dst_img_name);
+        assert_eq!(
+            src_info.width == dst_info.width,
+            src_info.height == dst_info.height,
+            "blit src img size must equal dst size"
+        );
+        let min = vk::Offset3D::default().x(0).y(0).z(0);
+        let max = min.x(src_info.width as i32).y(src_info.height as i32).z(1);
+        let subres = vk::ImageSubresourceLayers::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .layer_count(1);
+        unsafe {
+            gpu().cmd_blit_image(
+                self.cmd(),
+                *src,
+                src_info.layout,
+                *dst,
+                dst_info.layout,
+                &[vk::ImageBlit::default()
+                    .src_offsets([min, max])
+                    .src_subresource(subres)
+                    .dst_offsets([min, max])
+                    .dst_subresource(subres)],
+                vk::Filter::NEAREST,
+            )
+        };
+    }
+
     pub fn recreate_swapchain(&mut self) -> vk::Extent2D {
-        let surface_capabilities = self.surface_capabilities();
+        let surf_caps = self.surface_capabilities();
         let size = self.swapchain_size;
-        let surface_resolution = match surface_capabilities.current_extent.width {
+        let surf_res = match surf_caps.current_extent.width {
             u32::MAX => vk::Extent2D {
                 width: size.width,
                 height: size.height,
             },
-            _ => surface_capabilities.current_extent,
+            _ => surf_caps.current_extent,
         };
-        if surface_resolution.width == 0
-            || surface_resolution.height == 0
-            || surface_resolution == size
-        {
-            return surface_resolution;
+        if surf_res.width == 0 || surf_res.height == 0 || surf_res == size {
+            return surf_res;
         }
-        self.swapchain_size = surface_resolution;
-        scope_time!(
-            "resize {}x{}",
-            surface_resolution.width,
-            surface_resolution.height
-        );
-        let pre_transform = if surface_capabilities
+        self.swapchain_size = surf_res;
+        scope_time!("resize {}x{}", surf_res.width, surf_res.height);
+        let pre_transform = if surf_caps
             .supported_transforms
             .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
         {
             vk::SurfaceTransformFlagsKHR::IDENTITY
         } else {
-            surface_capabilities.current_transform
+            surf_caps.current_transform
         };
         let present_mode = self
             .surface_present_modes
@@ -1276,11 +1183,9 @@ impl RenderCtx {
             .find(|&mode| *mode == vk::PresentModeKHR::MAILBOX)
             .copied()
             .unwrap_or(vk::PresentModeKHR::FIFO);
-        let mut desired_image_count = surface_capabilities.min_image_count + 1;
-        if surface_capabilities.max_image_count > 0 {
-            desired_image_count = surface_capabilities
-                .max_image_count
-                .min(desired_image_count);
+        let mut desired_img_cnt = surf_caps.min_image_count + 1;
+        if surf_caps.max_image_count > 0 {
+            desired_img_cnt = surf_caps.max_image_count.min(desired_img_cnt);
         }
         // Destroy old swap chain images
         let old_swapchain = self.swapchain;
@@ -1289,10 +1194,10 @@ impl RenderCtx {
                 .create_swapchain(
                     &vk::SwapchainCreateInfoKHR::default()
                         .surface(self.surface)
-                        .min_image_count(desired_image_count)
+                        .min_image_count(desired_img_cnt)
                         .image_color_space(self.surface_format.color_space)
                         .image_format(self.surface_format.format)
-                        .image_extent(surface_resolution)
+                        .image_extent(surf_res)
                         .image_array_layers(1)
                         .image_usage(
                             vk::ImageUsageFlags::COLOR_ATTACHMENT
@@ -1312,13 +1217,13 @@ impl RenderCtx {
 
         if old_swapchain != Default::default() {
             // FIXME: assumes swapchain image count is constant
-            for i in 0..desired_image_count {
+            for i in 0..desired_img_cnt {
                 let img_name = format!("swapchain image {i}");
-                let img_views = self.images[&img_name].1.clone();
+                let img_views = self.imgs[&img_name].views.clone();
                 for img_view in img_views {
                     self.remove_img_view(&img_view);
                 }
-                self.images.remove(&img_name).unwrap();
+                self.imgs.remove(&img_name).unwrap();
             }
             unsafe {
                 self.swapchain_loader
@@ -1326,21 +1231,31 @@ impl RenderCtx {
             };
         }
 
-        let swapchain_images = unsafe {
+        let swapchain_imgs = unsafe {
             self.swapchain_loader
                 .get_swapchain_images(self.swapchain)
                 .unwrap()
         };
-        for (i, swap_img) in swapchain_images.into_iter().enumerate() {
+        for (i, swap_img) in swapchain_imgs.into_iter().enumerate() {
             let img_name = format!("swapchain image {i}");
             debug_name(&img_name, swap_img);
             let img_view_name = format!("swapchain image view {i}");
-            self.images.insert(img_name.clone(), (swap_img, vec![]));
+            self.imgs.insert(img_name.clone(), ImageData {
+                img: swap_img,
+                views: vec![],
+                info: ImageInfo::new()
+                    .width(surf_res.width)
+                    .height(surf_res.height)
+                    .format(self.surface_format.format)
+                    .usage(
+                        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST,
+                    ),
+            });
             self.add_img_view(&img_view_name, &img_name);
         }
 
         gpu_idle();
-        surface_resolution
+        surf_res
     }
 
     // might cause resize so returns optimal swapchain size
@@ -1376,12 +1291,12 @@ impl RenderCtx {
         }
     }
 
-    pub fn cur_img(&self) -> vk::Image {
-        self.img(&format!("swapchain image {}", self.swapchain_img_idx))
+    pub fn cur_img(&self) -> String {
+        format!("swapchain image {}", self.swapchain_img_idx)
     }
 
-    pub fn cur_img_view(&self) -> vk::ImageView {
-        self.img_view(&format!("swapchain image view {}", self.swapchain_img_idx))
+    pub fn cur_img_view(&self) -> String {
+        format!("swapchain image view {}", self.swapchain_img_idx)
     }
 
     fn surface_capabilities(&self) -> vk::SurfaceCapabilitiesKHR {
