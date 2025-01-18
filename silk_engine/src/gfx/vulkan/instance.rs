@@ -1,8 +1,8 @@
 use std::ffi::CString;
 use std::sync::LazyLock;
 
-use super::config::*;
 use super::ENTRY;
+use super::config::*;
 use crate::{fatal, warn};
 use ash::vk;
 
@@ -13,7 +13,7 @@ unsafe extern "system" fn vulkan_debug_callback(
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT<'_>,
     _user_data: *mut std::os::raw::c_void,
 ) -> vk::Bool32 {
-    let callback_data = *p_callback_data;
+    let callback_data = unsafe { *p_callback_data };
     let msg_id = callback_data.message_id_number;
     if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
         || (message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::INFO
@@ -21,13 +21,13 @@ unsafe extern "system" fn vulkan_debug_callback(
         || msg_id == 601872502  // validation active warn
         || msg_id == 615892639 // GPU assisted validation active warn
         || msg_id == 2132353751 // GPU assisted + core validation active warn
-        // pipeline exec props ext active warn
-        || msg_id == 1734198062
+        || msg_id == 1734198062 // pipeline exec props ext active warn
+        // not using combined image samplers warn (no wgsl support)
+        || msg_id == -222910232
     {
         return vk::FALSE;
     }
-    let mut message = callback_data
-        .message_as_c_str()
+    let mut message = unsafe { callback_data.message_as_c_str() }
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
@@ -171,8 +171,8 @@ static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
                     .pfn_user_callback(Some(vulkan_debug_callback)),
                 crate::alloc_callbacks(),
             )
-            .unwrap()
-    };
+            .unwrap();
+    }
 
     instance
 });

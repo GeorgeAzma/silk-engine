@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use super::{alloc_callbacks, gpu, QUEUE_FAMILY_INDEX};
-use crate::{buddy_alloc::BuddyAlloc, contain_range::ContainRange, gpu_mem_props, ImageInfo};
+use super::{alloc_callbacks, gpu, queue_family_index};
+use crate::{ImageInfo, buddy_alloc::BuddyAlloc, contain_range::ContainRange, gpu_mem_props};
 use ash::vk;
 use vk::Handle;
 
@@ -126,7 +126,7 @@ impl MemPool {
         crate::log!(
             "Mem Pool({:?}) Alloc: off({}), size({})",
             self.props,
-            crate::Mem::b(off as usize),
+            crate::Mem::b(off),
             crate::Mem::b(size as usize)
         );
         assert_ne!(off, usize::MAX);
@@ -216,15 +216,12 @@ impl GpuAlloc {
                 .bind_image_memory(image, mem_block.mem, alloc_off)
                 .unwrap()
         };
-        self.img_allocs.insert(
-            image.as_raw(),
-            ImageAlloc {
-                mem_type_idx,
-                buddy_off: alloc_off + mem_block.off,
-                aligned_size,
-                img_info: img_info.clone(),
-            },
-        );
+        self.img_allocs.insert(image.as_raw(), ImageAlloc {
+            mem_type_idx,
+            buddy_off: alloc_off + mem_block.off,
+            aligned_size,
+            img_info: img_info.clone(),
+        });
         image
     }
 
@@ -256,7 +253,7 @@ impl GpuAlloc {
                     &vk::BufferCreateInfo::default()
                         .size(size)
                         .usage(usage)
-                        .queue_family_indices(&[*QUEUE_FAMILY_INDEX])
+                        .queue_family_indices(&[queue_family_index()])
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
                     alloc_callbacks(),
                 )
@@ -272,18 +269,15 @@ impl GpuAlloc {
                 .bind_buffer_memory(buffer, mem_block.mem, alloc_off)
                 .unwrap()
         };
-        self.buf_allocs.insert(
-            buffer.as_raw(),
-            BufferAlloc {
-                mem_type_idx,
-                off: alloc_off,
-                buddy_off: mem_block.off + alloc_off,
-                size,
-                aligned_size,
-                usage,
-                mapped_range: (0, 0),
-            },
-        );
+        self.buf_allocs.insert(buffer.as_raw(), BufferAlloc {
+            mem_type_idx,
+            off: alloc_off,
+            buddy_off: mem_block.off + alloc_off,
+            size,
+            aligned_size,
+            usage,
+            mapped_range: (0, 0),
+        });
         buffer
     }
 

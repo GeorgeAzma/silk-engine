@@ -45,6 +45,6 @@ impl Rand for f32 {
     fn rand(mut self) -> Self {
         self *= 3141592653.0;
         let u32b = self.to_bits();
-        return (u32b.wrapping_mul(u32b).wrapping_mul(3141592653)) as f32 / (u32::MAX as f32);
+        (u32b.wrapping_mul(u32b).wrapping_mul(3141592653)) as f32 / (u32::MAX as f32)
     }
 }

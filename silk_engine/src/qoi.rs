@@ -31,7 +31,7 @@ const LUMA_MASK: u8 = 0b1000_0000;
 const RUN_MASK: u8 = 0b1100_0000;
 const MIN_QOI_LEN: usize = 4 /* magic */ + 4 /* width */ + 4 /* height */ + 1 /* channels */ + 1 /* colorspace */ + 8 /* padding */;
 
-struct Qoi;
+pub struct Qoi;
 impl Qoi {
     pub fn load(name: &str) -> ImageData {
         crate::scope_time!("QOI load");
@@ -137,7 +137,7 @@ impl Qoi {
                 },
             };
             for _ in 0..=run {
-                img[px_idx..px_idx + channels].copy_from_slice(&rgba[..channels]);
+                img[px_idx..][..channels].copy_from_slice(&rgba[..channels]);
                 px_idx += channels;
             }
             i += 1;
@@ -266,6 +266,36 @@ impl Qoi {
             .wrapping_add(rgba[2].wrapping_mul(7))
             .wrapping_add(rgba[3].wrapping_mul(11))
             % 64
+    }
+
+    pub fn flip_vert(img: &mut [u8], width: u32, height: u32, channels: usize) {
+        let height = height as usize;
+        let row_size = width as usize * channels;
+        for i in 0..height / 2 {
+            let top_row_start = i * row_size;
+            let bottom_row_start = (height - 1 - i) * row_size;
+            unsafe {
+                std::ptr::swap_nonoverlapping(
+                    img.as_mut_ptr().add(top_row_start),
+                    img.as_mut_ptr().add(bottom_row_start),
+                    row_size,
+                )
+            };
+        }
+    }
+
+    pub fn make4(rgb: &mut [u8]) -> Vec<u8> {
+        assert_eq!(rgb.len() % 3, 0, "Non-RGB image can't be made to RGBA");
+        let mut rgba = vec![0u8; rgb.len() / 3 * 4];
+        let rgb_chunks = unsafe { rgb.as_chunks_unchecked::<3>() };
+        let rgba_chunks = unsafe { rgba.as_chunks_unchecked_mut::<4>() };
+        for (rgb, rgba) in rgb_chunks.into_iter().zip(rgba_chunks.into_iter()) {
+            rgba[0] = rgb[0];
+            rgba[1] = rgb[1];
+            rgba[2] = rgb[2];
+            rgba[3] = 255;
+        }
+        rgba
     }
 }
 

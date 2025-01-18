@@ -11,14 +11,16 @@ static PIPELINE_EXEC_PROPS_LOADER: LazyLock<ash::khr::pipeline_executable_proper
 
 static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
     let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
-    unsafe {
+    let pipeline_cache = unsafe {
         gpu()
             .create_pipeline_cache(
                 &vk::PipelineCacheCreateInfo::default().initial_data(&cache),
                 alloc_callbacks(),
             )
             .unwrap_or_default()
-    }
+    };
+    debug_name("pipeline cache", pipeline_cache);
+    pipeline_cache
 });
 
 #[derive(Default, Clone)]

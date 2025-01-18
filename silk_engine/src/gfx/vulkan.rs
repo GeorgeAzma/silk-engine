@@ -22,14 +22,16 @@ pub(super) use pipeline_layout_manager::PipelineLayoutManager;
 mod config;
 pub mod pipeline;
 pub use pipeline::*;
-mod render_pass;
-pub(super) use render_pass::RenderPass;
 mod image;
 pub use image::*;
+mod cmd_manager;
+pub(super) use cmd_manager::CmdManager;
 
 use crate::err;
 #[cfg(debug_assertions)]
 use crate::log;
+
+use super::debug_name;
 
 #[cfg(debug_assertions)]
 struct UserData {
@@ -118,10 +120,12 @@ unsafe extern "system" fn alloc(
     sas: vk::SystemAllocationScope,
 ) -> *mut c_void {
     let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
-    let ptr = std::alloc::alloc_zeroed(layout);
-    let user_data = &mut *(user_data as *mut UserData);
-    user_data.log_alloc(layout, sas, ptr);
-    ptr as *mut _
+    unsafe {
+        let ptr = std::alloc::alloc_zeroed(layout);
+        let user_data = &mut *(user_data as *mut UserData);
+        user_data.log_alloc(layout, sas, ptr);
+        ptr as *mut _
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -129,9 +133,11 @@ unsafe extern "system" fn free(user_data: *mut c_void, ptr: *mut c_void) {
     if ptr.is_null() {
         return;
     }
-    let user_data = &mut *(user_data as *mut UserData);
-    let layout = user_data.log_free(ptr);
-    std::alloc::dealloc(ptr as *mut _, layout)
+    unsafe {
+        let user_data = &mut *(user_data as *mut UserData);
+        let layout = user_data.log_free(ptr);
+        std::alloc::dealloc(ptr as *mut _, layout)
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -143,12 +149,14 @@ unsafe extern "system" fn realloc(
     _sas: vk::SystemAllocationScope,
 ) -> *mut c_void {
     let layout = std::alloc::Layout::from_size_align(size, alignment).unwrap();
-    let new_ptr = std::alloc::realloc(ptr as *mut _, layout, size);
-    if new_ptr.is_null() {
-        std::alloc::dealloc(ptr as *mut _, layout);
-        return std::ptr::null_mut();
+    unsafe {
+        let new_ptr = std::alloc::realloc(ptr as *mut _, layout, size);
+        if new_ptr.is_null() {
+            std::alloc::dealloc(ptr as *mut _, layout);
+            return std::ptr::null_mut();
+        }
+        new_ptr as *mut _
     }
-    new_ptr as *mut _
 }
 
 #[cfg(debug_assertions)]
@@ -222,8 +230,11 @@ static QUEUE_FAMILY_INDEX: LazyLock<u32> = LazyLock::new(|| {
         .unwrap_or_default() as u32
 });
 
-static QUEUE: LazyLock<vk::Queue> =
-    LazyLock::new(|| unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) });
+static QUEUE: LazyLock<vk::Queue> = LazyLock::new(|| {
+    let queue = unsafe { gpu().get_device_queue(*QUEUE_FAMILY_INDEX, 0) };
+    debug_name("main queue", queue);
+    queue
+});
 
 pub fn gpu_idle() {
     crate::scope_time!("GPU idle");

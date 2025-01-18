@@ -14,7 +14,7 @@ pub struct ImageInfo {
     pub format: vk::Format,
     pub flags: vk::ImageCreateFlags,
     pub usage: vk::ImageUsageFlags,
-    pub init_layout: vk::ImageLayout,
+    pub layout: vk::ImageLayout,
 }
 
 impl Default for ImageInfo {
@@ -35,7 +35,7 @@ impl ImageInfo {
             format: vk::Format::B8G8R8A8_UNORM,
             flags: vk::ImageCreateFlags::empty(),
             usage: vk::ImageUsageFlags::empty(),
-            init_layout: vk::ImageLayout::UNDEFINED,
+            layout: vk::ImageLayout::UNDEFINED,
         }
     }
 
@@ -94,7 +94,7 @@ impl ImageInfo {
     }
 
     pub fn layout(mut self, layout: vk::ImageLayout) -> Self {
-        self.init_layout = layout;
+        self.layout = layout;
         self
     }
 
@@ -119,7 +119,7 @@ impl ImageInfo {
                         .format(self.format)
                         .flags(self.flags)
                         .usage(self.usage)
-                        .initial_layout(self.init_layout)
+                        .initial_layout(self.layout)
                         .queue_family_indices(&[queue_family_index()])
                         .sharing_mode(vk::SharingMode::EXCLUSIVE),
                     alloc_callbacks(),
