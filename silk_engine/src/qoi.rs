@@ -268,20 +268,21 @@ impl Qoi {
             % 64
     }
 
-    pub fn flip_vert(img: &mut [u8], width: u32, height: u32, channels: usize) {
-        let height = height as usize;
-        let row_size = width as usize * channels;
+    pub fn flip_vert(img_data: &mut ImageData) -> &mut ImageData {
+        let height = img_data.height as usize;
+        let row_size = img_data.width as usize * img_data.channels as usize;
         for i in 0..height / 2 {
             let top_row_start = i * row_size;
             let bottom_row_start = (height - 1 - i) * row_size;
             unsafe {
                 std::ptr::swap_nonoverlapping(
-                    img.as_mut_ptr().add(top_row_start),
-                    img.as_mut_ptr().add(bottom_row_start),
+                    img_data.img.as_mut_ptr().add(top_row_start),
+                    img_data.img.as_mut_ptr().add(bottom_row_start),
                     row_size,
                 )
             };
         }
+        img_data
     }
 
     pub fn make4(rgb: &mut [u8]) -> Vec<u8> {

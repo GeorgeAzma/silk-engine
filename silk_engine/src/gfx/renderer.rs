@@ -5,7 +5,7 @@ use std::{
 
 use ash::vk;
 
-use crate::{Tracked, WindowResize};
+use crate::{Qoi, Tracked, WindowResize};
 
 use super::{
     GraphicsPipelineInfo, ImageInfo, RenderCtx, Unit,
@@ -220,6 +220,17 @@ impl Renderer {
         } else {
             panic!("failed to add img to atlas, out of space")
         }
+    }
+
+    pub fn load_img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
+        let mut img_data = Qoi::load(name);
+        let img_data = Qoi::flip_vert(&mut img_data);
+        if img_data.channels != 4 {
+            img_data.img = Qoi::make4(&mut img_data.img);
+        }
+        let tracked_img_data = self.add_img(name, img_data.width, img_data.height);
+        tracked_img_data.copy_from_slice(&img_data.img);
+        tracked_img_data
     }
 
     pub fn img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
