@@ -290,7 +290,7 @@ impl Qoi {
         let mut rgba = vec![0u8; rgb.len() / 3 * 4];
         let rgb_chunks = unsafe { rgb.as_chunks_unchecked::<3>() };
         let rgba_chunks = unsafe { rgba.as_chunks_unchecked_mut::<4>() };
-        for (rgb, rgba) in rgb_chunks.into_iter().zip(rgba_chunks.into_iter()) {
+        for (rgb, rgba) in rgb_chunks.iter().zip(rgba_chunks.iter_mut()) {
             rgba[0] = rgb[0];
             rgba[1] = rgb[1];
             rgba[2] = rgb[2];

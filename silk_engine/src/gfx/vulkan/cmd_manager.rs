@@ -1,3 +1,5 @@
+use std::ptr::null;
+
 use ash::vk;
 
 use super::{CmdAlloc, alloc_callbacks, gpu, queue};
@@ -80,11 +82,21 @@ impl CmdManager {
             gpu()
                 .queue_submit(
                     queue(),
-                    &[vk::SubmitInfo::default()
-                        .command_buffers(&[cmd])
-                        .wait_semaphores(waits)
-                        .signal_semaphores(signals)
-                        .wait_dst_stage_mask(wait_dst_stage_mask)],
+                    &[vk::SubmitInfo {
+                        wait_semaphore_count: waits.len() as u32,
+                        p_wait_semaphores: waits
+                            .is_empty()
+                            .then_some(null())
+                            .unwrap_or(waits.as_ptr()),
+                        signal_semaphore_count: signals.len() as u32,
+                        p_signal_semaphores: signals
+                            .is_empty()
+                            .then_some(null())
+                            .unwrap_or(signals.as_ptr()),
+                        ..Default::default()
+                    }
+                    .command_buffers(&[cmd])
+                    .wait_dst_stage_mask(wait_dst_stage_mask)],
                     fence,
                 )
                 .unwrap()

@@ -392,7 +392,6 @@ impl Renderer {
                     buf_height: h as u32,
                 };
                 off += 4 * buf_width as vk::DeviceSize * h as vk::DeviceSize;
-                crate::log!("Img => Atlas Copy {w}x{h} ({x}, {y})");
                 i.0.reset();
                 (copy, &i.0)
             })

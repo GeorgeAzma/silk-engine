@@ -95,7 +95,7 @@ impl MemPool {
         if !self.mems.is_empty() {
             return;
         }
-        const BLOCK_SIZE: vk::DeviceSize = 1024 * 1024 * 32; // 1 MiB
+        const BLOCK_SIZE: vk::DeviceSize = 64 * (1 << 20); // 64 MiB
         let block_size = BLOCK_SIZE.next_power_of_two();
         self.mems = vec![MemBlock::new(0, block_size, self.mem_type_idx)];
         self.buddy = BuddyAlloc::new(block_size as usize);
@@ -170,8 +170,6 @@ struct ImageAlloc {
     mem_type_idx: u32,
     buddy_off: vk::DeviceSize,
     aligned_size: vk::DeviceSize,
-    #[allow(unused)] // will use later
-    img_info: ImageInfo,
 }
 
 pub struct GpuAlloc {
@@ -220,7 +218,6 @@ impl GpuAlloc {
             mem_type_idx,
             buddy_off: alloc_off + mem_block.off,
             aligned_size,
-            img_info: img_info.clone(),
         });
         image
     }

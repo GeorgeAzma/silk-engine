@@ -41,6 +41,15 @@ impl Rand for u64 {
     }
 }
 
+impl Rand for usize {
+    fn rand(self) -> Self {
+        let mut x = self.wrapping_add(0x9E3779B97F4A7C15);
+        x = (x ^ (x >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        x = (x ^ (x >> 27)).wrapping_mul(0x94D049BB133111EB);
+        x ^ (x >> 31)
+    }
+}
+
 impl Rand for f32 {
     fn rand(mut self) -> Self {
         self *= 3141592653.0;

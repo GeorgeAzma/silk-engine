@@ -1,6 +1,6 @@
 use silk_engine::*;
 
-pub(crate) struct MyApp<'a> {
+pub struct MyApp<'a> {
     app: &'a mut AppContext<Self>,
 }
 
@@ -12,11 +12,7 @@ impl App for MyApp<'_> {
 
     fn update(&mut self) {}
 
-    fn render(&mut self) {
-        // let mut ctx = self.app.ctx();
-    }
-
-    fn event(&mut self, _e: Event) {}
+    fn render(&mut self, gfx: &mut Renderer) {}
 }
 
 fn main() {
