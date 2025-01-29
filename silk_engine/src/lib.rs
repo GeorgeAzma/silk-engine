@@ -1,4 +1,10 @@
-#![feature(mapped_lock_guards, once_cell_get_mut, slice_as_chunks)]
+#![feature(
+    mapped_lock_guards,
+    once_cell_get_mut,
+    slice_as_chunks,
+    slice_as_array,
+    str_from_raw_parts
+)]
 use std::any::TypeId;
 pub use std::{
     collections::{HashMap, HashSet},
@@ -42,20 +48,13 @@ pub const RES_PATH: &str = "res";
 #[cfg(test)]
 pub const RES_PATH: &str = "../target/test_res";
 
-#[cfg(not(debug_assertions))]
-pub static INIT_CACHE_PATH: LazyLock<()> = LazyLock::new(|| {
-    fs::create_dir_all(format!("{RES_PATH}/cache/shaders")).unwrap_or_default();
-});
-
-pub static INIT_IMG_PATH: LazyLock<()> = LazyLock::new(|| {
-    fs::create_dir_all(format!("{RES_PATH}/images")).unwrap_or_default();
-});
-
 pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
-    fs::create_dir(RES_PATH).unwrap_or_default();
-    *INIT_IMG_PATH;
+    fs::create_dir_all(RES_PATH).unwrap_or_default();
+    fs::create_dir_all(format!("{RES_PATH}/shaders")).unwrap_or_default();
+    fs::create_dir_all(format!("{RES_PATH}/images")).unwrap_or_default();
+    fs::create_dir_all(format!("{RES_PATH}/fonts")).unwrap_or_default();
     #[cfg(not(debug_assertions))]
-    *INIT_CACHE_PATH;
+    fs::create_dir_all(format!("{RES_PATH}/cache/shaders")).unwrap_or_default();
 });
 
 pub trait App: Sized {
@@ -120,8 +119,8 @@ impl<A: App> AppContext<A> {
                     .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
                 &[],
             );
-            ctx.add_desc_set("rendered image ds", "fxaa", 0);
-            ctx.write_ds_sampler("rendered image ds", "linear", 1);
+            ctx.add_desc_set("fxaa ds", "fxaa", 0);
+            ctx.write_ds_sampler("fxaa ds", "linear", 1);
         }
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
@@ -168,6 +167,8 @@ impl<A: App> AppContext<A> {
         if self.width != 0 && self.height != 0 {
             scope_time!("render {}", self.frame; self.frame < 4);
 
+            self.ctx().wait_prev_frame();
+
             self.my_app.as_mut().unwrap().render(&mut self.renderer);
             self.renderer.flush();
 
@@ -177,7 +178,7 @@ impl<A: App> AppContext<A> {
             // make sure rendered_img is ready to be written in fs color output
             self.ctx().set_img_layout(
                 "rendered image",
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                ImgLayout::COLOR,
                 vk::PipelineStageFlags2::TOP_OF_PIPE,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags2::NONE,
@@ -186,15 +187,23 @@ impl<A: App> AppContext<A> {
 
             // Render (write rendered_img color output at fs shader)
             let (width, height) = (self.width, self.height);
-            self.ctx()
-                .begin_render(width, height, "rendered image view", "");
+            self.ctx().begin_render(
+                width,
+                height,
+                "rendered image view",
+                if MSAA > 1 {
+                    "sampled rendered image view"
+                } else {
+                    ""
+                },
+            );
             self.renderer.render();
             self.ctx().end_render();
 
             // make sure rendered_img color output is written to read in fxaa fs shader
             self.ctx().set_img_layout(
                 "rendered image",
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                ImgLayout::SHADER_READ,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags2::FRAGMENT_SHADER,
                 vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -204,7 +213,7 @@ impl<A: App> AppContext<A> {
             // make sure fxaa_img is ready to be written in fs color output
             self.ctx().set_img_layout(
                 "fxaa image",
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                ImgLayout::COLOR,
                 vk::PipelineStageFlags2::TOP_OF_PIPE,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags2::NONE,
@@ -215,14 +224,14 @@ impl<A: App> AppContext<A> {
             self.ctx()
                 .begin_render(width, height, "fxaa image view", "");
             self.ctx().bind_pipeline("fxaa");
-            self.ctx().bind_desc_set("rendered image ds");
+            self.ctx().bind_ds("fxaa ds");
             self.ctx().draw(3, 1);
             self.ctx().end_render();
 
             // make sure fxaa_img color output is written
             self.ctx().set_img_layout(
                 "fxaa image",
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                ImgLayout::SRC,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags2::BLIT,
                 vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -233,7 +242,7 @@ impl<A: App> AppContext<A> {
             let swap_img = self.ctx().cur_img();
             self.ctx().set_img_layout(
                 &swap_img,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                ImgLayout::DST,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::PipelineStageFlags2::BLIT,
                 vk::AccessFlags2::NONE,
@@ -246,7 +255,7 @@ impl<A: App> AppContext<A> {
             // make sure swap_img is ready for presenting
             self.ctx().set_img_layout(
                 &swap_img,
-                vk::ImageLayout::PRESENT_SRC_KHR,
+                ImgLayout::PRESENT,
                 vk::PipelineStageFlags2::BLIT,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
                 vk::AccessFlags2::TRANSFER_WRITE,
@@ -280,36 +289,46 @@ impl<A: App> AppContext<A> {
         if width != 0 && height != 0 {
             let mut ctx = self.ctx.lock().unwrap();
             // resize rendered image
-            ctx.try_remove_img("rendered image").unwrap_or_default();
+            queue_idle();
+            ctx.try_remove_img("rendered image");
             ctx.add_img(
                 "rendered image",
                 &ImageInfo::new()
                     .width(width)
                     .height(height)
                     .format(self.surface_format)
-                    .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED),
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    .usage(ImgUsage::COLOR | ImgUsage::SAMPLED),
+                MemProp::GPU,
             );
             ctx.add_img_view("rendered image view", "rendered image");
+
+            if MSAA > 1 {
+                ctx.try_remove_img("sampled rendered image");
+                ctx.add_img(
+                    "sampled rendered image",
+                    &ImageInfo::new()
+                        .width(width)
+                        .height(height)
+                        .samples(MSAA)
+                        .format(self.surface_format)
+                        .usage(ImgUsage::COLOR | ImgUsage::TRANSIENT),
+                    MemProp::GPU,
+                );
+                ctx.add_img_view("sampled rendered image view", "sampled rendered image");
+            }
+
             // rewrite rendered ds image
-            ctx.write_ds_img(
-                "rendered image ds",
-                "rendered image view",
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                0,
-            );
+            ctx.write_ds_img("fxaa ds", "rendered image view", ImgLayout::SHADER_READ, 0);
             // resize fxaa image
-            ctx.try_remove_img("fxaa image").unwrap_or_default();
+            ctx.try_remove_img("fxaa image");
             ctx.add_img(
                 "fxaa image",
                 &ImageInfo::new()
                     .width(width)
                     .height(height)
                     .format(self.surface_format)
-                    .usage(
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-                    ),
-                vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                    .usage(ImgUsage::COLOR | ImgUsage::SRC),
+                MemProp::GPU,
             );
             ctx.add_img_view("fxaa image view", "fxaa image");
         }
@@ -436,7 +455,7 @@ static PANIC_HOOK: LazyLock<()> = LazyLock::new(|| {
             println!(
                 "panicked: \x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m",
                 s,
-                crate::backtrace(2)
+                crate::backtrace(1)
             );
         };
         if let Some(s) = panic_info.payload().downcast_ref::<&str>() {

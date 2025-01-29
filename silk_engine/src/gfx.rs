@@ -8,4 +8,6 @@ pub use renderer::*;
 mod unit;
 pub use unit::Unit;
 pub use unit::Unit::*;
-mod packer;
+mod font;
+pub use font::Font;
+pub mod packer;

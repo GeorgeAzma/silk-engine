@@ -1,6 +1,6 @@
 use crate::{alloc_callbacks, queue_family_index, samples_u32_to_vk};
 
-use super::gpu;
+use super::{ImgLayout, gpu};
 use ash::vk;
 
 #[derive(Clone)]
@@ -35,7 +35,7 @@ impl ImageInfo {
             format: vk::Format::B8G8R8A8_UNORM,
             flags: vk::ImageCreateFlags::empty(),
             usage: vk::ImageUsageFlags::empty(),
-            layout: vk::ImageLayout::UNDEFINED,
+            layout: ImgLayout::UNDEFINED,
         }
     }
 

@@ -1,6 +1,5 @@
 # Fixes
 - app slowing down overtime when using validation layers
-- shader derivative stroke bug
 
 # Functionality
 - font loading

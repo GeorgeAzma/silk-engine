@@ -50,10 +50,48 @@ impl Rand for usize {
     }
 }
 
+impl Rand for i8 {
+    fn rand(self) -> Self {
+        (self as u8).rand() as Self
+    }
+}
+
+impl Rand for i16 {
+    fn rand(self) -> Self {
+        (self as u16).rand() as Self
+    }
+}
+
+impl Rand for i32 {
+    fn rand(self) -> Self {
+        (self as u32).rand() as Self
+    }
+}
+
+impl Rand for i64 {
+    fn rand(self) -> Self {
+        (self as u64).rand() as Self
+    }
+}
+
+impl Rand for isize {
+    fn rand(self) -> Self {
+        (self as usize).rand() as Self
+    }
+}
+
 impl Rand for f32 {
     fn rand(mut self) -> Self {
         self *= 3141592653.0;
         let u32b = self.to_bits();
         (u32b.wrapping_mul(u32b).wrapping_mul(3141592653)) as f32 / (u32::MAX as f32)
+    }
+}
+
+impl Rand for f64 {
+    fn rand(mut self) -> Self {
+        self *= 3141592653589793238.0;
+        let u64b = self.to_bits();
+        (u64b.wrapping_mul(u64b).wrapping_mul(3141592653589793238)) as f64 / (u64::MAX as f64)
     }
 }

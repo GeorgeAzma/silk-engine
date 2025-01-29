@@ -13,7 +13,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4f
 @group(0) @binding(1) var img_sampler: sampler;
 
 fn luma(col: vec3f) -> f32 {
-    return dot(col, vec3f(0.2126, 0.7152, 0.0722));
+    return dot(col, vec3f(0.299, 0.587, 0.114));
 }
 
 fn sample(coord: vec2i) -> vec4f {
@@ -24,8 +24,8 @@ fn sample_luma(coord: vec2i) -> f32 {
     return luma(sample(coord).rgb);
 }
 
-const MIN_THRESHOLD: f32 = 0.0312;
-const MAX_THRESHOLD: f32 = 0.125;
+const MIN_THRESHOLD: f32 = 1.0 / 24.0;
+const MAX_THRESHOLD: f32 = 1.0 / 12.0;
 const ITERS: u32 = 8;
 
 @fragment
@@ -33,8 +33,11 @@ fn fs_main(@builtin(position) coord: vec4f) -> @location(0) vec4f {
     let p = vec2i(coord.xy);
     
     let col = sample(p);
+    if true {
+        return col;
+    }
     let c = luma(col.rgb);
-    
+
     let n = sample_luma(p + vec2i( 0,  1));
     let s = sample_luma(p + vec2i( 0, -1));
     let e = sample_luma(p + vec2i( 1,  0));
@@ -81,43 +84,33 @@ fn fs_main(@builtin(position) coord: vec4f) -> @location(0) vec4f {
     var end2 = luma(textureSample(img, img_sampler, uv2).rgb) - avg;
     var reached1 = abs(end1) >= grad_scl;
     var reached2 = abs(end2) >= grad_scl;
-    uv1 -= f32(!reached1) * off;
-    uv2 += f32(!reached2) * off;
-    if !(reached1 && reached2) {
-        for (var i = 0u; i < ITERS && !(reached1 && reached2); i += 1u) {
-            if !reached1 {
-                end1 = luma(textureSample(img, img_sampler, uv1).rgb) - avg;
-                reached1 = abs(end1) >= grad_scl;
-                if !reached1 {
-                    uv1 -= off;
-                }
-            } 
-            if !reached2 {
-                end2 = luma(textureSample(img, img_sampler, uv2).rgb) - avg;
-                reached2 = abs(end2) >= grad_scl;
-                if !reached2 {
-                    uv2 += off;
-                }
-            }
+    for (var i = 0u; i < ITERS && !(reached1 && reached2); i += 1u) {
+        if !reached1 {
+            uv1 -= off;
+            end1 = luma(textureSample(img, img_sampler, uv1).rgb) - avg;
+            reached1 = abs(end1) >= grad_scl;
+        }
+        if !reached2 {
+            uv2 += off;
+            end2 = luma(textureSample(img, img_sampler, uv2).rgb) - avg;
+            reached2 = abs(end2) >= grad_scl;
         }
     }
-    
     let d = select(vec2f(uv.y - uv1.y, uv2.y - uv.y), 
                    vec2f(uv.x - uv1.x, uv2.x - uv.x), is_horz);
     let px_off = 0.5 - min(d.x, d.y) / (d.x + d.y);
     let corr_var = (select(end2, end1, d.x < d.y) < 0.0) != (c < avg);
     var final_off = px_off * f32(corr_var);
     
-    let luma_avg = (2 * (n + s + w + e) + nw + ne + sw + se) / 12;
-    let subpx_off1 = smoothstep(0.0, 1.0, abs(luma_avg - c) / rng);
-    let subpx_off = subpx_off1 * subpx_off1 * 0.75;
-    final_off = max(final_off, subpx_off);
+    // let luma_avg = (2 * (n + s + w + e) + nw + ne + sw + se) / 12;
+    // let subpx_off1 = smoothstep(0.0, 1.0, abs(luma_avg - c) / rng);
+    // let subpx_off = subpx_off1 * subpx_off1 * 0.75;
+    final_off = max(final_off, /*subpx_off*/ 0.0);
     var final_uv = uv;
     if is_horz  {
         final_uv.y += final_off * step;
     } else {
         final_uv.x += final_off * step;
     }
-    let final_col = textureSample(img, img_sampler, final_uv);
-    return final_col;
+    return textureSample(img, img_sampler, final_uv);
 }

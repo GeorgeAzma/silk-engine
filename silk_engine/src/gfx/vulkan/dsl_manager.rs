@@ -7,7 +7,7 @@ use std::ptr::null;
 #[derive(Clone, Debug)]
 pub struct DSLBinding {
     pub binding: u32,
-    pub descriptor_type: vk::DescriptorType,
+    pub desc_ty: vk::DescriptorType,
     pub descriptor_count: u32,
     pub stage_flags: vk::ShaderStageFlags,
 }
@@ -16,7 +16,7 @@ impl From<&DSLBinding> for vk::DescriptorSetLayoutBinding<'_> {
     fn from(value: &DSLBinding) -> Self {
         vk::DescriptorSetLayoutBinding {
             binding: value.binding,
-            descriptor_type: value.descriptor_type,
+            descriptor_type: value.desc_ty,
             descriptor_count: value.descriptor_count,
             stage_flags: value.stage_flags,
             p_immutable_samplers: null(),
@@ -67,7 +67,7 @@ impl Hash for DSLBindings {
         let mut combined_hash = 0;
         for dslb in self.0.iter() {
             combined_hash ^= dslb.binding as u64
-                | ((dslb.descriptor_type.as_raw() as u64) << 6)
+                | ((dslb.desc_ty.as_raw() as u64) << 6)
                 | ((dslb.descriptor_count as u64) << 12)
                 | ((dslb.stage_flags.as_raw() as u64) << 18);
         }
@@ -79,7 +79,7 @@ impl PartialEq for DSLBindings {
     fn eq(&self, other: &Self) -> bool {
         for (a, b) in self.0.iter().zip(other.0.iter()) {
             if !(a.binding == b.binding
-                && a.descriptor_type == b.descriptor_type
+                && a.desc_ty == b.desc_ty
                 && a.descriptor_count == b.descriptor_count
                 && a.stage_flags == b.stage_flags)
             {

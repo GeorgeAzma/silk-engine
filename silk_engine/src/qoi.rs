@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use crate::RES_PATH;
 
 pub struct ImageData {
@@ -326,7 +324,7 @@ mod test {
 
     #[test]
     fn save_load_test() {
-        *crate::INIT_IMG_PATH;
+        *crate::INIT_PATHS;
         let img = vec![
             155, 000, 000, /**/ 155, 000, 000, // run len + rgb
             000, 200, 000, /**/ 250, 168, 250, // luma

@@ -38,10 +38,82 @@ macro_rules! expose {
 
 pub fn as_slice<T: ?Sized, U>(p: &T) -> &[U] {
     unsafe {
-        std::slice::from_raw_parts(
-            (p as *const T) as *const U,
-            std::mem::size_of_val(p) / std::mem::size_of::<U>(),
-        )
+        std::slice::from_raw_parts((p as *const T) as *const U, size_of_val(p) / size_of::<U>())
+    }
+}
+
+pub fn from_slice<T, U>(p: &[U]) -> &T {
+    assert_eq!(
+        size_of::<T>(),
+        size_of_val(p),
+        "slice must have same size as struct for casting"
+    );
+    unsafe { &*(p.as_ptr() as *const T) }
+}
+
+pub fn from_bytes<T>(p: &[u8]) -> &T {
+    from_slice::<T, u8>(p)
+}
+
+pub struct Reader<'a, const BE: bool = false> {
+    idx: usize,
+    bytes: &'a [u8],
+}
+
+impl<'a, const BE: bool> Reader<'a, BE> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { idx: 0, bytes }
+    }
+
+    pub fn idx(&self) -> usize {
+        self.idx
+    }
+
+    pub fn goto(&mut self, idx: usize) {
+        self.idx = idx;
+    }
+
+    pub fn skip(&mut self, bytes: usize) {
+        self.idx += bytes;
+    }
+
+    pub fn read_arr<const N: usize>(&mut self) -> [u8; N] {
+        let array: [u8; N] = *self.bytes[self.idx..][..N].as_array::<N>().unwrap();
+        self.idx += N;
+        array
+    }
+
+    pub fn read(&mut self) -> u8 {
+        let byte = self.bytes[self.idx];
+        self.idx += 1;
+        byte
+    }
+
+    pub fn read16(&mut self) -> u16 {
+        let bytes = self.read_arr::<2>();
+        if BE {
+            u16::from_be_bytes(bytes)
+        } else {
+            u16::from_le_bytes(bytes)
+        }
+    }
+
+    pub fn read32(&mut self) -> u32 {
+        let bytes = self.read_arr::<4>();
+        if BE {
+            u32::from_be_bytes(bytes)
+        } else {
+            u32::from_le_bytes(bytes)
+        }
+    }
+
+    pub fn read64(&mut self) -> u64 {
+        let bytes = self.read_arr::<8>();
+        if BE {
+            u64::from_be_bytes(bytes)
+        } else {
+            u64::from_le_bytes(bytes)
+        }
     }
 }
 
@@ -213,5 +285,26 @@ impl<T> DerefMut for Tracked<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.dirty = true;
         &mut self.data
+    }
+}
+
+pub trait Lerp {
+    fn lerp(self, b: Self, k: f32) -> Self;
+}
+
+impl Lerp for f32 {
+    fn lerp(self, b: f32, k: f32) -> f32 {
+        self + (b - self) * k
+    }
+}
+
+pub trait Bezier {
+    fn bezier(self, b: f32, c: f32, t: f32) -> Self;
+}
+
+impl Bezier for f32 {
+    fn bezier(self, b: f32, c: f32, t: f32) -> f32 {
+        let a = self;
+        t * (t * (c - 2.0 * b + a) + 2.0 * (b - a)) + a
     }
 }

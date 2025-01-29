@@ -6,7 +6,7 @@ struct Vertex {
     @location(4) rotation: f32,
     @location(5) stroke_width: f32,
     @location(6) stroke_color: u32,
-    @location(7) tex_coord: vec2u,
+    @location(7) tex_coord: vec2u, // packed whxy
 }
 
 struct VSOut {
@@ -36,6 +36,7 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     out.stroke_width = in.stroke_width;
     out.stroke_color = unpack4x8unorm(in.stroke_color);
     out.scale = in.scale * res;
+    out.scale /= min(out.scale.x, out.scale.y);
     if in.tex_coord.x > 0 {
         out.tex_coord = vec4u(in.tex_coord.y >> 16, in.tex_coord.y, in.tex_coord.x >> 48, in.tex_coord.x >> 32) & vec4u(0xFFFF);
     } else {
@@ -46,26 +47,35 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
 
 fn elongated_rrect(p: vec2f, r: f32, h: vec2f) -> f32 { 
 	let q = abs(p) - h; 
-	let a = max(q, vec2f(0.0)) - 1.0 + r;
+	let a = max(q, vec2f(0)) - 1.0 + r;
 	return length(max(a, vec2f(0))) + min(max(a.x, a.y), 0.0) - r + min(max(q.x, q.y), 0.0); 
 }
 
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
-    var rr = 0.0;
+    // problems (hard):
+    // - rounded rects have slight transparent edge
+    // - edge flickering when smaller than couple pixels
+    var r = 0.0;
     if in.roundness < 1.0 {
-        let scl = in.scale / min(in.scale.x, in.scale.y);
-        rr = elongated_rrect(in.uv * scl, in.roundness, scl - 1);
+        r = elongated_rrect(in.uv * in.scale, in.roundness, in.scale - 1);
     } else {
-        rr = length(in.uv) - 1.0;
+        r = length(in.uv) - 1.0;
     }
-    let edge = step(rr, 0.0);
-    let strk = step(rr + in.stroke_width, 0.0);
-    var col = mix(in.stroke_color, in.color, strk);
+
+    var d = max(abs(dpdx(r)), abs(dpdy(r)));
+    r -= d * 0.5;
+    d *= 1.5;
+    let edge = clamp(1.0 - in.roundness * 0.75 - r / d, 0.0, 1.0);
+    let strk = clamp((r + in.stroke_width) / d, 0.0, 1.0);
+    var col = mix(in.color, in.stroke_color, strk);
     col.a *= edge;
     if in.tex_coord.x != ~0u {
         let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
         col *= textureLoad(atlas, p, 0);
+    }
+    if col.a < 0.001 {
+        discard;
     }
     return col;
 }

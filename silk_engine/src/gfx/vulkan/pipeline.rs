@@ -23,7 +23,7 @@ static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
     pipeline_cache
 });
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct PipelineStageInfo {
     pub stage: vk::ShaderStageFlags,
     pub module: vk::ShaderModule,
@@ -51,7 +51,7 @@ pub enum Enable {
     DepthWrite,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GraphicsPipelineInfo {
     pub stages: Vec<PipelineStageInfo>,
     pub vertex_input_binding_descriptions: Vec<vk::VertexInputBindingDescription>,
@@ -402,22 +402,36 @@ impl GraphicsPipelineInfo {
     }
 }
 
-pub fn create_compute_pipeline(shader_name: &str) -> vk::Pipeline {
-    let shader = Shader::new(shader_name);
-    let module = shader.create_module();
+pub fn create_compute(
+    module: vk::ShaderModule,
+    layout: vk::PipelineLayout,
+    entry_name: &str,
+) -> vk::Pipeline {
+    let entry_name_nul = if entry_name.ends_with('\0') {
+        entry_name.to_string()
+    } else {
+        format!("{entry_name}\0")
+    };
     let compute_pipeline = unsafe {
         gpu()
             .create_compute_pipelines(
                 *PIPELINE_CACHE,
-                &[vk::ComputePipelineCreateInfo::default().stage(
-                    vk::PipelineShaderStageCreateInfo::default()
-                        .stage(vk::ShaderStageFlags::COMPUTE)
-                        .name(std::ffi::CStr::from_bytes_with_nul_unchecked(
-                            shader_name.as_bytes(),
-                        ))
-                        .module(module)
-                        .specialization_info(&vk::SpecializationInfo::default()),
-                )],
+                &[vk::ComputePipelineCreateInfo::default()
+                    .stage(
+                        vk::PipelineShaderStageCreateInfo::default()
+                            .stage(vk::ShaderStageFlags::COMPUTE)
+                            .name(std::ffi::CStr::from_bytes_with_nul_unchecked(
+                                entry_name_nul.as_bytes(),
+                            ))
+                            .module(module)
+                            .specialization_info(&vk::SpecializationInfo::default()),
+                    )
+                    .layout(layout)
+                    .flags(if cfg!(debug_assertions) {
+                        vk::PipelineCreateFlags::CAPTURE_STATISTICS_KHR
+                    } else {
+                        vk::PipelineCreateFlags::empty()
+                    })],
                 alloc_callbacks(),
             )
             .unwrap_or_default()

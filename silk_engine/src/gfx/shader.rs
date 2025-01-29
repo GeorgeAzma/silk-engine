@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use super::{
     alloc_callbacks,
-    vulkan::{pipeline::PipelineStageInfo, DSLBinding},
+    vulkan::{DSLBinding, pipeline::PipelineStageInfo},
 };
-use crate::{format_size, gpu, log, RES_PATH};
+use crate::{RES_PATH, format_size, gpu, log};
 use ash::vk;
 use naga::Module;
 
@@ -57,7 +57,7 @@ impl Shader {
 
             // write spirv cache
             #[cfg(not(debug_assertions))]
-            *crate::INIT_CACHE_PATH;
+            *crate::INIT_PATHS;
             #[cfg(not(debug_assertions))]
             std::fs::write(&shader_cache_path(name), crate::util::as_slice(&spirv[..])).unwrap();
 
@@ -140,7 +140,7 @@ impl Shader {
                     };
                     let binding = DSLBinding {
                         binding,
-                        descriptor_type: desc_type,
+                        desc_ty: desc_type,
                         descriptor_count: array_size,
                         stage_flags: *resource_access_stages
                             .get(&resource_key)
@@ -219,16 +219,27 @@ impl Shader {
                 location_binding.insert(*l, i as u32);
             });
         });
-        fn calc_vert_attrib_descs(
-            binding: Option<&naga::Binding>,
-            ty: &naga::TypeInner,
-            module: &naga::Module,
-            binding_offset: &mut [u32],
-            vert_attrib_descs: &mut Vec<vk::VertexInputAttributeDescription>,
-            location_binding: &HashMap<u32, u32>,
-            name: &str,
+        struct Data<'a> {
+            binding: Option<&'a naga::Binding>,
+            ty: &'a naga::TypeInner,
+            module: &'a naga::Module,
+            binding_offset: &'a mut [u32],
+            vert_attrib_descs: &'a mut Vec<vk::VertexInputAttributeDescription>,
+            location_binding: &'a HashMap<u32, u32>,
+            name: &'a str,
             auto_location_binding: Option<u32>,
-        ) {
+        }
+        fn calc_vert_attrib_descs(data: Data) {
+            let Data {
+                binding,
+                ty,
+                module,
+                binding_offset,
+                vert_attrib_descs,
+                location_binding,
+                name,
+                auto_location_binding,
+            } = data;
             let mut push_attrib = |ty: &naga::TypeInner, location: u32| {
                 let format = type_to_vk(ty);
                 let binding = location_binding
@@ -255,16 +266,16 @@ impl Shader {
                 None => {
                     if let naga::TypeInner::Struct { members, .. } = ty {
                         for member in members {
-                            calc_vert_attrib_descs(
-                                member.binding.as_ref(),
-                                &module.types[member.ty].inner,
+                            calc_vert_attrib_descs(Data {
+                                binding: member.binding.as_ref(),
+                                ty: &module.types[member.ty].inner,
                                 module,
                                 binding_offset,
                                 vert_attrib_descs,
                                 location_binding,
-                                &member.name.clone().unwrap_or_default(),
+                                name: &member.name.clone().unwrap_or_default(),
                                 auto_location_binding,
-                            );
+                            });
                         }
                     }
                 }
@@ -278,16 +289,16 @@ impl Shader {
                 continue;
             }
             for arg in entry_point.function.arguments.iter() {
-                calc_vert_attrib_descs(
-                    arg.binding.as_ref(),
-                    &self.ir_module.types[arg.ty].inner,
-                    &self.ir_module,
-                    &mut binding_offset,
-                    &mut vert_attrib_descs,
-                    &location_binding,
-                    &arg.name.clone().unwrap_or_default(),
+                calc_vert_attrib_descs(Data {
+                    binding: arg.binding.as_ref(),
+                    ty: &self.ir_module.types[arg.ty].inner,
+                    module: &self.ir_module,
+                    binding_offset: &mut binding_offset,
+                    vert_attrib_descs: &mut vert_attrib_descs,
+                    location_binding: &location_binding,
+                    name: &arg.name.clone().unwrap_or_default(),
                     auto_location_binding,
-                );
+                });
             }
         }
 

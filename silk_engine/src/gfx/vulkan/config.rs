@@ -2,6 +2,8 @@ use std::ffi::{CStr, CString};
 
 use ash::khr;
 
+pub const MSAA: u32 = 8;
+
 pub fn required_vulkan_instance_extensions() -> Vec<CString> {
     [
         khr::surface::NAME,

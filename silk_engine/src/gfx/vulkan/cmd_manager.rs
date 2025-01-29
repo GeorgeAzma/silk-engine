@@ -84,15 +84,17 @@ impl CmdManager {
                     queue(),
                     &[vk::SubmitInfo {
                         wait_semaphore_count: waits.len() as u32,
-                        p_wait_semaphores: waits
-                            .is_empty()
-                            .then_some(null())
-                            .unwrap_or(waits.as_ptr()),
+                        p_wait_semaphores: if waits.is_empty() {
+                            null()
+                        } else {
+                            waits.as_ptr()
+                        },
                         signal_semaphore_count: signals.len() as u32,
-                        p_signal_semaphores: signals
-                            .is_empty()
-                            .then_some(null())
-                            .unwrap_or(signals.as_ptr()),
+                        p_signal_semaphores: if signals.is_empty() {
+                            null()
+                        } else {
+                            signals.as_ptr()
+                        },
                         ..Default::default()
                     }
                     .command_buffers(&[cmd])

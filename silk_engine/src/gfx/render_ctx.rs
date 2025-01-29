@@ -4,9 +4,10 @@ use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
+use crate::ImgUsage;
 use crate::{gpu, gpu_idle, scope_time, util::Mem};
 
-use super::CmdManager;
+use super::{BufUsage, CmdManager, ImgLayout, MemProp, create_compute};
 use super::{
     DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, alloc_callbacks, entry, instance,
     physical_gpu, queue,
@@ -27,14 +28,15 @@ struct ShaderData {
     pipeline_stages: Vec<PipelineStageInfo>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct PipelineData {
     pipeline: vk::Pipeline,
     info: GraphicsPipelineInfo,
     bind_point: vk::PipelineBindPoint,
+    shader_name: String,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct CmdInfo {
     pipeline_data: PipelineData,
     desc_sets: Vec<vk::DescriptorSet>,
@@ -166,8 +168,8 @@ impl RenderCtx {
             slf.add_buf(
                 "staging",
                 *Mem::kb(256) as vk::DeviceSize,
-                vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::TRANSFER_SRC,
-                vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+                BufUsage::DST | BufUsage::SRC,
+                MemProp::CPU,
             );
             slf.add_semaphore("img available");
             slf.add_semaphore("render finished");
@@ -191,11 +193,14 @@ impl RenderCtx {
         slf
     }
 
-    // might cause a swapchain resize so returns new size
-    pub(crate) fn begin_frame(&mut self) -> vk::Extent2D {
+    pub(crate) fn wait_prev_frame(&mut self) {
         if !self.frame_cmd.is_null() {
             self.cmd_manager.wait(self.frame_cmd);
         }
+    }
+
+    // might cause a swapchain resize so returns new size
+    pub(crate) fn begin_frame(&mut self) -> vk::Extent2D {
         self.cmd_info = Default::default();
         self.cmd_manager.reset();
         let swapchain_size = self.acquire_img(self.semaphore("img available"));
@@ -220,7 +225,7 @@ impl RenderCtx {
     pub fn begin_render_swapchain(&mut self, resolve_img_view_name: &str) {
         self.set_img_layout(
             &self.cur_img(),
-            vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            ImgLayout::COLOR,
             vk::PipelineStageFlags2::TOP_OF_PIPE,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::AccessFlags2::NONE,
@@ -236,7 +241,7 @@ impl RenderCtx {
         self.end_render();
         self.set_img_layout(
             &self.cur_img(),
-            vk::ImageLayout::PRESENT_SRC_KHR,
+            ImgLayout::PRESENT,
             vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
             vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
             vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -253,47 +258,47 @@ impl RenderCtx {
     }
 
     pub fn add_shader(&mut self, name: &str) -> &Shader {
-        let shader_data = {
-            let shader = Shader::new(name);
-            let dsls = self.dsl_manager.gets(shader.dsl_infos());
-            let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
-            debug_name(name, pipeline_layout);
-            let module = shader.create_module();
-            debug_name(name, module);
-            let pipeline_stages = shader.get_pipeline_stages(module);
-            ShaderData {
-                shader,
-                pipeline_layout,
-                pipeline_stages,
-            }
-        };
-        let shader_data = self.shaders.entry(name.to_string()).or_insert(shader_data);
-        &shader_data.shader
+        &self
+            .shaders
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let shader = Shader::new(name);
+                let dsls = self.dsl_manager.gets(shader.dsl_infos());
+                let pipeline_layout = self.pipeline_layout_manager.get(&dsls);
+                debug_name(name, pipeline_layout);
+                let module = shader.create_module();
+                debug_name(name, module);
+                let pipeline_stages = shader.get_pipeline_stages(module);
+                ShaderData {
+                    shader,
+                    pipeline_layout,
+                    pipeline_stages,
+                }
+            })
+            .shader
     }
 
-    pub fn add_fence(&mut self, name: &str, signaled: bool) {
-        let fence = unsafe {
-            gpu()
-                .create_fence(
-                    &vk::FenceCreateInfo::default().flags(if signaled {
-                        vk::FenceCreateFlags::SIGNALED
-                    } else {
-                        vk::FenceCreateFlags::empty()
-                    }),
-                    alloc_callbacks(),
-                )
-                .unwrap_or_else(|_| panic!("failed to create fence: {name}"))
-        };
-        debug_name(name, fence);
-        assert!(
-            self.fences
-                .insert(name.to_string(), FenceData {
+    pub fn add_fence(&mut self, name: &str, signaled: bool) -> vk::Fence {
+        self.fences
+            .entry(name.to_string())
+            .or_insert_with(|| unsafe {
+                let fence = gpu()
+                    .create_fence(
+                        &vk::FenceCreateInfo::default().flags(if signaled {
+                            vk::FenceCreateFlags::SIGNALED
+                        } else {
+                            vk::FenceCreateFlags::empty()
+                        }),
+                        alloc_callbacks(),
+                    )
+                    .unwrap_or_else(|_| panic!("failed to create fence: {name}"));
+                debug_name(name, fence);
+                FenceData {
                     fence,
-                    signaled: false
-                })
-                .is_none(),
-            "fence already exists: {name}"
-        );
+                    signaled: false,
+                }
+            })
+            .fence
     }
 
     pub fn remove_fence(&mut self, name: &str) {
@@ -344,19 +349,17 @@ impl RenderCtx {
         self.reset_fence(name);
     }
 
-    pub fn add_semaphore(&mut self, name: &str) {
-        let semaphore = unsafe {
-            gpu()
-                .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
-                .unwrap()
-        };
-        debug_name(name, semaphore);
-        assert!(
-            self.semaphores
-                .insert(name.to_string(), semaphore)
-                .is_none(),
-            "semaphore already exists: {name}"
-        );
+    pub fn add_semaphore(&mut self, name: &str) -> vk::Semaphore {
+        *self
+            .semaphores
+            .entry(name.to_string())
+            .or_insert_with(|| unsafe {
+                let semaphore = gpu()
+                    .create_semaphore(&vk::SemaphoreCreateInfo::default(), alloc_callbacks())
+                    .unwrap();
+                debug_name(name, semaphore);
+                semaphore
+            })
     }
 
     pub fn remove_semaphore(&mut self, name: &str) {
@@ -382,45 +385,47 @@ impl RenderCtx {
         info: &ImageInfo,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Image {
-        let img = self.gpu_alloc.alloc_img(info, mem_props);
-        debug_name(name, img);
-        assert!(
-            self.imgs
-                .insert(name.to_string(), ImageData {
+        self.imgs
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let img = self.gpu_alloc.alloc_img(info, mem_props);
+                debug_name(name, img);
+                ImageData {
                     img,
                     views: vec![],
                     info: info.clone(),
-                })
-                .is_none(),
-            "img already exists: {name}"
-        );
-        img
+                }
+            })
+            .img
     }
 
-    pub fn try_remove_img(&mut self, name: &str) -> Result<(), String> {
-        let ImageData {
+    pub fn try_remove_img(&mut self, name: &str) -> bool {
+        if let Some(ImageData {
             img,
             views,
             info: _,
-        } = self
-            .imgs
-            .remove(name)
-            .ok_or(format!("img not found: {name}"))?;
-        self.gpu_alloc.dealloc_img(img);
-        for img_view in views {
-            let (img_view, _) = self
-                .img_views
-                .remove(&img_view)
-                .unwrap_or_else(|| panic!("img view({img_view}) not found, for img({name})"));
-            unsafe {
-                gpu().destroy_image_view(img_view, alloc_callbacks());
+        }) = self.imgs.remove(name)
+        {
+            self.gpu_alloc.dealloc_img(img);
+            for img_view in views {
+                let (img_view, _) = self
+                    .img_views
+                    .remove(&img_view)
+                    .unwrap_or_else(|| panic!("img view({img_view}) not found, for img({name})"));
+                unsafe {
+                    gpu().destroy_image_view(img_view, alloc_callbacks());
+                }
             }
+            true
+        } else {
+            false
         }
-        Ok(())
     }
 
     pub fn remove_img(&mut self, name: &str) {
-        self.try_remove_img(name).unwrap_or_else(|e| panic!("{e}"))
+        if !self.try_remove_img(name) {
+            panic!("img not found: {name}")
+        }
     }
 
     pub fn img(&self, name: &str) -> &ImageData {
@@ -430,38 +435,41 @@ impl RenderCtx {
     }
 
     pub fn add_img_view(&mut self, name: &str, img_name: &str) -> vk::ImageView {
-        let ImageData { img, views, info } = self
-            .imgs
-            .get_mut(img_name)
-            .unwrap_or_else(|| panic!("img not found: {img_name}"));
-        views.push(name.to_string());
-        let img_view = unsafe {
-            gpu()
-                .create_image_view(
-                    &vk::ImageViewCreateInfo::default()
-                        .view_type(vk::ImageViewType::TYPE_2D)
-                        .format(info.format)
-                        .components(vk::ComponentMapping {
-                            r: vk::ComponentSwizzle::IDENTITY,
-                            g: vk::ComponentSwizzle::IDENTITY,
-                            b: vk::ComponentSwizzle::IDENTITY,
-                            a: vk::ComponentSwizzle::IDENTITY,
-                        })
-                        .subresource_range(
-                            vk::ImageSubresourceRange::default()
-                                .aspect_mask(vk::ImageAspectFlags::COLOR)
-                                .layer_count(1)
-                                .level_count(1),
-                        )
-                        .image(*img),
-                    alloc_callbacks(),
-                )
-                .unwrap_or_else(|_| panic!("failed to create img view: {name}"))
-        };
         self.img_views
-            .insert(name.to_string(), (img_view, img_name.to_string()));
-        debug_name(name, img_view);
-        img_view
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let ImageData { img, views, info } = self
+                    .imgs
+                    .get_mut(img_name)
+                    .unwrap_or_else(|| panic!("img not found: {img_name}"));
+                views.push(name.to_string());
+                let img_view = unsafe {
+                    gpu()
+                        .create_image_view(
+                            &vk::ImageViewCreateInfo::default()
+                                .view_type(vk::ImageViewType::TYPE_2D)
+                                .format(info.format)
+                                .components(vk::ComponentMapping {
+                                    r: vk::ComponentSwizzle::IDENTITY,
+                                    g: vk::ComponentSwizzle::IDENTITY,
+                                    b: vk::ComponentSwizzle::IDENTITY,
+                                    a: vk::ComponentSwizzle::IDENTITY,
+                                })
+                                .subresource_range(
+                                    vk::ImageSubresourceRange::default()
+                                        .aspect_mask(vk::ImageAspectFlags::COLOR)
+                                        .layer_count(1)
+                                        .level_count(1),
+                                )
+                                .image(*img),
+                            alloc_callbacks(),
+                        )
+                        .unwrap_or_else(|_| panic!("failed to create img view: {name}"))
+                };
+                debug_name(name, img_view);
+                (img_view, img_name.to_string())
+            })
+            .0
     }
 
     pub fn remove_img_view(&mut self, name: &str) {
@@ -479,6 +487,9 @@ impl RenderCtx {
     }
 
     pub fn img_view(&self, name: &str) -> vk::ImageView {
+        if name.is_empty() {
+            return vk::ImageView::null();
+        }
         self.img_views
             .get(name)
             .unwrap_or_else(|| panic!("img view not found: {name}"))
@@ -494,15 +505,17 @@ impl RenderCtx {
         mag_filter: vk::Filter,
         mip_filter: vk::SamplerMipmapMode,
     ) -> vk::Sampler {
-        let sampler =
-            self.sampler_manager
-                .get(addr_mode_u, addr_mode_v, min_filter, mag_filter, mip_filter);
-        assert!(
-            self.samplers.insert(name.to_string(), sampler).is_none(),
-            "sampler already exists: {name}"
-        );
-        debug_name(name, sampler);
-        sampler
+        *self.samplers.entry(name.to_string()).or_insert_with(|| {
+            let sampler = self.sampler_manager.get(
+                addr_mode_u,
+                addr_mode_v,
+                min_filter,
+                mag_filter,
+                mip_filter,
+            );
+            debug_name(name, sampler);
+            sampler
+        })
     }
 
     pub fn remove_sampler(&mut self, name: &str) -> vk::Sampler {
@@ -525,28 +538,63 @@ impl RenderCtx {
         pipeline_info: GraphicsPipelineInfo,
         vert_input_bindings: &[(bool, Vec<u32>)],
     ) -> vk::Pipeline {
-        scope_time!("Create pipeline({name})");
-        let shader_data = &self
-            .shaders
-            .get(shader_name)
-            .unwrap_or_else(|| panic!("no shader found: {shader_name}"));
-        let pipeline_info = pipeline_info
-            .layout(shader_data.pipeline_layout)
-            .stages(&shader_data.pipeline_stages)
-            .vert_layout(&shader_data.shader, vert_input_bindings);
-        let pipeline = pipeline_info.build();
-        assert!(
-            self.pipelines
-                .insert(name.to_string(), PipelineData {
+        self.pipelines
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let shader_data = &self
+                    .shaders
+                    .get(shader_name)
+                    .unwrap_or_else(|| panic!("no shader found: {shader_name}"));
+                let pipeline_info = pipeline_info
+                    .layout(shader_data.pipeline_layout)
+                    .stages(&shader_data.pipeline_stages)
+                    .vert_layout(&shader_data.shader, vert_input_bindings);
+                let pipeline = pipeline_info.build();
+                debug_name(name, pipeline);
+                PipelineData {
                     pipeline,
                     info: pipeline_info,
                     bind_point: vk::PipelineBindPoint::GRAPHICS,
-                },)
-                .is_none(),
-            "pipeline already exists: {name}"
-        );
-        debug_name(name, pipeline);
-        pipeline
+                    shader_name: shader_name.to_string(),
+                }
+            })
+            .pipeline
+    }
+
+    pub fn add_compute(&mut self, name: &str) -> vk::Pipeline {
+        self.add_shader(name);
+        let shader = &self.shaders[name];
+        let module = shader.pipeline_stages[0].module;
+        let layout = shader.pipeline_layout;
+        let entry_name = &shader.pipeline_stages[0].name;
+        self.pipelines
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let pipeline = create_compute(module, layout, entry_name);
+                debug_name(name, pipeline);
+                PipelineData {
+                    pipeline,
+                    info: GraphicsPipelineInfo::default().layout(layout),
+                    bind_point: vk::PipelineBindPoint::COMPUTE,
+                    shader_name: name.to_string(),
+                }
+            })
+            .pipeline
+    }
+
+    /// note: x,y,z are total size, not work group size
+    pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
+        unsafe {
+            let [wx, wy, wz] = self
+                .shader(&self.cmd_info.pipeline_data.shader_name)
+                .workgroup_size();
+            gpu().cmd_dispatch(
+                self.cmd(),
+                (x + wx - 1) / wx,
+                (y + wy - 1) / wy,
+                (z + wz - 1) / wz,
+            );
+        };
     }
 
     pub fn add_desc_set(
@@ -555,42 +603,22 @@ impl RenderCtx {
         shader_name: &str,
         group: usize,
     ) -> vk::DescriptorSet {
-        let binds = self
-            .shaders
-            .get(shader_name)
-            .unwrap_or_else(|| panic!("no shader found: {shader_name}"))
-            .shader
-            .dsl_infos()[group]
-            .clone();
-        let dsl = self.dsl_manager.get(&binds);
-        let desc_set = self.desc_alloc.alloc_one(dsl);
-        assert!(
-            self.desc_sets
-                .insert(name.to_string(), DescSetData { desc_set, binds })
-                .is_none(),
-            "desc set already exists: {name}"
-        );
-        debug_name(name, desc_set);
-        desc_set
-    }
-
-    pub fn add_desc_sets(&mut self, names: &[&str], shader_name: &str) -> Vec<vk::DescriptorSet> {
-        let dsl_infos = self.shaders[shader_name].shader.dsl_infos();
-        let dsls = self.dsl_manager.gets(dsl_infos);
-        let desc_sets = self.desc_alloc.alloc(&dsls);
-        for (name, (&desc_set, binds)) in names
-            .iter()
-            .zip(desc_sets.iter().zip(dsl_infos.iter().cloned()))
-        {
-            assert!(
-                self.desc_sets
-                    .insert(name.to_string(), DescSetData { desc_set, binds })
-                    .is_none(),
-                "desc set already exists: {name}"
-            );
-            debug_name(name, desc_set);
-        }
-        desc_sets
+        self.desc_sets
+            .entry(name.to_string())
+            .or_insert_with(|| {
+                let binds = self
+                    .shaders
+                    .get(shader_name)
+                    .unwrap_or_else(|| panic!("no shader found: {shader_name}"))
+                    .shader
+                    .dsl_infos()[group]
+                    .clone();
+                let dsl = self.dsl_manager.get(&binds);
+                let desc_set = self.desc_alloc.alloc_one(dsl);
+                debug_name(name, desc_set);
+                DescSetData { desc_set, binds }
+            })
+            .desc_set
     }
 
     pub fn desc_set(&self, name: &str) -> vk::DescriptorSet {
@@ -600,6 +628,7 @@ impl RenderCtx {
             .desc_set
     }
 
+    /// if exists with smaller size, grows buf (which invalidates old bufs)
     pub fn add_buf(
         &mut self,
         name: &str,
@@ -607,19 +636,20 @@ impl RenderCtx {
         usage: vk::BufferUsageFlags,
         mem_props: vk::MemoryPropertyFlags,
     ) -> vk::Buffer {
-        crate::log!(
-            "Alloc({name}) {:?}, {:?}, {:?}",
-            crate::Mem::b(size as usize),
-            usage,
-            mem_props
-        );
-        let buf = self.gpu_alloc.alloc_buf(size, usage, mem_props);
-        assert!(
-            self.bufs.insert(name.to_string(), buf).is_none(),
-            "buffer already exists: {name}"
-        );
-        debug_name(name, buf);
-        buf
+        if let Some(buf) = self.bufs.get(name) {
+            if self.buf_size(name) < size {
+                self.gpu_alloc.dealloc_buf(*buf);
+                let new_buf = self.gpu_alloc.alloc_buf(size, usage, mem_props);
+                let buf_mut = &mut unsafe { *std::ptr::from_ref(buf).cast_mut() };
+                *buf_mut = new_buf;
+            }
+            *buf
+        } else {
+            let buf = self.gpu_alloc.alloc_buf(size, usage, mem_props);
+            debug_name(name, buf);
+            self.bufs.insert(name.to_string(), buf);
+            buf
+        }
     }
 
     pub fn remove_buf(&mut self, name: &str) {
@@ -635,6 +665,9 @@ impl RenderCtx {
     }
 
     pub fn buf(&self, name: &str) -> vk::Buffer {
+        if name.is_empty() {
+            return vk::Buffer::null();
+        }
         *self
             .bufs
             .get(name)
@@ -720,8 +753,8 @@ impl RenderCtx {
                         } else {
                             vk::ImageView::null()
                         })
-                        .resolve_image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
-                        .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                        .resolve_image_layout(ImgLayout::COLOR)
+                        .image_layout(ImgLayout::COLOR)
                         .image_view(if sampled {
                             self.img_view(sampled_img_view_name)
                         } else {
@@ -781,27 +814,29 @@ impl RenderCtx {
         self.cmd_info.pipeline_data = pipeline_data;
 
         unsafe {
-            let dyn_states = self.cmd_info.pipeline_data.info.dynamic_states.clone();
-            let extent = self.cmd_info.render_area.extent;
-            if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
-                self.set_viewport(vk::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: extent.width as f32,
-                    height: extent.height as f32,
-                    min_depth: 0.0,
-                    max_depth: 1.0,
-                });
-            } else {
-                self.cmd_info.viewport = Default::default();
-            }
-            if dyn_states.contains(&vk::DynamicState::SCISSOR) {
-                self.set_scissor(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent,
-                });
-            } else {
-                self.cmd_info.scissor = Default::default();
+            if self.cmd_info.pipeline_data.bind_point == vk::PipelineBindPoint::GRAPHICS {
+                let dyn_states = self.cmd_info.pipeline_data.info.dynamic_states.clone();
+                let extent = self.cmd_info.render_area.extent;
+                if dyn_states.contains(&vk::DynamicState::VIEWPORT) {
+                    self.set_viewport(vk::Viewport {
+                        x: 0.0,
+                        y: 0.0,
+                        width: extent.width as f32,
+                        height: extent.height as f32,
+                        min_depth: 0.0,
+                        max_depth: 1.0,
+                    });
+                } else {
+                    self.cmd_info.viewport = Default::default();
+                }
+                if dyn_states.contains(&vk::DynamicState::SCISSOR) {
+                    self.set_scissor(vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent,
+                    });
+                } else {
+                    self.cmd_info.scissor = Default::default();
+                }
             }
             gpu().cmd_bind_pipeline(
                 self.cmd(),
@@ -811,7 +846,7 @@ impl RenderCtx {
         }
     }
 
-    pub fn bind_desc_set(&mut self, name: &str) {
+    pub fn bind_ds(&mut self, name: &str) {
         self.cmd_info.desc_sets = vec![self.desc_set(name)];
         unsafe {
             gpu().cmd_bind_descriptor_sets(
@@ -880,6 +915,7 @@ impl RenderCtx {
             .get_mut(img_name)
             .unwrap_or_else(|| panic!("img not found: {img_name}"));
         if info.layout == new_layout {
+            crate::log!("img layout transition to same layout: {new_layout:?}");
             return;
         }
         unsafe {
@@ -1017,37 +1053,97 @@ impl RenderCtx {
         }
     }
 
-    pub fn write_ds_range(
+    pub fn writes_ds(
         &self,
         name: &str,
-        buffer_name: &str,
-        range: std::ops::Range<vk::DeviceSize>,
-        binding: u32,
+        buf_range_binds: &[(&str, std::ops::Range<vk::DeviceSize>, u32)],
+        img_view_img_layout_sampler_binds: &[(&str, vk::ImageLayout, vk::Sampler, u32)],
     ) {
         let DescSetData { desc_set, binds } = &self
             .desc_sets
             .get(name)
             .unwrap_or_else(|| panic!("descriptor not found: {name}"));
-        let buffer = self.buf(buffer_name);
-        let ds_type = binds[binding as usize].descriptor_type;
-        unsafe {
-            gpu().update_descriptor_sets(
-                &[vk::WriteDescriptorSet::default()
-                    .buffer_info(&[vk::DescriptorBufferInfo::default()
-                        .buffer(buffer)
-                        .offset(range.start)
-                        .range(if range.end == vk::WHOLE_SIZE {
-                            vk::WHOLE_SIZE
-                        } else {
-                            range.end - range.start
-                        })])
+        let buf_infos = buf_range_binds
+            .iter()
+            .map(|(buf, rng, _bind)| {
+                vk::DescriptorBufferInfo::default()
+                    .buffer(self.buf(buf))
+                    .offset(rng.start)
+                    .range(if rng.end == vk::WHOLE_SIZE {
+                        vk::WHOLE_SIZE
+                    } else {
+                        rng.end - rng.start
+                    })
+            })
+            .collect::<Vec<_>>();
+        let img_infos = img_view_img_layout_sampler_binds
+            .iter()
+            .map(|&(img_view, layout, sampler, _bind)| {
+                vk::DescriptorImageInfo::default()
+                    .image_view(self.img_view(img_view))
+                    .image_layout(layout)
+                    .sampler(sampler)
+            })
+            .collect::<Vec<_>>();
+        let desc_buf_writes = buf_range_binds
+            .iter()
+            .enumerate()
+            .map(|(i, (_buf, _rng, bind))| {
+                vk::WriteDescriptorSet::default()
+                    .buffer_info(&buf_infos[i..i + 1])
                     .descriptor_count(1)
-                    .descriptor_type(ds_type)
-                    .dst_binding(binding)
-                    .dst_set(*desc_set)],
-                &[],
-            )
-        }
+                    .descriptor_type(binds[*bind as usize].desc_ty)
+                    .dst_binding(*bind)
+                    .dst_set(*desc_set)
+            })
+            .collect::<Vec<_>>();
+        let mut desc_img_writes = img_view_img_layout_sampler_binds
+            .iter()
+            .enumerate()
+            .map(|(i, (_img, _layout, _sampler, bind))| {
+                vk::WriteDescriptorSet::default()
+                    .image_info(&img_infos[i..i + 1])
+                    .descriptor_count(1)
+                    .descriptor_type(binds[*bind as usize].desc_ty)
+                    .dst_binding(*bind)
+                    .dst_set(*desc_set)
+            })
+            .collect::<Vec<_>>();
+        let mut desc_writes = desc_buf_writes;
+        desc_writes.append(&mut desc_img_writes);
+        unsafe { gpu().update_descriptor_sets(&desc_writes, &[]) }
+    }
+
+    pub fn write_ds_buf_ranges(
+        &self,
+        name: &str,
+        buf_range_binds: &[(&str, std::ops::Range<vk::DeviceSize>, u32)],
+    ) {
+        self.writes_ds(name, buf_range_binds, &[]);
+    }
+
+    pub fn write_ds_buf_range(
+        &self,
+        name: &str,
+        buf_name: &str,
+        buf_range: std::ops::Range<vk::DeviceSize>,
+        binding: u32,
+    ) {
+        self.write_ds_buf_ranges(name, &[(buf_name, buf_range, binding)]);
+    }
+
+    pub fn write_ds_bufs(&self, name: &str, buf_binds: &[(&str, u32)]) {
+        self.write_ds_buf_ranges(
+            name,
+            &buf_binds
+                .into_iter()
+                .map(|&(buf, bind)| (buf, 0..vk::WHOLE_SIZE, bind))
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    pub fn write_ds_buf(&self, name: &str, buf_name: &str, binding: u32) {
+        self.write_ds_buf_range(name, buf_name, 0..vk::WHOLE_SIZE, binding)
     }
 
     pub fn write_ds_img(
@@ -1057,48 +1153,21 @@ impl RenderCtx {
         img_layout: vk::ImageLayout,
         binding: u32,
     ) {
-        let DescSetData { desc_set, binds } = &self
-            .desc_sets
-            .get(name)
-            .unwrap_or_else(|| panic!("descriptor not found: {name}"));
-        let img_view = self.img_view(img_view_name);
-        let ds_type = binds[binding as usize].descriptor_type;
-        unsafe {
-            gpu().update_descriptor_sets(
-                &[vk::WriteDescriptorSet::default()
-                    .image_info(&[vk::DescriptorImageInfo::default()
-                        .image_layout(img_layout)
-                        .image_view(img_view)])
-                    .descriptor_count(1)
-                    .descriptor_type(ds_type)
-                    .dst_binding(binding)
-                    .dst_set(*desc_set)],
-                &[],
-            )
-        }
+        self.writes_ds(name, &[], &[(
+            img_view_name,
+            img_layout,
+            vk::Sampler::null(),
+            binding,
+        )]);
     }
 
     pub fn write_ds_sampler(&self, name: &str, sampler_name: &str, binding: u32) {
-        let DescSetData { desc_set, .. } = &self
-            .desc_sets
-            .get(name)
-            .unwrap_or_else(|| panic!("descriptor not found: {name}"));
-        let sampler = self.sampler(sampler_name);
-        unsafe {
-            gpu().update_descriptor_sets(
-                &[vk::WriteDescriptorSet::default()
-                    .image_info(&[vk::DescriptorImageInfo::default().sampler(sampler)])
-                    .descriptor_count(1)
-                    .descriptor_type(vk::DescriptorType::SAMPLER)
-                    .dst_binding(binding)
-                    .dst_set(*desc_set)],
-                &[],
-            )
-        }
-    }
-
-    pub fn write_ds(&self, name: &str, buffer_name: &str, binding: u32) {
-        self.write_ds_range(name, buffer_name, 0..vk::WHOLE_SIZE, binding)
+        self.writes_ds(name, &[], &[(
+            "",
+            ImgLayout::UNDEFINED,
+            self.sampler(sampler_name),
+            binding,
+        )]);
     }
 
     pub fn clear(&self, img: vk::Image, color: [f32; 4]) {
@@ -1106,7 +1175,7 @@ impl RenderCtx {
             gpu().cmd_clear_color_image(
                 self.cmd(),
                 img,
-                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                ImgLayout::COLOR,
                 &vk::ClearColorValue { float32: color },
                 &[vk::ImageSubresourceRange::default()
                     .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -1199,10 +1268,7 @@ impl RenderCtx {
                         .image_format(self.surface_format.format)
                         .image_extent(surf_res)
                         .image_array_layers(1)
-                        .image_usage(
-                            vk::ImageUsageFlags::COLOR_ATTACHMENT
-                                | vk::ImageUsageFlags::TRANSFER_DST,
-                        )
+                        .image_usage(ImgUsage::COLOR | ImgUsage::DST)
                         .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
                         .pre_transform(pre_transform)
                         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
@@ -1247,9 +1313,7 @@ impl RenderCtx {
                     .width(surf_res.width)
                     .height(surf_res.height)
                     .format(self.surface_format.format)
-                    .usage(
-                        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST,
-                    ),
+                    .usage(ImgUsage::COLOR | ImgUsage::DST),
             });
             self.add_img_view(&img_view_name, &img_name);
         }

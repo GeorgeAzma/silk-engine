@@ -95,7 +95,7 @@ impl MemPool {
         if !self.mems.is_empty() {
             return;
         }
-        const BLOCK_SIZE: vk::DeviceSize = 64 * (1 << 20); // 64 MiB
+        const BLOCK_SIZE: vk::DeviceSize = 128 * (1 << 20); // 128 MiB
         let block_size = BLOCK_SIZE.next_power_of_two();
         self.mems = vec![MemBlock::new(0, block_size, self.mem_type_idx)];
         self.buddy = BuddyAlloc::new(block_size as usize);
@@ -278,12 +278,12 @@ impl GpuAlloc {
         buffer
     }
 
-    pub fn dealloc_buf(&mut self, buffer: vk::Buffer) {
-        let buf_alloc = self.buf_allocs.remove(&buffer.as_raw()).unwrap();
+    pub fn dealloc_buf(&mut self, buf: vk::Buffer) {
+        let buf_alloc = self.buf_allocs.remove(&buf.as_raw()).unwrap();
         self.mem_pools[buf_alloc.mem_type_idx as usize]
             .dealloc(buf_alloc.off, buf_alloc.aligned_size);
         unsafe {
-            gpu().destroy_buffer(buffer, alloc_callbacks());
+            gpu().destroy_buffer(buf, alloc_callbacks());
         }
     }
 

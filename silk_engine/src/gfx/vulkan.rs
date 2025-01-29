@@ -20,6 +20,7 @@ mod pipeline_layout_manager;
 pub use instance::*;
 pub(super) use pipeline_layout_manager::PipelineLayoutManager;
 mod config;
+pub use config::MSAA;
 pub mod pipeline;
 pub use pipeline::*;
 mod image;
@@ -408,4 +409,60 @@ pub fn format_size(format: vk::Format) -> u32 {
         vk::Format::D32_SFLOAT_S8_UINT => 5,
         _ => 0,
     }
+}
+
+pub struct MemProp;
+impl MemProp {
+    pub const GPU: vk::MemoryPropertyFlags = vk::MemoryPropertyFlags::DEVICE_LOCAL;
+    pub const CPU_GPU: vk::MemoryPropertyFlags = vk::MemoryPropertyFlags::from_raw(
+        vk::MemoryPropertyFlags::DEVICE_LOCAL.as_raw()
+            | vk::MemoryPropertyFlags::HOST_VISIBLE.as_raw()
+            | vk::MemoryPropertyFlags::HOST_COHERENT.as_raw(),
+    );
+    pub const CPU: vk::MemoryPropertyFlags = vk::MemoryPropertyFlags::from_raw(
+        vk::MemoryPropertyFlags::HOST_VISIBLE.as_raw()
+            | vk::MemoryPropertyFlags::HOST_COHERENT.as_raw(),
+    );
+    pub const CPU_CACHED: vk::MemoryPropertyFlags = vk::MemoryPropertyFlags::from_raw(
+        vk::MemoryPropertyFlags::HOST_VISIBLE.as_raw()
+            | vk::MemoryPropertyFlags::HOST_COHERENT.as_raw()
+            | vk::MemoryPropertyFlags::HOST_CACHED.as_raw(),
+    );
+}
+
+pub struct BufUsage;
+impl BufUsage {
+    pub const UNIFORM: vk::BufferUsageFlags = vk::BufferUsageFlags::UNIFORM_BUFFER;
+    pub const STORAGE: vk::BufferUsageFlags = vk::BufferUsageFlags::STORAGE_BUFFER;
+    pub const VERT: vk::BufferUsageFlags = vk::BufferUsageFlags::VERTEX_BUFFER;
+    pub const INDEX: vk::BufferUsageFlags = vk::BufferUsageFlags::INDEX_BUFFER;
+    pub const INDIRECT: vk::BufferUsageFlags = vk::BufferUsageFlags::INDIRECT_BUFFER;
+    pub const SRC: vk::BufferUsageFlags = vk::BufferUsageFlags::TRANSFER_SRC;
+    pub const DST: vk::BufferUsageFlags = vk::BufferUsageFlags::TRANSFER_DST;
+}
+
+pub struct ImgUsage;
+impl ImgUsage {
+    pub const SAMPLED: vk::ImageUsageFlags = vk::ImageUsageFlags::SAMPLED;
+    pub const STORAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::SAMPLED;
+    pub const COLOR: vk::ImageUsageFlags = vk::ImageUsageFlags::COLOR_ATTACHMENT;
+    pub const SRC: vk::ImageUsageFlags = vk::ImageUsageFlags::TRANSFER_SRC;
+    pub const DST: vk::ImageUsageFlags = vk::ImageUsageFlags::TRANSFER_DST;
+    pub const DEPTH_STENCIL: vk::ImageUsageFlags = vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT;
+    pub const TRANSIENT: vk::ImageUsageFlags = vk::ImageUsageFlags::TRANSIENT_ATTACHMENT;
+}
+
+pub struct ImgLayout;
+impl ImgLayout {
+    pub const UNDEFINED: vk::ImageLayout = vk::ImageLayout::UNDEFINED;
+    pub const GENERAL: vk::ImageLayout = vk::ImageLayout::GENERAL;
+    pub const COLOR: vk::ImageLayout = vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL;
+    pub const DEPTH_STENCIL: vk::ImageLayout = vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    pub const SHADER_READ: vk::ImageLayout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+    pub const SRC: vk::ImageLayout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+    pub const DST: vk::ImageLayout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+    pub const PREINIT: vk::ImageLayout = vk::ImageLayout::PREINITIALIZED;
+    pub const DEPTH: vk::ImageLayout = vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL;
+    pub const STENCIL: vk::ImageLayout = vk::ImageLayout::STENCIL_ATTACHMENT_OPTIMAL;
+    pub const PRESENT: vk::ImageLayout = vk::ImageLayout::PRESENT_SRC_KHR;
 }
