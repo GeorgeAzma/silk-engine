@@ -1,4 +1,6 @@
-#[derive(Clone, Copy)]
+use std::cmp::Ordering;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Rect(u64);
 
 impl Rect {
@@ -6,7 +8,7 @@ impl Rect {
         Self(((w as u64) << 48) | ((h as u64) << 32) | ((x as u64) << 16) | y as u64)
     }
 
-    pub fn xywh(&self) -> (u16, u16, u16, u16) {
+    pub fn xywh(self) -> (u16, u16, u16, u16) {
         let r = self.0;
         (
             (r >> 16) as u16,
@@ -16,23 +18,35 @@ impl Rect {
         )
     }
 
-    pub fn xy(&self) -> (u16, u16) {
+    pub fn xy(self) -> (u16, u16) {
         let r = self.0;
         ((r >> 16) as u16, r as u16)
     }
 
-    pub fn wh(&self) -> (u16, u16) {
+    pub fn wh(self) -> (u16, u16) {
         let r = self.0;
         ((r >> 48) as u16, (r >> 32) as u16)
     }
 
-    pub fn packed_whxy(&self) -> u64 {
+    pub fn packed_whxy(self) -> u64 {
         self.0
     }
 
-    pub fn area(&self) -> u32 {
+    pub fn area(self) -> u32 {
         let (w, h) = self.wh();
         w as u32 * h as u32
+    }
+
+    pub fn perim(self) -> u32 {
+        let (w, h) = self.wh();
+        w as u32 + h as u32
+    }
+
+    pub fn aspect(self) -> f32 {
+        let (w, h) = self.wh();
+        let max = w.max(h) as f32;
+        let min = w.min(h) as f32;
+        max / min
     }
 }
 
@@ -57,12 +71,46 @@ pub struct Guillotine {
     pub free_rects: Vec<Rect>, // FIXME: remove pub, it was for testing
 }
 
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum AdjRect {
     North(usize),
     East(usize),
     South(usize),
     West(usize),
-    None,
+    NorthShorter(usize),
+    EastShorter(usize),
+    SouthShorter(usize),
+    WestShorter(usize),
+    NorthLonger(usize),
+    EastLonger(usize),
+    SouthLonger(usize),
+    WestLonger(usize),
+}
+
+impl AdjRect {
+    fn idx(self) -> usize {
+        match self {
+            AdjRect::North(i)
+            | AdjRect::East(i)
+            | AdjRect::South(i)
+            | AdjRect::West(i)
+            | AdjRect::NorthShorter(i)
+            | AdjRect::EastShorter(i)
+            | AdjRect::SouthShorter(i)
+            | AdjRect::WestShorter(i)
+            | AdjRect::NorthLonger(i)
+            | AdjRect::EastLonger(i)
+            | AdjRect::SouthLonger(i)
+            | AdjRect::WestLonger(i) => i,
+        }
+    }
+
+    fn is_eq(self) -> bool {
+        matches!(
+            self,
+            AdjRect::North(_) | AdjRect::East(_) | AdjRect::South(_) | AdjRect::West(_)
+        )
+    }
 }
 
 impl Guillotine {
@@ -81,19 +129,38 @@ impl Guillotine {
         }
     }
 
-    /// returns indices of north/east/south/west adjacent rects with same edge length
-    fn find_adjacent(&self, x: u16, y: u16, w: u16, h: u16) -> [Option<usize>; 4] {
+    /// returns indices of north/east/south/west adjacent rects\
+    /// with different edge length if their merge result is lower aspect ratio\
+    /// and left out rect also has low aspect ratio\
+    /// also returns indices of north/east/south/west adjacent rects with same edge length
+    fn find_adjacent(&self, x: u16, y: u16, w: u16, h: u16) -> [Option<AdjRect>; 4] {
         let (mut north, mut east, mut south, mut west) = (None, None, None, None);
         for (i, fr) in self.free_rects.iter().enumerate() {
             let (fx, fy, fw, fh) = fr.xywh();
-            if fx == x && fy == y + h && fw == w {
-                north = Some(i);
-            } else if fx == x + w && fy == y && fh == h {
-                east = Some(i);
-            } else if fx == x && fy + fh == y && fw == w {
-                south = Some(i);
-            } else if fx + fw == x && fy == y && fh == h {
-                west = Some(i);
+            if fx == x && fy == y + h {
+                north = Some(match fw.cmp(&w) {
+                    Ordering::Less => AdjRect::NorthShorter(i),
+                    Ordering::Equal => AdjRect::North(i),
+                    Ordering::Greater => AdjRect::NorthLonger(i),
+                });
+            } else if fx == x + w && fy == y {
+                east = Some(match fh.cmp(&h) {
+                    Ordering::Less => AdjRect::EastShorter(i),
+                    Ordering::Equal => AdjRect::East(i),
+                    Ordering::Greater => AdjRect::EastLonger(i),
+                });
+            } else if fx == x && fy + fh == y {
+                south = Some(match fw.cmp(&w) {
+                    Ordering::Less => AdjRect::SouthShorter(i),
+                    Ordering::Equal => AdjRect::South(i),
+                    Ordering::Greater => AdjRect::SouthLonger(i),
+                });
+            } else if fx + fw == x && fy == y {
+                west = Some(match fh.cmp(&h) {
+                    Ordering::Less => AdjRect::WestShorter(i),
+                    Ordering::Equal => AdjRect::West(i),
+                    Ordering::Greater => AdjRect::WestLonger(i),
+                });
             }
             if north.is_some() && east.is_some() && south.is_some() && west.is_some() {
                 break;
@@ -102,24 +169,28 @@ impl Guillotine {
         [north, east, south, west]
     }
 
-    fn find_biggest_adjacent(&self, x: u16, y: u16, w: u16, h: u16) -> AdjRect {
-        let (i, adj_idx) = self
-            .find_adjacent(x, y, w, h)
+    fn find_biggest_adjacent(&self, x: u16, y: u16, w: u16, h: u16) -> Option<AdjRect> {
+        self.find_adjacent(x, y, w, h)
             .into_iter()
-            .enumerate()
-            .max_by_key(|(_, idx)| idx.map(|i| self.free_rects[i].area()).unwrap_or(0))
-            .unwrap();
-        if let Some(adj_idx) = adj_idx {
-            match i {
-                0 => AdjRect::North(adj_idx),
-                1 => AdjRect::East(adj_idx),
-                2 => AdjRect::South(adj_idx),
-                3 => AdjRect::West(adj_idx),
-                _ => unreachable!(),
-            }
-        } else {
-            AdjRect::None
-        }
+            .max_by_key(|idx| {
+                idx.map(|i| {
+                    (if matches!(
+                        i,
+                        AdjRect::North(_)
+                            | AdjRect::NorthLonger(_)
+                            | AdjRect::NorthShorter(_)
+                            | AdjRect::South(_)
+                            | AdjRect::SouthLonger(_)
+                            | AdjRect::SouthShorter(_)
+                    ) {
+                        self.free_rects[i.idx()].wh().1 as u32
+                    } else {
+                        self.free_rects[i.idx()].wh().0 as u32
+                    }) + (if i.is_eq() { u32::MAX / 2 } else { 0 })
+                })
+                .unwrap_or(0)
+            })
+            .unwrap()
     }
 
     /// finds adjacent rects and merges with biggest one `(by area)`\
@@ -127,39 +198,96 @@ impl Guillotine {
     // can also consider adjacent rects with different edge length
     // and merge them if merging doesn't leave high aspect ratio rects
     // then merge the left out rect (since it's dimensions changed)
-    fn merge(&mut self, free_rect_idx: usize) {
+    fn merge_impl(&mut self, free_rect_idx: usize, remove: &mut Vec<usize>) {
         let (x, y, w, h) = self.free_rects[free_rect_idx].xywh();
         assert_ne!(w, 0, "width was 0");
         assert_ne!(h, 0, "height was 0");
         let adj = self.find_biggest_adjacent(x, y, w, h);
-        let new_rect = match adj {
-            AdjRect::North(i) => {
-                let (_, fh) = self.free_rects[i].wh();
-                Some((i, Rect::new(x, y, w, h + fh)))
-            }
-            AdjRect::East(i) => {
-                let (fw, _) = self.free_rects[i].wh();
-                Some((i, Rect::new(x, y, w + fw, h)))
-            }
-            AdjRect::South(i) => {
-                let (_, fh) = self.free_rects[i].wh();
-                Some((i, Rect::new(x, y - fh, w, fh + h)))
-            }
-            AdjRect::West(i) => {
-                let (fw, _) = self.free_rects[i].wh();
-                Some((i, Rect::new(x - fw, y, fw + w, h)))
-            }
-            AdjRect::None => None,
+        let mut merge_eq = |i: usize, merged: Rect, free_rects: &mut Vec<Rect>| {
+            free_rects[free_rect_idx] = merged;
+            remove.push(i);
         };
-        if let Some((i, nr)) = new_rect {
-            self.free_rects.swap_remove(free_rect_idx);
-            if i == self.free_rects.len() {
-                self.free_rects.swap_remove(free_rect_idx);
-            } else {
-                self.free_rects.swap_remove(i);
+        let merge_ne = |i: usize, merged: Rect, left_out: Rect, free_rects: &mut [Rect]| {
+            free_rects[free_rect_idx] = left_out;
+            free_rects[i] = merged;
+        };
+        if let Some(adj) = adj {
+            let calc_score = |a: Rect, b: Rect| 1.0 / (a.aspect() * b.aspect());
+            let score = calc_score(self.free_rects[free_rect_idx], self.free_rects[adj.idx()]);
+            let (fw, fh) = self.free_rects[adj.idx()].wh();
+            match adj {
+                AdjRect::North(i) | AdjRect::East(i) | AdjRect::South(i) | AdjRect::West(i) => {
+                    merge_eq(
+                        i,
+                        match adj {
+                            AdjRect::North(_) => Rect::new(x, y, w, h + fh),
+                            AdjRect::East(_) => Rect::new(x, y, w + fw, h),
+                            AdjRect::South(_) => Rect::new(x, y - fh, w, fh + h),
+                            AdjRect::West(_) => Rect::new(x - fw, y, fw + w, h),
+                            _ => unreachable!(),
+                        },
+                        &mut self.free_rects,
+                    );
+                    self.merge_impl(free_rect_idx, remove);
+                }
+                AdjRect::NorthShorter(i)
+                | AdjRect::EastShorter(i)
+                | AdjRect::SouthShorter(i)
+                | AdjRect::WestShorter(i)
+                | AdjRect::NorthLonger(i)
+                | AdjRect::EastLonger(i)
+                | AdjRect::SouthLonger(i)
+                | AdjRect::WestLonger(i) => {
+                    let (merged, left_out) = match adj {
+                        AdjRect::NorthShorter(_) => {
+                            (Rect::new(x, y, fw, h + fh), Rect::new(x + fw, y, w - fw, h))
+                        }
+                        AdjRect::EastShorter(_) => {
+                            (Rect::new(x, y, w + fw, fh), Rect::new(x, y + fh, w, h - fh))
+                        }
+                        AdjRect::SouthShorter(_) => (
+                            Rect::new(x, y - fh, fw, h + fh),
+                            Rect::new(x + fw, y, w - fw, h),
+                        ),
+                        AdjRect::WestShorter(_) => (
+                            Rect::new(x - fw, y, w + fw, fh),
+                            Rect::new(x, y + fh, w, h - fh),
+                        ),
+                        AdjRect::NorthLonger(_) => (
+                            Rect::new(x, y, w, h + fh),
+                            Rect::new(x + w, y + h, fw - w, fh),
+                        ),
+                        AdjRect::EastLonger(_) => (
+                            Rect::new(x, y, w + fw, h),
+                            Rect::new(x + w, y + h, fw, fh - h),
+                        ),
+                        AdjRect::SouthLonger(_) => (
+                            Rect::new(x, y - fh, w, h + fh),
+                            Rect::new(x + w, y - fh, fw - w, fh),
+                        ),
+                        AdjRect::WestLonger(_) => (
+                            Rect::new(x - fw, y, w + fw, h),
+                            Rect::new(x - fw, y + h, fw, fh - h),
+                        ),
+                        _ => unreachable!(),
+                    };
+                    let new_score = calc_score(merged, left_out);
+                    if new_score > score {
+                        merge_ne(i, merged, left_out, &mut self.free_rects);
+                        self.merge_impl(free_rect_idx, remove);
+                        self.merge_impl(i, remove);
+                    }
+                }
             }
-            self.free_rects.push(nr);
-            self.merge(self.free_rects.len() - 1);
+        };
+    }
+
+    fn merge(&mut self, free_rect_idx: usize) {
+        let mut rm = Vec::new();
+        self.merge_impl(free_rect_idx, &mut rm);
+        rm.sort_unstable_by(|a, b| b.cmp(a));
+        for i in rm {
+            self.free_rects.swap_remove(i);
         }
     }
 }
@@ -265,4 +393,8 @@ impl Packer for Guillotine {
     }
 }
 
-// TODO: skyline/shelf algos
+// TODO:
+// - improve guillotine merging
+// - skyline
+// - shelf
+// - maximal rect
