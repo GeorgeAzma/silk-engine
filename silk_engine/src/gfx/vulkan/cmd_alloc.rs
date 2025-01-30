@@ -1,4 +1,4 @@
-use crate::debug_name;
+use crate::gfx::debug_name;
 
 use super::{QUEUE_FAMILY_INDEX, alloc_callbacks, gpu};
 use ash::vk::{self, Handle};

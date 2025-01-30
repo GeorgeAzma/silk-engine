@@ -36,7 +36,7 @@ macro_rules! expose {
     };
 }
 
-pub fn as_slice<T: ?Sized, U>(p: &T) -> &[U] {
+pub fn cast_slice<T: ?Sized, U>(p: &T) -> &[U] {
     unsafe {
         std::slice::from_raw_parts((p as *const T) as *const U, size_of_val(p) / size_of::<U>())
     }
@@ -55,12 +55,12 @@ pub fn from_bytes<T>(p: &[u8]) -> &T {
     from_slice::<T, u8>(p)
 }
 
-pub struct Reader<'a, const BE: bool = false> {
+pub struct Reader<'a> {
     idx: usize,
     bytes: &'a [u8],
 }
 
-impl<'a, const BE: bool> Reader<'a, BE> {
+impl<'a> Reader<'a> {
     pub fn new(bytes: &'a [u8]) -> Self {
         Self { idx: 0, bytes }
     }
@@ -83,7 +83,13 @@ impl<'a, const BE: bool> Reader<'a, BE> {
         array
     }
 
-    pub fn read(&mut self) -> u8 {
+    pub fn read(&mut self, num_bytes: usize) -> &[u8] {
+        let bytes = &self.bytes[self.idx..][..num_bytes];
+        self.idx += num_bytes;
+        bytes
+    }
+
+    pub fn read8(&mut self) -> u8 {
         let byte = self.bytes[self.idx];
         self.idx += 1;
         byte
@@ -91,29 +97,126 @@ impl<'a, const BE: bool> Reader<'a, BE> {
 
     pub fn read16(&mut self) -> u16 {
         let bytes = self.read_arr::<2>();
-        if BE {
-            u16::from_be_bytes(bytes)
-        } else {
-            u16::from_le_bytes(bytes)
-        }
+        u16::from_le_bytes(bytes)
     }
 
     pub fn read32(&mut self) -> u32 {
         let bytes = self.read_arr::<4>();
-        if BE {
-            u32::from_be_bytes(bytes)
-        } else {
-            u32::from_le_bytes(bytes)
-        }
+        u32::from_le_bytes(bytes)
     }
 
     pub fn read64(&mut self) -> u64 {
         let bytes = self.read_arr::<8>();
-        if BE {
-            u64::from_be_bytes(bytes)
-        } else {
-            u64::from_le_bytes(bytes)
+        u64::from_le_bytes(bytes)
+    }
+}
+
+pub struct ReaderBe<'a> {
+    idx: usize,
+    bytes: &'a [u8],
+}
+
+impl<'a> ReaderBe<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self { idx: 0, bytes }
+    }
+
+    pub fn idx(&self) -> usize {
+        self.idx
+    }
+
+    pub fn goto(&mut self, idx: usize) {
+        self.idx = idx;
+    }
+
+    pub fn skip(&mut self, bytes: usize) {
+        self.idx += bytes;
+    }
+
+    pub fn read_arr<const N: usize>(&mut self) -> [u8; N] {
+        let array: [u8; N] = *self.bytes[self.idx..][..N].as_array::<N>().unwrap();
+        self.idx += N;
+        array
+    }
+
+    pub fn read(&mut self, num_bytes: usize) -> &[u8] {
+        let bytes = &self.bytes[self.idx..][..num_bytes];
+        self.idx += num_bytes;
+        bytes
+    }
+
+    pub fn read8(&mut self) -> u8 {
+        let byte = self.bytes[self.idx];
+        self.idx += 1;
+        byte
+    }
+
+    pub fn read16(&mut self) -> u16 {
+        let bytes = self.read_arr::<2>();
+        u16::from_be_bytes(bytes)
+    }
+
+    pub fn read32(&mut self) -> u32 {
+        let bytes = self.read_arr::<4>();
+        u32::from_be_bytes(bytes)
+    }
+
+    pub fn read64(&mut self) -> u64 {
+        let bytes = self.read_arr::<8>();
+        u64::from_be_bytes(bytes)
+    }
+}
+
+pub struct Writer {
+    idx: usize,
+    bytes: Box<[u8]>,
+}
+
+impl Writer {
+    pub fn new(size: usize) -> Self {
+        Self {
+            idx: 0,
+            bytes: vec![0u8; size].into_boxed_slice(),
         }
+    }
+
+    pub fn idx(&self) -> usize {
+        self.idx
+    }
+
+    pub fn finish(self) -> Vec<u8> {
+        self.bytes.into_vec()
+    }
+
+    pub fn goto(&mut self, idx: usize) {
+        self.idx = idx;
+    }
+
+    pub fn skip(&mut self, bytes: usize) {
+        self.idx += bytes;
+    }
+
+    pub fn write<T: ?Sized>(&mut self, val: &T) {
+        let size = size_of_val(val);
+        self.bytes[self.idx..][..size].copy_from_slice(cast_slice(val));
+        self.idx += size;
+    }
+
+    pub fn write8(&mut self, byte: u8) {
+        self.bytes[self.idx] = byte;
+        self.idx += 1;
+    }
+
+    pub fn write16(&mut self, word: u16) {
+        self.write(&word.to_le_bytes())
+    }
+
+    pub fn write32(&mut self, dword: u32) {
+        self.write(&dword.to_le_bytes())
+    }
+
+    pub fn write64(&mut self, qword: u64) {
+        self.write(&qword.to_le_bytes())
     }
 }
 

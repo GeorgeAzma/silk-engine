@@ -5,15 +5,34 @@
     slice_as_array,
     str_from_raw_parts
 )]
-use std::any::TypeId;
-pub use std::{
-    collections::{HashMap, HashSet},
-    fs,
-    process::abort,
-    ptr::{self, null, null_mut},
-    rc::Rc,
+
+pub mod prelude;
+
+mod bmp;
+mod buddy_alloc;
+mod contain_range;
+mod event;
+mod gfx;
+mod input;
+mod print;
+mod qoi;
+mod rand;
+mod util;
+
+use ash::vk;
+use event::{Dispatcher, Event, WindowResize};
+use gfx::{
+    GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Renderer,
+    queue_idle,
+};
+pub use print::*;
+
+use input::*;
+use std::{
+    any::TypeId,
+    collections::HashMap,
     sync::{Arc, LazyLock, Mutex},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -25,30 +44,13 @@ use winit::{
     {platform::run_on_demand::EventLoopExtRunOnDemand, window::WindowAttributes},
 };
 
-mod input;
-mod print;
-mod qoi;
-use input::*;
-pub use input::{Key, Mouse};
-pub use print::*;
-pub use qoi::Qoi;
-mod gfx;
-pub use gfx::*;
-mod util;
-pub use util::*;
-mod buddy_alloc;
-mod contain_range;
-mod event;
-pub use event::*;
-mod rand;
-pub use rand::*;
-
 #[cfg(not(test))]
 pub const RES_PATH: &str = "res";
 #[cfg(test)]
 pub const RES_PATH: &str = "../target/test_res";
 
 pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
+    use std::fs;
     fs::create_dir_all(RES_PATH).unwrap_or_default();
     fs::create_dir_all(format!("{RES_PATH}/shaders")).unwrap_or_default();
     fs::create_dir_all(format!("{RES_PATH}/images")).unwrap_or_default();

@@ -1,5 +1,9 @@
-use crate::*;
-use gfx::shader::Shader;
+use crate::{
+    RES_PATH,
+    gfx::{alloc_callbacks, debug_name, gpu, instance, samples_u32_to_vk, shader::Shader},
+};
+use ash::vk;
+use std::sync::LazyLock;
 
 fn pipeline_cache_path() -> String {
     format!("{RES_PATH}/cache/pipeline_cache")
@@ -502,13 +506,13 @@ fn log_pipeline_info(pipeline: vk::Pipeline) {
                     continue;
                 }
                 if name == "bin" {
-                    let val = util::Mem::str(&val);
+                    let val = crate::util::Mem::str(&val);
                     stats_str += &format!(" {name}({val})");
                 } else {
                     stats_str += &format!(" {name}({val})");
                 }
             }
-            log!("{stats_str}");
+            crate::log!("{stats_str}");
         }
     }
 }

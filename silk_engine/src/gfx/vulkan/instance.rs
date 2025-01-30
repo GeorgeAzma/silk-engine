@@ -169,7 +169,7 @@ static INSTANCE: LazyLock<ash::Instance> = LazyLock::new(|| {
                             | vk::DebugUtilsMessageTypeFlagsEXT::DEVICE_ADDRESS_BINDING,
                     )
                     .pfn_user_callback(Some(vulkan_debug_callback)),
-                crate::alloc_callbacks(),
+                super::alloc_callbacks(),
             )
             .unwrap();
     }

@@ -1,4 +1,4 @@
-use crate::alloc_callbacks;
+use crate::gfx::alloc_callbacks;
 
 use super::gpu;
 use ash::vk::{self, Handle};

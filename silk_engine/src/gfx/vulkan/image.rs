@@ -1,6 +1,4 @@
-use crate::{alloc_callbacks, queue_family_index, samples_u32_to_vk};
-
-use super::{ImgLayout, gpu};
+use super::{ImgLayout, alloc_callbacks, gpu, queue_family_index, samples_u32_to_vk};
 use ash::vk;
 
 #[derive(Clone)]

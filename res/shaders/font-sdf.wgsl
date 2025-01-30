@@ -4,70 +4,69 @@
 //     run invocation:
 //       for 1..4:
 //         for each bezier:
-//           calc sdf (0-255) for 4 pixels at a time
+//           calc sdf (0-255)
 //           and pack result in u32
-// notes: 
-// - efficient if font has similar bezier count per glyph
-// - result has to be unpacked into an R8 image for storage
+// note: efficient if font has similar bezier count per glyph
 
 struct Uniform {
     sdf_width: u32,
-    max_glyph_width: u32,
-    max_glyph_height: u32,
+    char_size_px: u32,
 }
 
 @group(0) @binding(0) var<storage, read_write> sdf: array<u32>;
-@group(0) @binding(1) var<uniform> sdf_width: u32;
+@group(0) @binding(1) var<uniform> uni: Uniform;
 @group(0) @binding(2) var<storage, read> points: array<vec2f>; // 0-1 range
 // packed (off, size, wh, xy) per glyph
 @group(0) @binding(3) var<storage, read> glyphs: array<vec4u>;
 
-fn cross(a: vec2f, b: vec2f, p: vec2f) -> f32 {
-    return dot(b - a, vec2f(a.y - p.y, p.x - a.x));
+fn cross2(a: vec2f, b: vec2f) -> f32 {
+    return a.x * b.y - a.y * b.x;
 }
 
-fn sign_bezier(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 { 
-    let a = C - A;
-    let b = vec2f(B.y - A.y, A.x - B.x);
-    let c = p - A;
-    let bary = vec2f(dot(c, b), dot(a, vec2f(c.y, -c.x))) / dot(a, b);
-    let d = vec2f(bary.y * 0.5, 0.0) + 1.0 - bary.x - bary.y;
-    return sign(((d.x * d.x - d.y) * step(d.y, d.x) + cross(B, A, p) * cross(B, C, p) * step(d.x, d.y)) * dot(a, -b));
-}
-
-fn solve_cubic(a: f32, b: f32, c: f32) -> vec3f {
-    let p = b - a * a / 3.0;
-    let p3 = p * p * p;
-    let q = a * (2.0 * a * a - 9.0 * b) / 27.0 + c;
-    let d = q * q + 4.0 * p3 / 27.0;
-    let offset = -a / 3.0;
-    if(d >= 0.0) { 
-        let z = sqrt(d);
-        let x = (vec2f(z, -z) - q) / 2.0;
-        let uv = sign(x) * pow(abs(x), vec2f(1.0 / 3.0));
-        return vec3f(offset + uv.x + uv.y);
-    }
-    let v = acos(-sqrt(-27.0 / p3) * q / 2.0) / 3.0;
-    let m = cos(v);
-    let n = sin(v) * sqrt(3.0);
-    return vec3f(m + m, -n - m, n - m) * sqrt(-p / 3.0) + offset;
-}
-
-fn bezier_sdf(A: vec2f, B: vec2f, C: vec2f, p: vec2f) -> f32 {    
-    let b1 = B + 0.00001;
-    let a2 = b1 - A;
-    let b2 = A - b1 * 2.0 + C;
-    let c2 = a2 * 2.0;
+// https://www.shadertoy.com/view/ftdGDB
+fn bezier_sdf(p: vec2f, A: vec2f, B: vec2f, C: vec2f) -> f32 {
+    let EPS = 1e-6;
+    let a = B - A;
+    let b = A - 2.0 * B + C;
+    let c = a * 2.0;
     let d = A - p;
-    let k = vec3f(3.0 * dot(a2, b2), 2.0 * dot(a2, a2) + dot(d, b2), dot(d, a2)) / dot(b2, b2);      
-    let t = clamp(solve_cubic(k.x, k.y, k.z), vec3f(0.0), vec3f(1.0));
-    var pos = A + (c2 + b2 * t.x) * t.x;
-    var dis = length(pos - p);
-    pos = A + (c2 + b2 * t.y) * t.y;
-    dis = min(dis, length(pos - p));
-    pos = A + (c2 + b2 * t.z) * t.z;
-    dis = min(dis, length(pos - p));
-    return dis * sign_bezier(A, b1, C, p);
+
+    let kk = 1.0 / dot(b, b);
+    let kx = kk * dot(a, b);
+    let ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
+    let kz = kk * dot(d, a);
+
+    var res = 0.0;
+    var sgn = 0.0;
+
+    let p1 = ky - kx * kx;
+    let p3 = p1 * p1 * p1;
+    let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    var h = q * q + 4.0 * p3;
+    if h >= 0.0 {
+        h = sqrt(h);
+        let x = 0.5 * (vec2f(h, -h) - q);
+        let uv = sign(x) * pow(abs(x), vec2f(1.0 / 3.0));
+        let t = saturate(uv.x + uv.y - kx) + EPS;
+        let q = d + (c + b * t) * t;
+        res = dot(q, q);
+        sgn = cross2(c + 2.0 * b *  t, q);
+    } else {
+        let z = sqrt(-p1);
+        let v = acos(q / (p1 * z * 2.0)) / 3.0;
+        let m = cos(v);
+        let n = sin(v) * sqrt(3.0);
+        let t = saturate(vec3f(m + m, -n - m, n - m) * z-kx) + EPS;
+        let qx = d + (c + b * t.x) * t.x;
+        let dx = dot(qx, qx);
+        let sx = cross2(c + 2.0 * b * t.x, qx);
+        let qy = d + (c + b * t.y) * t.y;
+        let dy = dot(qy, qy);
+        let sy = cross2(c + 2.0 * b * t.y, qy);
+        res = select(dy, dx, dx < dy);
+        sgn = select(sy, sx, dx < dy);
+    }
+    return sign(sgn) * sqrt(res);
 }
 
 @compute
@@ -80,30 +79,28 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let glyph = glyphs[gid.y];
     let gs = vec2u(glyph.z >> 16, glyph.z & 0xFFFF);
     let gp = vec2u(glyph.w >> 16, glyph.w & 0xFFFF);
-    let id = gid.x * 4;
-    let p = vec2u(id % sdf_width, id / sdf_width);
-    if any(vec4(p < gp, p >= gp + gs)) {
+    var id = gid.x * 4;
+    let pu = vec2u(id % uni.sdf_width, id / uni.sdf_width);
+    if any(vec4(pu < gp, pu >= gp + gs)) {
         return;
     }
-    let off = glyph.x;
-    let bezier_count = glyph.y;
-    for (var i = 0u; i < 4; i += 1u) {
-        let idx = id + i;
-        let pu = vec2u(idx % sdf_width, idx / sdf_width);
-        let p = vec2f(pu - gp) / vec2f(256, 256);
+    for (var j = 0u; j < 4; j += 1u) {
+        let idx = id + j;
+        let puj = vec2u(idx % uni.sdf_width, idx / uni.sdf_width);
+        let p = vec2f(puj - gp) / vec2f(uni.char_size_px);
         var d = 9999.0;
-        var ds = 9999.0;
-        for (var j = 0u; j < bezier_count; j += 1u) {
-            let a = points[j * 3 + off + 0];
-            let b = points[j * 3 + off + 1];
-            let c = points[j * 3 + off + 2];
-            let dir = normalize(c - a) * 0.00001;
-            let bd = bezier_sdf(a + dir, b + dir * vec2f(10), c - dir, p);
+        for (var i = 0u; i < glyph.y; i += 1u) {
+            let off = glyph.x + i * 3;
+            let a = points[off + 0];
+            let b = points[off + 1];
+            let c = points[off + 2];
+            let dir = normalize(c - a) * 5e-5;
+            let bd = bezier_sdf(p, a + dir, b + dir, c - dir);
             if abs(bd) < abs(d) {
                 d = bd;
             }
         }
-        let sdfu = u32(round(smoothstep(-0.3, 0.3, d) * 255.0));
-        sdf[gid.x] |= sdfu << (i * 8u);
+        sdf[gid.x] |= u32(saturate(d / 0.5 + 0.5) * 255.0) << (j * 8u);
     }
+
 }

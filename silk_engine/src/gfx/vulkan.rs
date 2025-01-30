@@ -2,31 +2,33 @@
 use std::ffi::c_void;
 use std::sync::LazyLock;
 
-pub use ash::vk;
-mod gpu_alloc;
-pub(super) use gpu_alloc::GpuAlloc;
 mod cmd_alloc;
-pub(super) use cmd_alloc::CmdAlloc;
-mod ds_alloc;
-pub(super) use ds_alloc::DescAlloc;
-mod dsl_manager;
-pub(super) use dsl_manager::*;
-mod sampler_manager;
-pub(super) use sampler_manager::*;
-mod gpu;
-pub use gpu::*;
-mod instance;
-mod pipeline_layout_manager;
-pub use instance::*;
-pub(super) use pipeline_layout_manager::PipelineLayoutManager;
-mod config;
-pub use config::MSAA;
-pub mod pipeline;
-pub use pipeline::*;
-mod image;
-pub use image::*;
 mod cmd_manager;
+mod config;
+mod ds_alloc;
+mod dsl_manager;
+mod gpu;
+mod gpu_alloc;
+mod image;
+mod instance;
+mod pipeline;
+mod pipeline_layout_manager;
+mod sampler_manager;
+
+pub use ash::vk;
+pub use config::MSAA;
+pub use gpu::*;
+pub use image::*;
+pub use instance::*;
+pub use pipeline::*;
+
+pub(super) use cmd_alloc::CmdAlloc;
 pub(super) use cmd_manager::CmdManager;
+pub(super) use ds_alloc::DescAlloc;
+pub(super) use dsl_manager::{DSLBinding, DSLManager};
+pub(super) use gpu_alloc::GpuAlloc;
+pub(super) use pipeline_layout_manager::PipelineLayoutManager;
+pub(super) use sampler_manager::SamplerManager;
 
 use crate::err;
 #[cfg(debug_assertions)]
@@ -36,7 +38,7 @@ use super::debug_name;
 
 #[cfg(debug_assertions)]
 struct UserData {
-    allocs: crate::HashMap<usize, (std::alloc::Layout, vk::SystemAllocationScope)>,
+    allocs: std::collections::HashMap<usize, (std::alloc::Layout, vk::SystemAllocationScope)>,
 }
 
 #[cfg(debug_assertions)]

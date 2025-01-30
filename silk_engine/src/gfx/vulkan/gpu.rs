@@ -1,6 +1,4 @@
-use crate::{alloc_callbacks, queue_family_index};
-
-use super::{config::*, instance};
+use super::{alloc_callbacks, config::*, instance, queue_family_index};
 use ash::vk;
 use std::{ffi::CString, sync::LazyLock};
 

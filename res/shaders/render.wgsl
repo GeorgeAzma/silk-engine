@@ -66,8 +66,8 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
     var d = max(abs(dpdx(r)), abs(dpdy(r)));
     r -= d * 0.5;
     d *= 1.5;
-    let edge = clamp(1.0 - in.roundness * 0.75 - r / d, 0.0, 1.0);
-    let strk = clamp((r + in.stroke_width) / d, 0.0, 1.0);
+    let edge = saturate(1.0 - in.roundness * 0.75 - r / d);
+    let strk = saturate((r + in.stroke_width) / d);
     var col = mix(in.color, in.stroke_color, strk);
     col.a *= edge;
     if in.tex_coord.x != ~0u {

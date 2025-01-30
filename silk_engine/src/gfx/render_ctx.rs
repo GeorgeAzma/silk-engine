@@ -4,23 +4,18 @@ use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
-use crate::ImgUsage;
-use crate::{gpu, gpu_idle, scope_time, util::Mem};
+use crate::{scope_time, util::Mem};
 
-use super::{BufUsage, CmdManager, ImgLayout, MemProp, create_compute};
 use super::{
-    DSLManager, DescAlloc, GpuAlloc, PipelineLayoutManager, alloc_callbacks, entry, instance,
-    physical_gpu, queue,
-    shader::Shader,
-    vulkan::{
-        DSLBinding, ImageInfo, SamplerManager,
-        pipeline::{GraphicsPipelineInfo, PipelineStageInfo},
-    },
+    BufUsage, CmdManager, DSLBinding, DSLManager, DescAlloc, GpuAlloc, GraphicsPipelineInfo,
+    ImageInfo, ImgLayout, ImgUsage, MemProp, PipelineLayoutManager, PipelineStageInfo,
+    SamplerManager, alloc_callbacks, create_compute, entry, gpu, gpu_idle, instance, physical_gpu,
+    queue, shader::Shader,
 };
 
 #[cfg(debug_assertions)]
 static DEBUG_UTILS_LOADER: std::sync::LazyLock<ash::ext::debug_utils::Device> =
-    std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(crate::instance(), gpu()));
+    std::sync::LazyLock::new(|| ash::ext::debug_utils::Device::new(instance(), gpu()));
 
 struct ShaderData {
     shader: Shader,
@@ -584,17 +579,10 @@ impl RenderCtx {
 
     /// note: x,y,z are total size, not work group size
     pub fn dispatch(&mut self, x: u32, y: u32, z: u32) {
-        unsafe {
-            let [wx, wy, wz] = self
-                .shader(&self.cmd_info.pipeline_data.shader_name)
-                .workgroup_size();
-            gpu().cmd_dispatch(
-                self.cmd(),
-                (x + wx - 1) / wx,
-                (y + wy - 1) / wy,
-                (z + wz - 1) / wz,
-            );
-        };
+        let [wx, wy, wz] = self
+            .shader(&self.cmd_info.pipeline_data.shader_name)
+            .workgroup_size();
+        unsafe { gpu().cmd_dispatch(self.cmd(), x.div_ceil(wx), y.div_ceil(wy), z.div_ceil(wz)) };
     }
 
     pub fn add_desc_set(
@@ -1136,7 +1124,7 @@ impl RenderCtx {
         self.write_ds_buf_ranges(
             name,
             &buf_binds
-                .into_iter()
+                .iter()
                 .map(|&(buf, bind)| (buf, 0..vk::WHOLE_SIZE, bind))
                 .collect::<Vec<_>>(),
         );

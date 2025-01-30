@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use super::{alloc_callbacks, gpu, queue_family_index};
-use crate::{ImageInfo, buddy_alloc::BuddyAlloc, contain_range::ContainRange, gpu_mem_props};
+use super::{ImageInfo, alloc_callbacks, gpu, gpu_mem_props, queue_family_index};
+use crate::{buddy_alloc::BuddyAlloc, contain_range::ContainRange};
 use ash::vk;
 use vk::Handle;
 
@@ -45,8 +45,11 @@ impl MemBlock {
             } else {
                 ""
             };
-            crate::debug_name(
-                &format!("{ty}{cached} mem block({})", crate::Mem::b(size as usize)),
+            super::debug_name(
+                &format!(
+                    "{ty}{cached} mem block({})",
+                    crate::util::Mem::b(size as usize)
+                ),
                 mem,
             );
         }
@@ -126,8 +129,8 @@ impl MemPool {
         crate::log!(
             "Mem Pool({:?}) Alloc: off({}), size({})",
             self.props,
-            crate::Mem::b(off),
-            crate::Mem::b(size as usize)
+            crate::util::Mem::b(off),
+            crate::util::Mem::b(size as usize)
         );
         assert_ne!(off, usize::MAX);
         (off as vk::DeviceSize, &self.mems[0])
@@ -137,8 +140,8 @@ impl MemPool {
         crate::log!(
             "Mem Pool({:?}) Dealloc: off({}), size({})",
             self.props,
-            crate::Mem::b(offset as usize),
-            crate::Mem::b(size as usize)
+            crate::util::Mem::b(offset as usize),
+            crate::util::Mem::b(size as usize)
         );
         self.buddy.dealloc(offset as usize, size as usize)
     }

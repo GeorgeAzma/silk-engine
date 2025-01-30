@@ -1,7 +1,7 @@
-use packer::{Guillotine, Packer};
-use silk_engine::*;
+use silk_engine::prelude::*;
 
 struct MyApp<'a> {
+    #[allow(unused)]
     app: &'a mut AppContext<Self>,
     packer: Guillotine,
     rects: Vec<(u16, u16, u16, u16)>,
@@ -12,25 +12,34 @@ impl App for MyApp<'_> {
         let app = unsafe { &mut *app };
 
         let mut ctx = app.ctx();
-        let _font = Font::new("segoe-ui", 256, &mut ctx);
+        let _font = Font::new("segoe-ui", 64, &mut ctx);
         drop(ctx);
         let mut rects = vec![];
         let mut packer = Guillotine::new(512, 512);
         let mut area = 0;
         let mut perim = 0;
-        let unpacked = (0u32..512)
-            .map(|i| ((i.rand() >> 16) as u16 % 32 + 1, i.rand() as u16 % 32 + 1))
+        let unpacked = (0u32..1160)
+            .map(|i| {
+                let range = 128;
+                let rng = |off: i32| {
+                    (i as i32 + off)
+                        .randn_range(-range, range, 6.0)
+                        .unsigned_abs() as u16
+                        + 1
+                };
+                (rng(0), rng(i32::MAX / 2))
+            })
             .collect::<Vec<_>>();
         let packed = packer.pack_all(&unpacked);
         for (i, p) in packed.iter().enumerate() {
+            let (w, h) = unpacked[i];
             if let &Some((x, y)) = p {
-                let (w, h) = unpacked[i];
-                if (x as usize * y as usize + i).rand() % 4 != 0 || x + y > 256 {
-                    packer.unpack(x, y, w, h);
-                } else {
-                    area += w as u32 * h as u32;
-                    rects.push((x, y, w, h));
-                }
+                // if (x as usize * y as usize + i).rand() % 4 != 0 || x + y > 256 {
+                //     packer.unpack(x, y, w, h);
+                // } else {
+                area += w as u32 * h as u32;
+                rects.push((x, y, w, h));
+                // }
             }
         }
         for fr in packer.free_rects.iter() {
@@ -40,6 +49,10 @@ impl App for MyApp<'_> {
         println!(
             "Pack Efficiency: {} %",
             area as f32 / (packer.width() as f32 * packer.height() as f32) * 100.0
+        );
+        println!(
+            "Packed: {} %",
+            rects.len() as f32 / unpacked.len() as f32 * 100.0
         );
         println!("Rects: {}", rects.len());
         println!("Free Rects: {}", packer.free_rects.len());

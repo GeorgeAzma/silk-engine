@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use super::{
-    alloc_callbacks,
-    vulkan::{DSLBinding, pipeline::PipelineStageInfo},
+    alloc_callbacks, format_size, gpu,
+    vulkan::{DSLBinding, PipelineStageInfo},
 };
-use crate::{RES_PATH, format_size, gpu, log};
+use crate::{RES_PATH, log};
 use ash::vk;
 use naga::Module;
 
@@ -33,7 +33,7 @@ impl Shader {
         // read spirv cache
         let spirv = if let Ok(spirv) = std::fs::read(shader_cache_path(name)) {
             log!("Shader cache loaded: \"{name}.spv\"");
-            crate::util::as_slice(&spirv[..]).to_owned()
+            crate::util::cast_slice(&spirv[..]).to_owned()
         } else {
             log!("Shader loaded: \"{name}.wgsl\"");
             // validate wgsl
@@ -59,7 +59,11 @@ impl Shader {
             #[cfg(not(debug_assertions))]
             *crate::INIT_PATHS;
             #[cfg(not(debug_assertions))]
-            std::fs::write(&shader_cache_path(name), crate::util::as_slice(&spirv[..])).unwrap();
+            std::fs::write(
+                &shader_cache_path(name),
+                crate::util::cast_slice(&spirv[..]),
+            )
+            .unwrap();
 
             spirv
         };

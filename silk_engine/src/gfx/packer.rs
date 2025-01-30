@@ -50,10 +50,42 @@ impl Rect {
     }
 }
 
-pub trait Packer {
+pub trait Packer: Sized {
     fn new(width: u16, height: u16) -> Self;
     fn pack(&mut self, w: u16, h: u16) -> Option<(u16, u16)>;
     fn pack_all(&mut self, rects: &[(u16, u16)]) -> Vec<Option<(u16, u16)>>;
+    fn growing_pack_all_with<F: Fn(u16, u16) -> (u16, u16)>(
+        &mut self,
+        rects: &[(u16, u16)],
+        growth_fn: F,
+    ) -> Vec<(u16, u16)> {
+        let mut maybe_packed = self.pack_all(rects);
+        let mut packed = maybe_packed.iter().filter_map(|&p| p).collect::<Vec<_>>();
+        while packed.len() != maybe_packed.len() {
+            let (w, h) = growth_fn(self.width(), self.height());
+            assert!(
+                w > self.width() || h > self.height(),
+                "growth fn didn't grow packer"
+            );
+            assert!(
+                w >= self.width() && h >= self.height(),
+                "growth fn can't shrink packer"
+            );
+            *self = Self::new(w, h);
+            maybe_packed = self.pack_all(rects);
+            packed = maybe_packed.iter().filter_map(|&p| p).collect::<Vec<_>>();
+        }
+        packed
+    }
+    fn growing_pack_all(&mut self, rects: &[(u16, u16)], growth_factor: f32) -> Vec<(u16, u16)> {
+        assert!(growth_factor > 1.0, "growth factor must be more than 1");
+        self.growing_pack_all_with(rects, |w: u16, h: u16| {
+            (
+                (w as f32 * growth_factor).ceil() as u16,
+                (h as f32 * growth_factor).ceil() as u16,
+            )
+        })
+    }
     #[allow(unused)]
     fn unpack(&mut self, x: u16, y: u16, w: u16, h: u16) {
         panic!("unpacking not supported for this packer")
@@ -63,6 +95,12 @@ pub trait Packer {
     fn resize(&mut self, width: u16, height: u16);
     fn width(&self) -> u16;
     fn height(&self) -> u16;
+    fn grow(&mut self, factor: f32) {
+        self.resize(
+            (self.width() as f32 * factor).ceil() as u16,
+            (self.height() as f32 * factor).ceil() as u16,
+        );
+    }
 }
 
 pub struct Guillotine {
@@ -129,10 +167,6 @@ impl Guillotine {
         }
     }
 
-    /// returns indices of north/east/south/west adjacent rects\
-    /// with different edge length if their merge result is lower aspect ratio\
-    /// and left out rect also has low aspect ratio\
-    /// also returns indices of north/east/south/west adjacent rects with same edge length
     fn find_adjacent(&self, x: u16, y: u16, w: u16, h: u16) -> [Option<AdjRect>; 4] {
         let (mut north, mut east, mut south, mut west) = (None, None, None, None);
         for (i, fr) in self.free_rects.iter().enumerate() {
@@ -195,9 +229,6 @@ impl Guillotine {
 
     /// finds adjacent rects and merges with biggest one `(by area)`\
     /// keeps doing this until everything is fully merged `(greedy)`
-    // can also consider adjacent rects with different edge length
-    // and merge them if merging doesn't leave high aspect ratio rects
-    // then merge the left out rect (since it's dimensions changed)
     fn merge_impl(&mut self, free_rect_idx: usize, remove: &mut Vec<usize>) {
         let (x, y, w, h) = self.free_rects[free_rect_idx].xywh();
         assert_ne!(w, 0, "width was 0");
@@ -326,7 +357,9 @@ impl Packer for Guillotine {
             if fw < w || fh < h {
                 u32::MAX
             } else {
-                ((fw - w) as u32 * h as u32).min((fh - h) as u32 * w as u32)
+                let (w, h) = (w as f32, h as f32);
+                let (dw, dh) = (fw as f32 - w, fh as f32 - h);
+                (4e8 / ((dw.max(h) / dw.min(h)) * (dh.max(w) / dh.min(w)))) as u32
             }
         });
         if let Some((i, min_fr)) = min_fr {
@@ -382,6 +415,79 @@ impl Packer for Guillotine {
         self.merge(self.free_rects.len() - 2);
         self.free_rects.push(big);
         self.merge(self.free_rects.len() - 1);
+    }
+
+    fn width(&self) -> u16 {
+        self.width
+    }
+
+    fn height(&self) -> u16 {
+        self.height
+    }
+}
+
+pub struct Shelf {
+    width: u16,
+    height: u16,
+    xpos: u16,
+    ypos: u16,
+    row_max_height: u16,
+}
+
+impl Packer for Shelf {
+    fn new(width: u16, height: u16) -> Self {
+        Self {
+            width,
+            height,
+            xpos: 0,
+            ypos: 0,
+            row_max_height: 0,
+        }
+    }
+
+    fn pack(&mut self, w: u16, h: u16) -> Option<(u16, u16)> {
+        assert_ne!(w, 0, "width was 0");
+        assert_ne!(h, 0, "height was 0");
+        if self.xpos + w > self.width {
+            self.xpos = 0;
+            self.ypos += self.row_max_height;
+            self.row_max_height = 0;
+        }
+        if self.ypos + h > self.height || self.xpos + w > self.width {
+            None
+        } else {
+            let pos = Some((self.xpos, self.ypos));
+            self.row_max_height = self.row_max_height.max(h);
+            self.xpos += w;
+            pos
+        }
+    }
+
+    fn pack_all(&mut self, rects: &[(u16, u16)]) -> Vec<Option<(u16, u16)>> {
+        let mut indexed_rects = rects
+            .iter()
+            .enumerate()
+            .map(|(i, &(w, h))| (i, w, h))
+            .collect::<Vec<_>>();
+        indexed_rects
+            .sort_unstable_by_key(|&(_, w, h)| std::cmp::Reverse(h as u32 * 65535 + w as u32));
+        let mut rects = vec![None; indexed_rects.len()];
+        for i in 0..indexed_rects.len() {
+            let r = self.pack(indexed_rects[i].1, indexed_rects[i].2);
+            rects[indexed_rects[i].0] = r;
+        }
+        rects
+    }
+
+    fn reset(&mut self) {
+        self.xpos = 0;
+        self.ypos = 0;
+        self.row_max_height = 0;
+    }
+
+    fn resize(&mut self, width: u16, height: u16) {
+        self.width = width;
+        self.height = height;
     }
 
     fn width(&self) -> u16 {

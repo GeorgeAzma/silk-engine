@@ -7,7 +7,7 @@ use std::{
 
 use ash::vk;
 
-use crate::{Qoi, Tracked, WindowResize};
+use crate::{event::WindowResize, gfx::ImageLoader, util::Tracked};
 
 use super::{
     BufUsage, GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Unit,
@@ -228,10 +228,9 @@ impl Renderer {
     }
 
     pub fn load_img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
-        let mut img_data = Qoi::load(name);
-        let img_data = Qoi::flip_vert(&mut img_data);
+        let mut img_data = ImageLoader::load(name);
         if img_data.channels != 4 {
-            img_data.img = Qoi::make4(&mut img_data.img);
+            img_data.img = ImageLoader::make4(&mut img_data.img);
         }
         let tracked_img_data = self.add_img(name, img_data.width, img_data.height);
         tracked_img_data.copy_from_slice(&img_data.img);
@@ -361,7 +360,7 @@ impl Renderer {
         let (dx, dy) = (x1 - x0, y1 - y0);
         let an = dy.atan2(dx);
         self.rotation += an;
-        let (rw, rh) = (self.width as f32, self.height as f32);
+        let (rw, rh) = (self.width, self.height);
         let len = (dx * dx + dy * dy).sqrt() / rw * 0.5;
         let dw = self.pc_y(w) * 0.5;
         self.instance(
@@ -580,8 +579,8 @@ impl Renderer {
         self.old_color = self.color;
         self.old_stroke_color = self.stroke_color;
         self.old_stroke_width = self.stroke_width;
-        self.old_roundness = self.old_roundness;
-        self.old_rotation = self.old_rotation;
-        self.old_tex_coord = self.old_tex_coord;
+        self.old_roundness = self.roundness;
+        self.old_rotation = self.rotation;
+        self.old_tex_coord = self.tex_coord;
     }
 }

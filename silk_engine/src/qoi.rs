@@ -1,22 +1,7 @@
-use crate::RES_PATH;
-
-pub struct ImageData {
-    pub img: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub channels: u8,
-}
-
-impl ImageData {
-    pub fn new(img: Vec<u8>, width: u32, height: u32, channels: u8) -> Self {
-        Self {
-            img,
-            width,
-            height,
-            channels,
-        }
-    }
-}
+use crate::{
+    RES_PATH,
+    gfx::{ImageData, ImageFormat},
+};
 
 const MAX_PIXELS: u32 = 400_000_000;
 const SRGB: u8 = 0;
@@ -30,8 +15,20 @@ const RUN_MASK: u8 = 0b1100_0000;
 const MIN_QOI_LEN: usize = 4 /* magic */ + 4 /* width */ + 4 /* height */ + 1 /* channels */ + 1 /* colorspace */ + 8 /* padding */;
 
 pub struct Qoi;
+
 impl Qoi {
-    pub fn load(name: &str) -> ImageData {
+    #[inline(always)]
+    fn hash(rgba: [u8; 4]) -> u8 {
+        (rgba[0].wrapping_mul(3))
+            .wrapping_add(rgba[1].wrapping_mul(5))
+            .wrapping_add(rgba[2].wrapping_mul(7))
+            .wrapping_add(rgba[3].wrapping_mul(11))
+            % 64
+    }
+}
+
+impl ImageFormat for Qoi {
+    fn load(name: &str) -> ImageData {
         crate::scope_time!("QOI load");
         let path = format!("{RES_PATH}/images/{name}.qoi");
         let qoi = std::fs::read(path).unwrap_or_else(|_| panic!("qoi image not found: {name}"));
@@ -155,7 +152,7 @@ impl Qoi {
         }
     }
 
-    pub fn save(name: &str, img: &[u8], width: u32, height: u32, channels: u8) -> usize {
+    fn save(name: &str, img: &[u8], width: u32, height: u32, channels: u8) {
         crate::scope_time!("QOI save");
         let pixels = width * height;
         assert!(
@@ -254,47 +251,6 @@ impl Qoi {
         let img_path = format!("{RES_PATH}/images/{name}.qoi");
         std::fs::write(&img_path, &qoi)
             .unwrap_or_else(|e| panic!("failed to save qoi image({}): {e}", img_path));
-        qoi_len
-    }
-
-    #[inline(always)]
-    fn hash(rgba: [u8; 4]) -> u8 {
-        (rgba[0].wrapping_mul(3))
-            .wrapping_add(rgba[1].wrapping_mul(5))
-            .wrapping_add(rgba[2].wrapping_mul(7))
-            .wrapping_add(rgba[3].wrapping_mul(11))
-            % 64
-    }
-
-    pub fn flip_vert(img_data: &mut ImageData) -> &mut ImageData {
-        let height = img_data.height as usize;
-        let row_size = img_data.width as usize * img_data.channels as usize;
-        for i in 0..height / 2 {
-            let top_row_start = i * row_size;
-            let bottom_row_start = (height - 1 - i) * row_size;
-            unsafe {
-                std::ptr::swap_nonoverlapping(
-                    img_data.img.as_mut_ptr().add(top_row_start),
-                    img_data.img.as_mut_ptr().add(bottom_row_start),
-                    row_size,
-                )
-            };
-        }
-        img_data
-    }
-
-    pub fn make4(rgb: &mut [u8]) -> Vec<u8> {
-        assert_eq!(rgb.len() % 3, 0, "Non-RGB image can't be made to RGBA");
-        let mut rgba = vec![0u8; rgb.len() / 3 * 4];
-        let rgb_chunks = unsafe { rgb.as_chunks_unchecked::<3>() };
-        let rgba_chunks = unsafe { rgba.as_chunks_unchecked_mut::<4>() };
-        for (rgb, rgba) in rgb_chunks.iter().zip(rgba_chunks.iter_mut()) {
-            rgba[0] = rgb[0];
-            rgba[1] = rgb[1];
-            rgba[2] = rgb[2];
-            rgba[3] = 255;
-        }
-        rgba
     }
 }
 
