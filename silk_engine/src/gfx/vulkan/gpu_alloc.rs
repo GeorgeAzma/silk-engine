@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::{ImageInfo, alloc_callbacks, gpu, gpu_mem_props, queue_family_index};
-use crate::{buddy_alloc::BuddyAlloc, contain_range::ContainRange};
+use crate::util::{BuddyAlloc, ContainRange};
 use ash::vk;
 use vk::Handle;
 

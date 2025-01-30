@@ -1,5 +1,4 @@
 mod font;
-mod font_reader;
 mod image_loader;
 mod packer;
 mod render_ctx;

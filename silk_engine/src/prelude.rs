@@ -3,7 +3,6 @@ pub use crate::{
     event::*,
     gfx::*,
     input::{Key, Mouse},
-    rand::*,
     util::*,
 };
 pub use std::{

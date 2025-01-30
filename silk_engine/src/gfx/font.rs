@@ -7,6 +7,56 @@ use super::{
 };
 use crate::bmp::Bmp;
 
+// fn cross2(a: vec2f, b: vec2f) -> f32 {
+//     return a.x * b.y - a.y * b.x;
+// }
+
+// // https://www.shadertoy.com/view/ftdGDB
+// fn bezier_sdf(p: vec2f, A: vec2f, B: vec2f, C: vec2f) -> f32 {
+//     let EPS = 1e-6;
+//     let a = B - A;
+//     let b = A - 2.0 * B + C;
+//     let c = a * 2.0;
+//     let d = A - p;
+
+//     let kk = 1.0 / dot(b, b);
+//     let kx = kk * dot(a, b);
+//     let ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
+//     let kz = kk * dot(d, a);
+
+//     let mut res = 0.0;
+//     let mut sgn = 0.0;
+
+//     let p1 = ky - kx * kx;
+//     let p3 = p1 * p1 * p1;
+//     let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+//     let mut h = q * q + 4.0 * p3;
+//     if h >= 0.0 {
+//         h = h.sqrt();
+//         let x = 0.5 * (vec2f(h, -h) - q);
+//         let uv = sign(x) * pow(abs(x), vec2f(1.0 / 3.0));
+//         let t = saturate(uv.x + uv.y - kx) + EPS;
+//         let q = d + (c + b * t) * t;
+//         res = dot(q, q);
+//         sgn = cross2(c + 2.0 * b * t, q);
+//     } else {
+//         let z = sqrt(-p1);
+//         let v = acos(q / (p1 * z * 2.0)) / 3.0;
+//         let m = cos(v);
+//         let n = sin(v) * sqrt(3.0);
+//         let t = saturate(vec3f(m + m, -n - m, n - m) * z - kx) + EPS;
+//         let qx = d + (c + b * t.x) * t.x;
+//         let dx = dot(qx, qx);
+//         let sx = cross2(c + 2.0 * b * t.x, qx);
+//         let qy = d + (c + b * t.y) * t.y;
+//         let dy = dot(qy, qy);
+//         let sy = cross2(c + 2.0 * b * t.y, qy);
+//         res = select(dy, dx, dx < dy);
+//         sgn = select(sy, sx, dx < dy);
+//     }
+//     return sign(sgn) * sqrt(res);
+// }
+
 pub struct Font;
 
 impl Font {

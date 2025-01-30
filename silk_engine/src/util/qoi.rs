@@ -262,9 +262,9 @@ mod test {
         assert_eq!(a.img.len(), b.img.len(), "img size not equal");
         if a.img != b.img {
             println!("left img (wrong):");
-            crate::print_img(&a.img, a.width, a.height, a.channels);
+            crate::util::print_img(&a.img, a.width, a.height, a.channels);
             println!("right img (truth):");
-            crate::print_img(&b.img, b.width, b.height, a.channels);
+            crate::util::print_img(&b.img, b.width, b.height, a.channels);
             panic!();
         }
     }

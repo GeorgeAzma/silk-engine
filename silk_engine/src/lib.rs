@@ -8,15 +8,9 @@
 
 pub mod prelude;
 
-mod bmp;
-mod buddy_alloc;
-mod contain_range;
 mod event;
 mod gfx;
 mod input;
-mod print;
-mod qoi;
-mod rand;
 mod util;
 
 use ash::vk;
@@ -25,7 +19,6 @@ use gfx::{
     GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Renderer,
     queue_idle,
 };
-pub use print::*;
 
 use input::*;
 use std::{
