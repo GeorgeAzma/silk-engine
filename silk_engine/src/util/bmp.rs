@@ -1,7 +1,6 @@
 use crate::{
     RES_PATH,
-    gfx::{ImageData, ImageFormat},
-    util::{Reader, Writer},
+    util::{ImageData, ImageFormat, Reader, Writer},
 };
 
 pub struct Bmp;
@@ -92,12 +91,7 @@ impl ImageFormat for Bmp {
             }
         }
 
-        ImageData {
-            img,
-            width,
-            height,
-            channels,
-        }
+        ImageData::new(img, width, height, channels)
     }
 
     fn save(name: &str, img: &[u8], width: u32, height: u32, channels: u8) {

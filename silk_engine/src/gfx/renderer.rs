@@ -7,7 +7,10 @@ use std::{
 
 use ash::vk;
 
-use crate::{event::WindowResize, gfx::ImageLoader, util::Tracked};
+use crate::{
+    event::WindowResize,
+    util::{Funcs, ImageLoader, Tracked},
+};
 
 use super::{
     BufUsage, GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Unit,
@@ -384,7 +387,6 @@ impl Renderer {
         let (x0, y0) = (self.pc_x(x0), self.pc_y(y0));
         let (x1, y1) = (self.pc_x(x1), self.pc_y(y1));
         let (x2, y2) = (self.pc_x(x2), self.pc_y(y2));
-        use crate::util::Bezier;
         use Unit::Pc;
         let (mut px, mut py) = (x0, y0);
         let old_roundness = self.roundness;

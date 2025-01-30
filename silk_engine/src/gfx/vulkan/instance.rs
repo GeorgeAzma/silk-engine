@@ -45,7 +45,7 @@ unsafe extern "system" fn vulkan_debug_callback(
         .replace("the ", "");
 
     type Severity = vk::DebugUtilsMessageSeverityFlagsEXT;
-    use crate::print;
+    use crate::util::print;
     let ansi_message = match message_severity {
         Severity::ERROR => print::err(&message),
         Severity::WARNING => print::warn(&message),

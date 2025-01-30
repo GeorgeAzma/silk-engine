@@ -1,5 +1,4 @@
 mod font;
-mod image_loader;
 mod packer;
 mod render_ctx;
 mod renderer;
@@ -8,9 +7,8 @@ mod unit;
 mod vulkan;
 
 pub use font::Font;
-pub use image_loader::{ImageData, ImageFormat, ImageLoader};
 pub use packer::{Guillotine, Packer, Shelf};
-pub use render_ctx::*;
+pub use render_ctx::{BufferImageCopy, DebugScope, RenderCtx, debug_name, debug_tag};
 pub use renderer::Renderer;
 pub use unit::Unit;
 pub use unit::Unit::*;

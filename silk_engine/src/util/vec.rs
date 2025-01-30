@@ -34,7 +34,7 @@ impl Funcs for f32 {
     fn noise(self) -> f32 {
         let fl = self.abs().floor();
         let fr = self.abs().fract();
-        return fl.rand().slerp((fl + 1.0).rand(), fr.smooth());
+        fl.rand().slerp((fl + 1.0).rand(), fr.smooth())
     }
 
     fn smooth(self) -> Self {
@@ -417,7 +417,7 @@ impl Vec2 {
     }
 
     pub fn rand(&self) -> f32 {
-        ((self.x * 12.9898 + self.y * 4.1414).sin() * 43758.5453).fract()
+        ((self.x * 12.9898 + self.y * 4.1414).sin() * 43758.547).fract()
     }
 
     pub fn noise(&self) -> f32 {
@@ -432,7 +432,7 @@ impl Vec2 {
                     .lerp((ip + 1.0).rand(), u.x),
                 u.y,
             );
-        return res * res;
+        res * res
     }
 
     pub fn snoise(&self) -> f32 {
@@ -442,18 +442,18 @@ impl Vec2 {
                 p.dot(&Vec2::new(269.5, 183.3)),
             )
             .sin()
-                * 43758.5453123)
+                * 43758.547)
                 .fract()
                 * 2.0
                 - 1.0
         };
 
-        let i = (self.clone() + (self.x + self.y) * 0.366025404).floor();
-        let a = self.clone() - &i + (i.x + i.y) * 0.211324865;
+        let i = (self.clone() + (self.x + self.y) * 0.36602542).floor();
+        let a = self.clone() - &i + (i.x + i.y) * 0.21132487;
         let m = a.y.step(a.x);
         let o = Vec2::new(m, 1.0 - m);
-        let b = a.clone() - &o + 0.211324865;
-        let c = a.clone() - 1.0 + 2.0 * 0.211324865;
+        let b = a.clone() - &o + 0.21132487;
+        let c = a.clone() - 1.0 + 2.0 * 0.21132487;
         let h = (-Vec3::new(a.len2(), b.len2(), c.len2()) + 0.5).max(&Vec3::splat(0.0));
         let n = h.clone()
             * &h
@@ -464,7 +464,7 @@ impl Vec2 {
                 b.dot(&rand(&(i.clone() + o))),
                 c.dot(&rand(&(i + 1.0))),
             );
-        return n.dot(&Vec3::splat(70.0)) * 0.5 + 0.5;
+        n.dot(&Vec3::splat(70.0)) * 0.5 + 0.5
     }
 
     pub fn voronoise(&self, smooth: f32) -> f32 {
@@ -474,7 +474,7 @@ impl Vec2 {
                 p.dot(&Vec2::new(269.5, 183.3)),
                 p.dot(&Vec2::new(419.2, 371.9)),
             );
-            return (q.sin() * 43758.5453).fract();
+            (q.sin() * 43758.547).fract()
         };
         let p = self.floor();
         let f = self.fract();
@@ -487,12 +487,12 @@ impl Vec2 {
                 let o = hash3(&(p.clone() + &g)) * Vec3::splat(1.0);
                 let r = g - &f + Vec2::new(o.x, o.y);
                 let d = r.len2();
-                let ww = (1.0 - d.sqrt().sstep(0.0, 1.414213562373)).powf(k);
+                let ww = (1.0 - d.sqrt().sstep(0.0, std::f32::consts::SQRT_2)).powf(k);
                 va += o.z * ww;
                 wt += ww;
             }
         }
-        return va / wt;
+        va / wt
     }
 
     pub fn fbm(&self, oct: u32, amp_mul: f32, freq_mul: f32) -> f32 {
@@ -507,7 +507,7 @@ impl Vec2 {
             a *= amp_mul;
             p *= freq_mul;
         }
-        return s / m;
+        s / m
     }
 
     pub fn sfbm(self, oct: u32, amp_mul: f32, freq_mul: f32) -> f32 {
@@ -522,7 +522,7 @@ impl Vec2 {
             a *= amp_mul;
             p *= freq_mul;
         }
-        return s / m;
+        s / m
     }
 }
 #[derive(Clone)]

@@ -1,9 +1,11 @@
+pub(crate) mod print;
+
 mod bmp;
 mod buddy_alloc;
 mod contain_range;
 mod cooldown;
+mod image_loader;
 mod mem;
-mod print;
 mod qoi;
 mod rand;
 mod reader;
@@ -12,11 +14,19 @@ mod ttf;
 mod vec;
 mod writer;
 
+pub(crate) use bmp::Bmp;
+pub(crate) use buddy_alloc::BuddyAlloc;
+pub(crate) use contain_range::ContainRange;
+pub(crate) use image_loader::{ImageData, ImageFormat, ImageLoader};
+pub(crate) use qoi::Qoi;
+pub(crate) use ttf::Ttf;
+
+pub use cooldown::Cooldown;
 pub use mem::Mem;
-pub use print::*;
 pub use rand::Rand;
 pub use reader::{Reader, ReaderBe};
 pub use tracked::Tracked;
+pub use vec::{Funcs, Vec2, Vec3};
 pub use writer::Writer;
 
 #[macro_export]

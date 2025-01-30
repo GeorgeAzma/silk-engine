@@ -1,3 +1,4 @@
+#![allow(unused)]
 use crate::RES_PATH;
 use std::sync::LazyLock;
 
@@ -36,14 +37,16 @@ pub fn trace(text: &str) -> String {
 #[macro_export]
 macro_rules! fatal {
     ($($args:tt)*) => {
-        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace(1))
+        panic!("\x1b[48;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*),
+            $crate::util::print::backtrace(1))
     };
 }
 
 #[macro_export]
 macro_rules! err {
     ($($args:tt)*) => {
-        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*), $crate::backtrace(1))
+        eprintln!("\x1b[38;2;241;76;76m{}\x1b[0m\n\x1b[2m{}\x1b[0m", format_args!($($args)*),
+            $crate::util::print::backtrace(1))
     };
 }
 
@@ -122,7 +125,7 @@ macro_rules! log_file {
     ($file:expr, $($args:tt)*) => {
         #[cfg(any(debug_assertions, test))]
         {
-            use $crate::print::INIT_LOG_FOLDER;
+            use $crate::util::print::INIT_LOG_FOLDER;
             use std::io::{Read, Seek, Write};
             const LOG_SIZE: usize = 65536;
             *INIT_LOG_FOLDER;
@@ -151,7 +154,7 @@ macro_rules! log_file {
 #[macro_export]
 macro_rules! log {
     ($($args:tt)*) => {
-        $crate::log_file!([$crate::log_path() + "/debug.log"].concat(), $($args)*);
+        $crate::log_file!([$crate::util::print::log_path() + "/debug.log"].concat(), $($args)*);
     }
 }
 
@@ -159,13 +162,13 @@ macro_rules! log {
 macro_rules! scope_time {
     ($($args:expr),* ; $($cond:tt)+) => {
         let _t = if $($cond)+ {
-            Some($crate::ScopeTime::new(&format!($($args),*)))
+            Some($crate::util::print::ScopeTime::new(&format!($($args),*)))
         } else {
             None
         };
     };
     ($($args:tt)*) => {
-        let _t = $crate::ScopeTime::new(&format!($($args)*));
+        let _t = $crate::util::print::ScopeTime::new(&format!($($args)*));
     };
 }
 

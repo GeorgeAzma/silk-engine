@@ -15,18 +15,19 @@ mod pipeline;
 mod pipeline_layout_manager;
 mod sampler_manager;
 
-pub use ash::vk;
 pub use config::MSAA;
-pub use gpu::*;
-pub use image::*;
-pub use instance::*;
-pub use pipeline::*;
+pub use image::ImageInfo;
+pub use pipeline::{Enable, GraphicsPipelineInfo};
 
 pub(super) use cmd_alloc::CmdAlloc;
 pub(super) use cmd_manager::CmdManager;
 pub(super) use ds_alloc::DescAlloc;
 pub(super) use dsl_manager::{DSLBinding, DSLManager};
+pub(super) use gpu::{gpu, gpu_mem_props, physical_gpu};
 pub(super) use gpu_alloc::GpuAlloc;
+pub(super) use instance::instance;
+pub(super) use pipeline::PipelineStageInfo;
+pub(super) use pipeline::create_compute;
 pub(super) use pipeline_layout_manager::PipelineLayoutManager;
 pub(super) use sampler_manager::SamplerManager;
 
@@ -35,6 +36,8 @@ use crate::err;
 use crate::log;
 
 use super::debug_name;
+
+use ash::vk;
 
 #[cfg(debug_assertions)]
 struct UserData {

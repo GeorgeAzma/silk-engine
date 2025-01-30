@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 pub struct Tracked<T> {
     data: T,
     dirty: bool,

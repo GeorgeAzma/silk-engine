@@ -341,7 +341,7 @@ impl Shader {
         (binding_descs[0], attrib_descs)
     }
 
-    pub fn get_pipeline_stages(&self, module: vk::ShaderModule) -> Vec<PipelineStageInfo> {
+    pub(crate) fn get_pipeline_stages(&self, module: vk::ShaderModule) -> Vec<PipelineStageInfo> {
         self.ir_module
             .entry_points
             .iter()

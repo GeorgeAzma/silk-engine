@@ -62,7 +62,7 @@ impl std::ops::Deref for Mem {
     }
 }
 
-impl fmt::Debug for Mem {
+impl std::fmt::Debug for Mem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let by = self.bytes;
         let kb = by / 1024;
@@ -83,8 +83,8 @@ impl fmt::Debug for Mem {
     }
 }
 
-impl fmt::Display for Mem {
+impl std::fmt::Display for Mem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt::Debug::fmt(self, f)
+        std::fmt::Debug::fmt(self, f)
     }
 }

@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 pub struct Cooldown {
     timer: Instant,
     pub delay: Duration,

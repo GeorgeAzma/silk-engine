@@ -1,3 +1,5 @@
+use super::cast_slice;
+
 pub struct Writer {
     idx: usize,
     bytes: Box<[u8]>,

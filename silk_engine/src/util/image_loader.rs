@@ -1,4 +1,4 @@
-use crate::{bmp::Bmp, qoi::Qoi};
+use crate::util::{Bmp, Qoi};
 
 pub struct ImageData {
     pub img: Vec<u8>,

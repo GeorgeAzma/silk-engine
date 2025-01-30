@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
 use super::{
-    BufUsage, ImageFormat, MemProp, RenderCtx,
-    font_reader::FontReader,
+    BufUsage, MemProp, RenderCtx,
     packer::{Guillotine, Packer, Rect},
 };
-use crate::bmp::Bmp;
+use crate::util::{Bmp, ImageFormat, Ttf};
 
 // fn cross2(a: vec2f, b: vec2f) -> f32 {
 //     return a.x * b.y - a.y * b.x;
@@ -61,8 +60,8 @@ pub struct Font;
 
 impl Font {
     pub fn new(name: &str, char_size_px: u32, ctx: &mut RenderCtx) -> Self {
-        let t = crate::ScopeTime::new(&format!("parse font({name})"));
-        let mut reader = FontReader::new(name);
+        let t = crate::util::print::ScopeTime::new(&format!("parse font({name})"));
+        let mut reader = Ttf::new(name);
         // extract ascii glyphs
         reader.head.glob_xmin = i16::MAX;
         reader.head.glob_ymin = i16::MAX;
@@ -194,7 +193,7 @@ impl Font {
             ("font glyphs", 3),
         ]);
 
-        let t = crate::ScopeTime::new(&format!("{name} sdf gen"));
+        let t = crate::util::print::ScopeTime::new(&format!("{name} sdf gen"));
         ctx.write_buf("font sdf uniform", &[font_sdf_dim, char_size_px]);
         ctx.write_buf("font points", &font_points[..]);
         ctx.write_buf("font glyphs", &font_glyphs[..]);

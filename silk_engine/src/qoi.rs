@@ -1,6 +1,7 @@
-use crate::{RES_PATH, util::ImageFormat};
-
-use super::ImageData;
+use crate::{
+    RES_PATH,
+    gfx::{ImageData, ImageFormat},
+};
 
 const MAX_PIXELS: u32 = 400_000_000;
 const SRGB: u8 = 0;
@@ -256,9 +257,9 @@ mod test {
         assert_eq!(a.img.len(), b.img.len(), "img size not equal");
         if a.img != b.img {
             println!("left img (wrong):");
-            crate::util::print::print_img(&a.img, a.width, a.height, a.channels);
+            crate::print_img(&a.img, a.width, a.height, a.channels);
             println!("right img (truth):");
-            crate::util::print::print_img(&b.img, b.width, b.height, a.channels);
+            crate::print_img(&b.img, b.width, b.height, a.channels);
             panic!();
         }
     }

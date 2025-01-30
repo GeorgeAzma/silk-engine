@@ -60,14 +60,14 @@ impl Head {
     }
 }
 
-pub(crate) struct FontReader {
+pub(crate) struct Ttf {
     pub(crate) head: Head,
     pub(crate) glyphs: Vec<GlyphData>,
     pub(crate) idx2uni: Vec<char>,
 }
 
 // TTF parsing: https://youtu.be/SO83KQuuZvg
-impl FontReader {
+impl Ttf {
     pub(crate) fn new(name: &str) -> Self {
         let path = format!("{RES_PATH}/fonts/{name}.ttf");
         let bytes = std::fs::read(path).unwrap();
