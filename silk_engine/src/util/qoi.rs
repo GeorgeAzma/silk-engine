@@ -269,17 +269,19 @@ mod test {
         assert_eq!(img.width, limg.width);
         assert_eq!(img.height, limg.height);
         assert_eq!(img.channels, limg.channels);
-        assert_img_eq(&limg, &img);
+        assert_img_eq(&limg, img);
     }
 
     #[test]
     fn save_load_test() {
         *crate::INIT_PATHS;
+        #[rustfmt::skip]
+        #[allow(clippy::zero_prefixed_literal)]
         let img = vec![
-            155, 000, 000, /**/ 155, 000, 000, // run len + rgb
-            000, 200, 000, /**/ 250, 168, 250, // luma
-            000, 000, 155, /**/ 001, 000, 153, // diff
-            000, 200, 000, /**/ 250, 168, 250, // index
+            155, 000, 000,   155, 000, 000, // run len + rgb
+            000, 200, 000,   250, 168, 250, // luma
+            000, 000, 155,   001, 000, 153, // diff
+            000, 200, 000,   250, 168, 250, // index
         ];
         save_load(&ImageData::new(img, 2, 4, 3));
 

@@ -11,9 +11,7 @@ impl App for MyApp<'_> {
     fn new(app: *mut AppContext<Self>) -> Self {
         let app = unsafe { &mut *app };
 
-        let mut ctx = app.ctx();
-        let _font = Font::new("segoe-ui", 64, &mut ctx);
-        drop(ctx);
+        let _font = Font::new("segoe-ui", 64);
         let mut rects = vec![];
         let mut packer = Guillotine::new(512, 512);
         let mut area = 0;

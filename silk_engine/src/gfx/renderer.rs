@@ -9,7 +9,7 @@ use ash::vk;
 
 use crate::{
     event::WindowResize,
-    util::{Funcs, ImageLoader, Tracked},
+    util::{Bezier, ImageLoader, Tracked},
 };
 
 use super::{

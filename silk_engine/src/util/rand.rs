@@ -1,5 +1,7 @@
 use std::ops::Add;
 
+use super::ExtraFns;
+
 pub trait Rand: Sized {
     fn rand(self) -> Self;
     fn randn(self) -> Self {
@@ -209,5 +211,38 @@ impl Rand for f64 {
         let stdev = (max - min) / stdev as Self;
         let z = self.randn();
         mean + stdev * z
+    }
+}
+
+pub trait Noise: Sized + ExtraFns + Copy + From<f32> + std::ops::MulAssign {
+    fn hash(self) -> f32;
+    fn noise(self) -> f32;
+    fn fbm(self, oct: u32) -> f32 {
+        let mut s = 0.0;
+        let mut m = 0.0;
+        let mut a = 0.5;
+        let mut p = self;
+        for _ in 0..oct {
+            s += a * p.noise();
+            m += a;
+            a *= 0.5;
+            p *= Self::from(2.0);
+        }
+        s / m
+    }
+    fn voronoise(self, #[allow(unused)] smooth: f32) -> f32 {
+        panic!("type did not implement voronoise");
+    }
+}
+
+impl Noise for f32 {
+    fn hash(self) -> f32 {
+        self.rand()
+    }
+
+    fn noise(self) -> f32 {
+        let fl = self.abs().floor();
+        let fr = self.abs().fract();
+        fl.rand().lerp((fl + 1.0).rand(), fr.smooth())
     }
 }

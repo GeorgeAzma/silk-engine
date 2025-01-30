@@ -23,10 +23,10 @@ pub(crate) use ttf::Ttf;
 
 pub use cooldown::Cooldown;
 pub use mem::Mem;
-pub use rand::Rand;
+pub use rand::{Noise, Rand};
 pub use reader::{Reader, ReaderBe};
 pub use tracked::Tracked;
-pub use vec::{Funcs, Vec2, Vec3};
+pub use vec::{Bezier, ExtraFns, Vec2, Vec2u, Vec3, Vectorf, Vectoru};
 pub use writer::Writer;
 
 #[macro_export]

@@ -1,65 +1,60 @@
 use std::collections::HashMap;
 
 use super::{
-    BufUsage, MemProp, RenderCtx,
+    RenderCtx,
     packer::{Guillotine, Packer, Rect},
 };
-use crate::util::{Bmp, ImageFormat, Ttf};
+use crate::util::{Bmp, ExtraFns, ImageFormat, Ttf, Vec2, Vec2u, Vec3, Vectorf};
 
-// fn cross2(a: vec2f, b: vec2f) -> f32 {
-//     return a.x * b.y - a.y * b.x;
-// }
+// https://www.shadertoy.com/view/ftdGDB
+fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
+    const EPS: f32 = 1e-6;
+    let aa = b - a;
+    let bb = a - 2.0 * b + c;
+    let cc = aa * 2.0;
+    let d = a - p;
 
-// // https://www.shadertoy.com/view/ftdGDB
-// fn bezier_sdf(p: vec2f, A: vec2f, B: vec2f, C: vec2f) -> f32 {
-//     let EPS = 1e-6;
-//     let a = B - A;
-//     let b = A - 2.0 * B + C;
-//     let c = a * 2.0;
-//     let d = A - p;
+    let kk = 1.0 / bb.len2();
+    let kx = kk * aa.dot(bb);
+    let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
+    let kz = kk * d.dot(aa);
 
-//     let kk = 1.0 / dot(b, b);
-//     let kx = kk * dot(a, b);
-//     let ky = kk * (2.0 * dot(a, a) + dot(d, b)) / 3.0;
-//     let kz = kk * dot(d, a);
-
-//     let mut res = 0.0;
-//     let mut sgn = 0.0;
-
-//     let p1 = ky - kx * kx;
-//     let p3 = p1 * p1 * p1;
-//     let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-//     let mut h = q * q + 4.0 * p3;
-//     if h >= 0.0 {
-//         h = h.sqrt();
-//         let x = 0.5 * (vec2f(h, -h) - q);
-//         let uv = sign(x) * pow(abs(x), vec2f(1.0 / 3.0));
-//         let t = saturate(uv.x + uv.y - kx) + EPS;
-//         let q = d + (c + b * t) * t;
-//         res = dot(q, q);
-//         sgn = cross2(c + 2.0 * b * t, q);
-//     } else {
-//         let z = sqrt(-p1);
-//         let v = acos(q / (p1 * z * 2.0)) / 3.0;
-//         let m = cos(v);
-//         let n = sin(v) * sqrt(3.0);
-//         let t = saturate(vec3f(m + m, -n - m, n - m) * z - kx) + EPS;
-//         let qx = d + (c + b * t.x) * t.x;
-//         let dx = dot(qx, qx);
-//         let sx = cross2(c + 2.0 * b * t.x, qx);
-//         let qy = d + (c + b * t.y) * t.y;
-//         let dy = dot(qy, qy);
-//         let sy = cross2(c + 2.0 * b * t.y, qy);
-//         res = select(dy, dx, dx < dy);
-//         sgn = select(sy, sx, dx < dy);
-//     }
-//     return sign(sgn) * sqrt(res);
-// }
+    let res;
+    let sgn;
+    let p1 = ky - kx * kx;
+    let p3 = p1 * p1 * p1;
+    let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    let mut h = q * q + 4.0 * p3;
+    if h >= 0.0 {
+        h = h.sqrt();
+        let x = 0.5 * (Vec2::new(h, -h) - q);
+        let uv = x.sign() * x.abs().cbrt();
+        let t = (uv.x + uv.y - kx).saturate() + EPS;
+        let q = d + (cc + bb * t) * t;
+        res = q.len2();
+        sgn = (cc + 2.0 * bb * t).cross(q);
+    } else {
+        let z = (-p1).sqrt();
+        let v = (q / (p1 * z * 2.0)).acos() / 3.0;
+        let m = v.cos();
+        let n = v.sin() * 3f32.sqrt();
+        let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
+        let qx = d + (cc + bb * t.x) * t.x;
+        let dx = qx.len2();
+        let sx = (cc + 2.0 * bb * t.x).cross(qx);
+        let qy = d + (cc + bb * t.y) * t.y;
+        let dy = qy.len2();
+        let sy = (cc + 2.0 * bb * t.y).cross(qy);
+        res = dx.min(dy);
+        sgn = if dx < dy { sx } else { sy };
+    }
+    sgn.signum() * res.sqrt()
+}
 
 pub struct Font;
 
 impl Font {
-    pub fn new(name: &str, char_size_px: u32, ctx: &mut RenderCtx) -> Self {
+    pub fn new(name: &str, char_size_px: u32) -> Self {
         let t = crate::util::print::ScopeTime::new(&format!("parse font({name})"));
         let mut reader = Ttf::new(name);
         // extract ascii glyphs
@@ -158,54 +153,40 @@ impl Font {
         drop(t);
 
         let font_sdf_pxs = font_sdf_dim * font_sdf_dim;
-
-        ctx.add_compute("font-sdf");
-        ctx.add_desc_set("font sdf ds", "font-sdf", 0);
-        ctx.add_buf(
-            "font sdf",
-            font_sdf_pxs as u64,
-            BufUsage::SRC | BufUsage::STORAGE,
-            MemProp::GPU,
-        );
-        ctx.add_buf(
-            "font sdf uniform",
-            size_of::<[u32; 2]>() as u64,
-            BufUsage::UNIFORM,
-            MemProp::CPU_GPU,
-        );
-        ctx.add_buf(
-            "font points",
-            (font_points.len() * size_of::<[f32; 2]>()) as u64,
-            BufUsage::STORAGE,
-            MemProp::CPU_GPU,
-        );
-        ctx.add_buf(
-            "font glyphs",
-            num_glyphs as u64 * size_of::<[u32; 4]>() as u64,
-            BufUsage::STORAGE,
-            MemProp::CPU_GPU,
-        );
-        // TODO: only write if necessary (at init and when buffer resized)
-        ctx.write_ds_bufs("font sdf ds", &[
-            ("font sdf", 0),
-            ("font sdf uniform", 1),
-            ("font points", 2),
-            ("font glyphs", 3),
-        ]);
-
         let t = crate::util::print::ScopeTime::new(&format!("{name} sdf gen"));
-        ctx.write_buf("font sdf uniform", &[font_sdf_dim, char_size_px]);
-        ctx.write_buf("font points", &font_points[..]);
-        ctx.write_buf("font glyphs", &font_glyphs[..]);
-
-        ctx.begin_cmd();
-        ctx.bind_pipeline("font-sdf");
-        ctx.bind_ds("font sdf ds");
-        ctx.dispatch(font_sdf_pxs / 4, num_glyphs as u32, 1);
-        ctx.finish_cmd();
-
         let mut font_sdf = vec![0u8; font_sdf_pxs as usize];
-        ctx.read_buf("font sdf", &mut font_sdf[..]);
+        for [off, size, wh, xy] in font_glyphs {
+            let gs = Vec2u::new(wh >> 16, wh & 0xFFFF);
+            let gp = Vec2u::new(xy >> 16, xy & 0xFFFF);
+            for y in 0..gs.y {
+                for x in 0..gs.x {
+                    let pu = Vec2u::new(x + gp.x, y + gp.y);
+                    let p = Vec2::from(pu - gp) / Vec2::from(char_size_px);
+                    let mut d = f32::MAX;
+                    for i in 0..size {
+                        let off = off as usize + i as usize * 3;
+                        let a = Vec2::from(font_points[off + 0]);
+                        let b = Vec2::from(font_points[off + 1]);
+                        let c = Vec2::from(font_points[off + 2]);
+                        let (min, max) = (a.min(b).min(c) - 0.1, a.max(b).max(c) + 0.1);
+                        if p.x < min.x || p.y < min.y || p.x > max.x || p.y > max.y {
+                            continue;
+                        }
+                        let dir = (c - a).norm() * 5e-5;
+                        let bd = bezier_sdf(p, a + dir, b + dir, c - dir);
+                        if bd.abs() < d.abs() {
+                            d = bd;
+                        }
+                    }
+                    let d = d * 4.0 + 0.75;
+                    if d <= 1.0 {
+                        font_sdf[(pu.y * font_sdf_dim + pu.x) as usize] |=
+                            (d.saturate() * 255.0) as u8;
+                    }
+                }
+            }
+        }
+
         drop(t);
         Bmp::save("temp", &font_sdf[..], font_sdf_dim, font_sdf_dim, 1);
 
