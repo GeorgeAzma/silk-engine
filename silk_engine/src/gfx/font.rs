@@ -131,6 +131,24 @@ impl Font {
         positions
     }
 
+    pub fn bounding_box(&self, str: &str) -> (f32, f32, f32, f32) {
+        let layout = self.layout(str);
+        let (mut ax, mut ay, mut bx, mut by) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (c, (lx, ly)) in str.chars().zip(layout.into_iter()) {
+            ax = ax.min(lx);
+            ay = ay.min(ly);
+            let (w, h) = self.glyph_size(c);
+            bx = bx.max(lx + w);
+            by = by.max(ly + h);
+        }
+        (ax, ay, bx, by)
+    }
+
+    pub fn bounding_rect(&self, str: &str) -> (f32, f32, f32, f32) {
+        let (ax, ay, bx, by) = self.bounding_box(str);
+        (ax, ay, bx - ax, by - ay)
+    }
+
     fn kerning(&self, a: &GlyphData, b: &GlyphData) -> i16 {
         *self
             .kernings

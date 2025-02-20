@@ -213,6 +213,10 @@ impl Renderer {
         }
     }
 
+    pub fn alpha(&mut self, a: u8) {
+        self.color[3] = a;
+    }
+
     pub fn rgb(&mut self, r: u8, g: u8, b: u8) {
         self.color = [r, g, b, 255];
     }
@@ -225,16 +229,20 @@ impl Renderer {
         self.color = hex.to_be_bytes()
     }
 
+    pub fn stroke_alpha(&mut self, a: u8) {
+        self.stroke_color[3] = a;
+    }
+
     pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) {
-        self.color = [r, g, b, 255];
+        self.stroke_color = [r, g, b, 255];
     }
 
     pub fn stroke_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
-        self.color = [r, g, b, a];
+        self.stroke_color = [r, g, b, a];
     }
 
     pub fn stroke_hex(&mut self, hex: u32) {
-        self.color = hex.to_be_bytes()
+        self.stroke_color = hex.to_be_bytes()
     }
 
     pub fn font(&mut self, font: &str) {
@@ -415,7 +423,7 @@ impl Renderer {
     pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) {
         let (x0, y0, x1, y1) = (self.pc_x(x0), self.pc_y(y0), self.pc_x(x1), self.pc_y(y1));
         let (w, h) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
-        let (x, y) = (x0 - h, y0 - w);
+        let (x, y) = (x0 + w, y0 + h);
         self.instance(x, y, w, h);
     }
 
@@ -496,7 +504,8 @@ impl Renderer {
         })
     }
 
-    pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) {
+    /// returns bounding rect in pixels
+    pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) -> (i32, i32, i32, i32) {
         assert!(
             self.font.as_str() != "",
             "failed to render text, no font is active"
@@ -526,6 +535,7 @@ impl Renderer {
             .collect::<Vec<_>>();
         _ = &*char_rects;
         let px = SDF_PX as f32;
+        let (mut ax, mut ay, mut bx, mut by) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
         for (lx, ly, r) in rects_glyph_sizes {
             if r == Default::default() {
                 continue;
@@ -534,9 +544,23 @@ impl Renderer {
             let (rw, rh) = (rw as f32 / px * w, rh as f32 / px * h);
             let r = r.packed_whxy();
             self.tex_coord = [(r >> 32) as u32, r as u32];
-            self.instance(x + lx * w + rw, y + ly * h + rh, rw, rh);
+            let (x, y) = (x + lx * w, y + ly * h);
+            let (w, h) = (rw, rh);
+            self.instance(x + w, y + h, w, h);
+            ax = ax.min(x);
+            ay = ay.min(y);
+            bx = bx.max(x + w * 2.0);
+            by = by.max(y + h * 2.0);
         }
         self.roundness = old_roundness;
+        use Unit::*;
+        let (ax, ay, bx, by) = (
+            self.px_x(Pc(ax)),
+            self.px_y(Pc(ay)),
+            self.px_x(Pc(bx)),
+            self.px_y(Pc(by)),
+        );
+        (ax as i32, ay as i32, bx as i32, by as i32)
     }
 
     pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {

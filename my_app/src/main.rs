@@ -89,7 +89,6 @@ impl App for MyApp<'_> {
         // }
         // gfx.end_temp();
 
-        // TODO: calculate text bounding box
         gfx.stroke_color = [255, 0, 0, 255];
         // gfx.stroke_width = 0.25;
         gfx.font("segoe-ui");
@@ -99,13 +98,15 @@ impl App for MyApp<'_> {
             Px(110),
             Px(110),
         );
-        gfx.text(
+        let bb = gfx.text(
             "quick brown fox jumped over a lazy dog",
             Px(50),
             Px(70),
             Px(8),
         );
         gfx.no_img();
+        gfx.alpha(64);
+        gfx.aabb(Px(bb.0), Px(bb.1), Px(bb.2), Px(bb.3));
         gfx.circle(Px(10), Px(10), Px(4));
         gfx.atlas();
         gfx.rect(Pc(0.5), Pc(0.5), Px(1024), Px(1024));
