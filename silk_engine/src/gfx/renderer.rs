@@ -497,19 +497,24 @@ impl Renderer {
     }
 
     pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) {
+        assert!(
+            self.font.as_str() != "",
+            "failed to render text, no font is active"
+        );
         let old_roundness = self.roundness;
         self.roundness = -(self.bold + 1.0 + 1e-5);
         let (x, y) = (self.pc_x(x), self.pc_y(y));
         let (w, h) = (self.pc_x(w), self.pc_y(w));
-        let (font, char_rects) = self.fonts.get_mut(&self.font).unwrap_or_else(|| {
-            panic!(
-                "failed to render text \"{text}\", {}",
-                if self.font.as_str() == "" {
-                    format!("no font is active")
-                } else {
-                    format!("font does not exist: {}", self.font)
-                }
-            )
+        let (font, char_rects) = self.fonts.entry(self.font.clone()).or_insert_with(|| {
+            use crate::RES_PATH;
+            if let Ok(true) = std::fs::exists(format!("{RES_PATH}/fonts/{}.ttf", self.font)) {
+                (Font::new(&self.font), HashMap::new())
+            } else {
+                panic!(
+                    "failed to render text \"{text}\", font does not exist: {}",
+                    self.font
+                )
+            }
         });
         let rects_glyph_sizes = text
             .chars()

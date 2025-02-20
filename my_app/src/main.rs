@@ -11,8 +11,6 @@ impl App for MyApp<'_> {
     fn new(app: *mut AppContext<Self>) -> Self {
         let app = unsafe { &mut *app };
 
-        app.gfx().add_font("segoe-ui");
-
         let mut rects = vec![];
         let mut packer = Guillotine::new(512, 512);
         let mut area = 0;
@@ -91,11 +89,10 @@ impl App for MyApp<'_> {
         // }
         // gfx.end_temp();
 
-        gfx.bold = 0.5;
         gfx.stroke_color = [255, 0, 0, 255];
         gfx.stroke_width = 0.5;
         gfx.font("segoe-ui");
-        gfx.text("‰‰‰shit and\nsuch", Px(150), Px(110), Px(64));
+        gfx.text("‰‰‰AVAV", Px(150), Px(110), Px(64));
         gfx.no_img();
         gfx.square(Px(10), Px(10), Px(64));
         gfx.atlas();
