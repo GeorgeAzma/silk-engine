@@ -1,8 +1,7 @@
-# Fixes
+# Fix
 - app slowing down overtime when using validation layers
 
 # Functionality
-- font loading
 - image loading (png/jpg/webp)
 - simple scene
 - render graph

@@ -89,10 +89,11 @@ impl App for MyApp<'_> {
         // }
         // gfx.end_temp();
 
+        // TODO: calculate text bounding box
         gfx.stroke_color = [255, 0, 0, 255];
-        gfx.stroke_width = 0.5;
+        gfx.stroke_width = 0.0;
         gfx.font("segoe-ui");
-        gfx.text("‰‰‰AVAV", Px(150), Px(110), Px(64));
+        gfx.text("Nope", Px(150), Px(110), Px(128));
         gfx.no_img();
         gfx.square(Px(10), Px(10), Px(64));
         gfx.atlas();

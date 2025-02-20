@@ -66,13 +66,12 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
         var r = 2.0 * (0.5 - bold * 0.05 - textureSample(atlas, atlas_sampler, p).r / 1.4);
         var d = max(abs(dpdx(r)), abs(dpdy(r)));
         let edge = saturate(1.0 - r / d);
-        let strk = saturate((r + in.stroke_width * 0.25) / d);
+        let strk = saturate((r + in.stroke_width * 0.28 - 0.01) / d);
         var col = mix(in.color, in.stroke_color, strk);
         col.a *= edge;
-        // if col.a < 0.001 {
-        //     discard;
-        // }
-        col += 0.3;
+        if col.a < 0.001 {
+            discard;
+        }
         return col;
     } else {
         var r = 0.0;
@@ -86,7 +85,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
         r -= d * 0.5;
         d *= 1.5;
         let edge = saturate(1.0 - in.roundness * 0.75 - r / d);
-        let strk = saturate((r + in.stroke_width) / d);
+        let strk = saturate((r + in.stroke_width * 1.05) / d);
         var col = mix(in.color, in.stroke_color, strk);
         col.a *= edge;
         if in.tex_coord.x != ~0u {
