@@ -91,11 +91,22 @@ impl App for MyApp<'_> {
 
         // TODO: calculate text bounding box
         gfx.stroke_color = [255, 0, 0, 255];
-        gfx.stroke_width = 0.0;
+        // gfx.stroke_width = 0.25;
         gfx.font("segoe-ui");
-        gfx.text("Nope", Px(150), Px(110), Px(128));
+        gfx.text(
+            "quick brown fox jumped over a lazy dog",
+            Px(150),
+            Px(110),
+            Px(110),
+        );
+        gfx.text(
+            "quick brown fox jumped over a lazy dog",
+            Px(50),
+            Px(70),
+            Px(8),
+        );
         gfx.no_img();
-        gfx.square(Px(10), Px(10), Px(64));
+        gfx.circle(Px(10), Px(10), Px(4));
         gfx.atlas();
         gfx.rect(Pc(0.5), Pc(0.5), Px(1024), Px(1024));
     }
