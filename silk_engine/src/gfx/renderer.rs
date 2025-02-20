@@ -193,7 +193,7 @@ impl Renderer {
             rotation: 0.0,
             stroke_width: 0.0,
             stroke_color: [0, 0, 0, 0],
-            bold: 0.5,
+            bold: 0.0,
             tex_coord: [0, 0],
             font: String::new(),
             old_color: [255, 255, 255, 255],
@@ -201,7 +201,7 @@ impl Renderer {
             old_rotation: 0.0,
             old_stroke_width: 0.0,
             old_stroke_color: [0, 0, 0, 0],
-            old_bold: 0.5,
+            old_bold: 0.0,
             old_tex_coord: [0, 0],
             old_font: String::new(),
             areas: Vec::new(),
@@ -713,7 +713,7 @@ impl Renderer {
         self.areas = Vec::new();
         self.tex_coord = [0, 0];
         self.font = String::new();
-        self.bold = 0.5;
+        self.bold = 0.0;
 
         self.old_color = self.color;
         self.old_stroke_color = self.stroke_color;

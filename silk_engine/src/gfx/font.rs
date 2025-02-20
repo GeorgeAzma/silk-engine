@@ -206,8 +206,8 @@ impl Font {
                         d = bd;
                     }
                 }
-                const E: f32 = 0.125;
-                let d = (d + E) / (2.0 * E);
+                const E: f32 = 0.1;
+                let d = (d + E) / (2.0 * E) * 1.4;
                 if d <= 1.0 {
                     sdf[(y * w + x) as usize] |= (d.saturate() * 255.0) as u8;
                 }

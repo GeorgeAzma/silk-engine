@@ -646,12 +646,8 @@ impl Ttf {
         let xmax = reader.read16() as i16;
         let ymax = reader.read16() as i16;
 
-        let mut num_points = 0;
-        let mut contour_end_idxs = vec![0; contour_count as usize];
-        for cei in contour_end_idxs.iter_mut() {
-            *cei = reader.read16();
-            num_points = num_points.max(*cei + 1);
-        }
+        let contour_end_idxs = reader.read_arr16(contour_count as usize);
+        let num_points = *contour_end_idxs.iter().max().unwrap_or(&0) + 1;
 
         let num_instrs = reader.read16() as usize;
         reader.skip(num_instrs); // skip instructions

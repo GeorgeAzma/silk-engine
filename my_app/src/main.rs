@@ -91,7 +91,7 @@ impl App for MyApp<'_> {
         // }
         // gfx.end_temp();
 
-        gfx.bold = 0.0;
+        gfx.bold = 0.5;
         gfx.stroke_color = [255, 0, 0, 255];
         gfx.stroke_width = 0.5;
         gfx.font("segoe-ui");
