@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-use super::{
-    RenderCtx,
-    packer::{Guillotine, Packer, Rect},
-};
-use crate::util::{Bmp, ExtraFns, ImageFormat, Ttf, Vec2, Vec2u, Vec3, Vectorf};
+use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec3, Vectorf};
 
 // https://www.shadertoy.com/view/ftdGDB
 fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
@@ -51,146 +47,173 @@ fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
     sgn.signum() * res.sqrt()
 }
 
-pub struct Font;
+pub struct Font {
+    uni2glyph: HashMap<char, GlyphData>,
+    kernings: HashMap<u32, i16>,
+    ascent: i16,
+    descent: i16,
+    line_gap: i16,
+    max_width: u16,  // max glyph width in em
+    max_height: u16, // max glyph height in em
+    em_units: u16,
+}
 
 impl Font {
-    pub fn new(name: &str, char_size_px: u32) -> Self {
-        let t = crate::util::print::ScopeTime::new(&format!("parse font({name})"));
-        let mut reader = Ttf::new(name);
-        // extract ascii glyphs
-        reader.head.glob_xmin = i16::MAX;
-        reader.head.glob_ymin = i16::MAX;
-        reader.head.glob_xmax = i16::MIN;
-        reader.head.glob_ymax = i16::MIN;
-        let mut glyphs = Vec::with_capacity(128);
-        let uni2idx: HashMap<char, u32> = reader
+    pub fn new(name: &str) -> Self {
+        let ttf = Ttf::new(name);
+        let uni2glyph: HashMap<char, GlyphData> = ttf
             .idx2uni
             .iter()
             .enumerate()
-            .map(|(i, uni)| (*uni, i as u32))
+            .map(|(i, uni)| (*uni, ttf.glyphs[i].clone()))
             .collect();
-        for ascii in (0u8..128)
-            .map(|x| x as char)
-            .filter(|x| x.is_ascii_graphic())
-        {
-            let idx = uni2idx[&ascii] as usize;
-            let glyph = &reader.glyphs[idx];
-            let (w, h) = (glyph.metric.width(), glyph.metric.height());
-            if w == 0 || h == 0 {
-                continue;
-            }
-            glyphs.push(glyph.clone());
-            reader.head.glob_xmin = reader.head.glob_xmin.min(glyph.metric.xmin);
-            reader.head.glob_ymin = reader.head.glob_ymin.min(glyph.metric.ymin);
-            reader.head.glob_xmax = reader.head.glob_xmax.max(glyph.metric.xmax);
-            reader.head.glob_ymax = reader.head.glob_ymax.max(glyph.metric.ymax);
+        Self {
+            uni2glyph,
+            kernings: ttf.kernings,
+            ascent: ttf.ascent,
+            descent: ttf.descent,
+            line_gap: ttf.line_gap,
+            max_width: ttf.head.max_width(),
+            max_height: ttf.head.max_height(),
+            em_units: ttf.head.em_units,
         }
-        reader.head.num_glyphs = glyphs.len() as u16;
+    }
 
-        let num_glyphs = reader.head.num_glyphs;
-        let (mx, my) = (reader.head.max_width(), reader.head.max_height());
-        let (nx, ny) = (1.0 / mx as f32, 1.0 / my as f32);
-        let padding_px: u32 = char_size_px / 16 + 4;
+    fn em(&self, em_unit: f32) -> f32 {
+        em_unit / self.em_units as f32
+    }
 
-        let mut unpacked = Vec::with_capacity(num_glyphs as usize);
-        let mut area_px = 0;
-        for glyph in glyphs.iter() {
-            let (w, h) = (glyph.metric.width(), glyph.metric.height());
-            let (w, h) = (w as f32 * nx, h as f32 * ny);
-            assert!(w <= 1.0 && h <= 1.0, "invalid glyph width/height: {w}x{h}");
-            let (w, h) = (
-                (w * char_size_px as f32).ceil() as u16 + padding_px as u16,
-                (h * char_size_px as f32).ceil() as u16 + padding_px as u16,
-            );
-            unpacked.push((w, h));
-            area_px += w as u32 * h as u32;
-        }
-        // NOTE: might need to be multiple of 256 for vulkan image transfer alignment requirements
-        //       (also would match work group size in font sdf shader)
-
-        let mut font_sdf_dim = (((area_px as f32).sqrt()) as u32).next_multiple_of(4);
-
-        // write font bezier points into buffer
-        let mut font_points = vec![];
-        let mut off_sizes = Vec::with_capacity(num_glyphs as usize);
-        let pad = padding_px as f32 / char_size_px as f32 * 0.5;
-        for glyph in glyphs.iter() {
-            let mut csi = 0;
-            let off = font_points.len() as u32;
-            for &cei in glyph.contour_end_idxs.iter() {
-                let mut points = Self::convert_points(
-                    &glyph.points[csi..cei as usize + 1],
-                    glyph.metric.xmin - (pad * mx as f32).round() as i16,
-                    glyph.metric.ymin - (pad * my as f32).round() as i16,
-                    mx,
-                    my,
-                );
-                assert!(points.len() >= 3, "must have atleast 3 points for bezier");
-                font_points.append(&mut points);
-                csi = cei as usize + 1;
-            }
-            let size = (font_points.len() as u32 - off) / 3;
-            off_sizes.push((off, size));
-        }
-        let mut packer = Guillotine::new(font_sdf_dim as u16, font_sdf_dim as u16);
-        let packed = packer.growing_pack_all_with(&unpacked, |w: u16, h: u16| {
-            (
-                ((w as f32 * 1.02).ceil() as u16).next_multiple_of(4),
-                ((h as f32 * 1.02).ceil() as u16).next_multiple_of(4),
-            )
-        });
-        font_sdf_dim = packer.width() as u32;
-        let mut font_glyphs = vec![[0u32; 4]; num_glyphs as usize];
-        for (i, &(x, y)) in packed.iter().enumerate() {
-            let (w, h) = unpacked[i];
-            let r = Rect::new(x, y, w, h).packed_whxy();
-            let wh = (r >> 32) as u32;
-            let xy = r as u32;
-            let (off, size) = off_sizes[i];
-            let glyph = [off, size, wh, xy];
-            font_glyphs[i] = glyph;
-        }
-        drop(t);
-
-        let font_sdf_pxs = font_sdf_dim * font_sdf_dim;
-        let t = crate::util::print::ScopeTime::new(&format!("{name} sdf gen"));
-        let mut font_sdf = vec![0u8; font_sdf_pxs as usize];
-        for [off, size, wh, xy] in font_glyphs {
-            let gs = Vec2u::new(wh >> 16, wh & 0xFFFF);
-            let gp = Vec2u::new(xy >> 16, xy & 0xFFFF);
-            for y in 0..gs.y {
-                for x in 0..gs.x {
-                    let pu = Vec2u::new(x + gp.x, y + gp.y);
-                    let p = Vec2::from(pu - gp) / Vec2::from(char_size_px);
-                    let mut d = f32::MAX;
-                    for i in 0..size {
-                        let off = off as usize + i as usize * 3;
-                        let a = Vec2::from(font_points[off + 0]);
-                        let b = Vec2::from(font_points[off + 1]);
-                        let c = Vec2::from(font_points[off + 2]);
-                        let (min, max) = (a.min(b).min(c) - 0.1, a.max(b).max(c) + 0.1);
-                        if p.x < min.x || p.y < min.y || p.x > max.x || p.y > max.y {
-                            continue;
+    /// returns `str` layout, where 1.0 is `em_units`
+    /// accounts for `[' ', '\n', '\r', '\t']`
+    pub fn layout(&self, str: &str) -> Vec<(f32, f32)> {
+        let (mut x, mut y) = (0.0, 0.0);
+        let mut positions = Vec::with_capacity(str.len());
+        let mut prev_c = '\0';
+        let space_width = self
+            .uni2glyph
+            .get(&' ')
+            .map(|g| self.em(g.metric.advance_width as f32))
+            .unwrap_or(1.0);
+        let line_height: f32 = self.em((self.ascent - self.descent + self.line_gap) as f32);
+        let gap: f32 = 0.2;
+        for c in str.chars() {
+            let mut pos = (0.0, 0.0);
+            match c {
+                ' ' => {
+                    x += space_width;
+                }
+                '\n' => {
+                    x = 0.0;
+                    y -= line_height;
+                }
+                '\r' => {
+                    x = 0.0;
+                }
+                '\t' => {
+                    x += space_width * 4.0;
+                }
+                _ => {
+                    if let Some(glyph) = self.uni2glyph.get(&c) {
+                        if let Some(prev_glyph) = self.uni2glyph.get(&prev_c) {
+                            let kerning = self.kerning(prev_glyph, glyph);
+                            x += self.em(kerning as f32);
                         }
-                        let dir = (c - a).norm() * 5e-5;
-                        let bd = bezier_sdf(p, a + dir, b + dir, c - dir);
-                        if bd.abs() < d.abs() {
-                            d = bd;
-                        }
-                    }
-                    let d = d * 4.0 + 0.75;
-                    if d <= 1.0 {
-                        font_sdf[(pu.y * font_sdf_dim + pu.x) as usize] |=
-                            (d.saturate() * 255.0) as u8;
+                        let x_off = self.em(glyph.metric.left_side_bearing as f32);
+                        let y_off = self.em((glyph.metric.ymin) as f32);
+                        pos = (x + x_off, y + y_off);
+                        x += self.em(glyph.metric.advance_width as f32) + gap;
+                        prev_c = c;
                     }
                 }
             }
+            positions.push(pos);
+        }
+        positions
+    }
+
+    fn kerning(&self, a: &GlyphData, b: &GlyphData) -> i16 {
+        *self
+            .kernings
+            .get(&((a.index as u32) << 16 | b.index as u32))
+            .unwrap_or(&0)
+    }
+
+    pub fn glyph_size(&self, char: char) -> (f32, f32) {
+        let Some(glyph) = &self.uni2glyph.get(&char) else {
+            return (0.0, 0.0);
+        };
+        (
+            self.em(glyph.metric.width() as f32),
+            self.em(glyph.metric.height() as f32),
+        )
+    }
+
+    pub fn is_char_graphic(&self, char: char) -> bool {
+        self.uni2glyph
+            .get(&char)
+            .map_or(false, |g| g.points.len() > 1)
+        // char.is_ascii_graphic() || (!char.is_ascii() && self.uni2glyph.contains_key(&char))
+    }
+
+    pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
+        if !self.is_char_graphic(char) {
+            return ImageData::new(vec![], 0, 0, 0);
+        }
+        let (mx, my) = (self.max_width, self.max_height);
+        let (mx, my) = (mx.max(my), mx.max(my));
+        let (nx, ny) = (1.0 / mx as f32, 1.0 / my as f32);
+        let padding_px: u32 = size_px.div_ceil(8);
+        let glyph = &self.uni2glyph[&char];
+        let (ew, eh) = (glyph.metric.width(), glyph.metric.height());
+        let (nw, nh) = (ew as f32 * nx, eh as f32 * ny);
+        assert!(nw <= 1.0 && nh <= 1.0);
+        let (w, h) = (
+            (nw * size_px as f32).ceil() as u16 + padding_px as u16,
+            (nh * size_px as f32).ceil() as u16 + padding_px as u16,
+        );
+        let pad = padding_px as f32 / size_px as f32 * 0.5;
+        let mut csi = 0;
+        let mut points = vec![];
+        for &cei in glyph.contour_end_idxs.iter() {
+            let mut contour_points = Self::convert_points(
+                &glyph.points[csi..cei as usize + 1],
+                glyph.metric.xmin - (pad * mx as f32).round() as i16,
+                glyph.metric.ymin - (pad * my as f32).round() as i16,
+                mx,
+                my,
+            );
+            points.append(&mut contour_points);
+            csi = cei as usize + 1;
         }
 
-        drop(t);
-        Bmp::save("temp", &font_sdf[..], font_sdf_dim, font_sdf_dim, 1);
-
-        Self
+        let mut sdf = vec![0; w as usize * h as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let p = Vec2::new(x as f32, y as f32) / Vec2::from(size_px);
+                let mut d = f32::MAX;
+                for i in 0..points.len() / 3 {
+                    let idx = i as usize * 3;
+                    let a = Vec2::from(points[idx + 0]);
+                    let b = Vec2::from(points[idx + 1]);
+                    let c = Vec2::from(points[idx + 2]);
+                    let (min, max) = (a.min(b).min(c) - 0.1, a.max(b).max(c) + 0.1);
+                    if p.x < min.x || p.y < min.y || p.x > max.x || p.y > max.y {
+                        continue;
+                    }
+                    let dir = (c - a).norm() * 5e-5;
+                    let bd = bezier_sdf(p, a + dir, b + dir, c - dir);
+                    if bd.abs() < d.abs() {
+                        d = bd;
+                    }
+                }
+                const E: f32 = 0.125;
+                let d = (d + E) / (2.0 * E);
+                if d <= 1.0 {
+                    sdf[(y * w + x) as usize] |= (d.saturate() * 255.0) as u8;
+                }
+            }
+        }
+        ImageData::new(sdf, w as u32, h as u32, 1)
     }
 
     fn convert_points(

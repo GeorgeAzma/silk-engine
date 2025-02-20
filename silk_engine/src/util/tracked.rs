@@ -6,15 +6,15 @@ pub struct Tracked<T> {
 }
 
 impl<T> Tracked<T> {
-    pub fn new(data: T) -> Self {
+    pub const fn new(data: T) -> Self {
         Self { data, dirty: false }
     }
 
-    pub fn is_dirty(&self) -> bool {
+    pub const fn is_dirty(&self) -> bool {
         self.dirty
     }
 
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.dirty = false;
     }
 }

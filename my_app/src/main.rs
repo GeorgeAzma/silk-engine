@@ -11,7 +11,8 @@ impl App for MyApp<'_> {
     fn new(app: *mut AppContext<Self>) -> Self {
         let app = unsafe { &mut *app };
 
-        let _font = Font::new("segoe-ui", 64);
+        app.gfx().add_font("segoe-ui");
+
         let mut rects = vec![];
         let mut packer = Guillotine::new(512, 512);
         let mut area = 0;
@@ -58,56 +59,47 @@ impl App for MyApp<'_> {
         Self { app, packer, rects }
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        if self.app.frame % 256 == 0 {
+            self.app
+                .window
+                .set_title(&format!("{:.3} ms", self.app.dt * 1000.0));
+        }
+    }
 
     fn render(&mut self, gfx: &mut Renderer) {
-        gfx.stroke_width = 0.2;
-        gfx.stroke_color = [32, 128, 48, 128];
-        gfx.color = [64, 255, 96, 128];
-        for fr in self.packer.free_rects.iter() {
-            let (x, y, w, h) = fr.xywh();
-            let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
-            let (x, y) = (x as f32 / pw, y as f32 / ph);
-            let (w, h) = (w as f32 / pw, h as f32 / ph);
-            gfx.rect(Mn(x), Mn(y), Mn(w), Mn(h));
-        }
+        // gfx.begin_temp();
+        // gfx.stroke_width = 0.2;
+        // gfx.stroke_color = [32, 128, 48, 128];
+        // gfx.color = [64, 255, 96, 128];
+        // for fr in self.packer.free_rects.iter() {
+        //     let (x, y, w, h) = fr.xywh();
+        //     let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
+        //     let (x, y) = (x as f32 / pw, y as f32 / ph);
+        //     let (w, h) = (w as f32 / pw, h as f32 / ph);
+        //     gfx.rect(Mn(x), Mn(y), Mn(w), Mn(h));
+        // }
 
-        gfx.stroke_width = 0.2;
-        gfx.stroke_color = [128, 32, 48, 128];
-        gfx.color = [255, 48, 96, 128];
-        for &(x, y, w, h) in self.rects.iter() {
-            let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
-            let (x, y) = (x as f32 / pw, y as f32 / ph);
-            let (w, h) = (w as f32 / pw, h as f32 / ph);
-            gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
-        }
+        // gfx.stroke_width = 0.2;
+        // gfx.stroke_color = [128, 32, 48, 128];
+        // gfx.color = [255, 48, 96, 128];
+        // for &(x, y, w, h) in self.rects.iter() {
+        //     let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
+        //     let (x, y) = (x as f32 / pw, y as f32 / ph);
+        //     let (w, h) = (w as f32 / pw, h as f32 / ph);
+        //     gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
+        // }
+        // gfx.end_temp();
 
-        gfx.color = [255, 255, 255, 255];
-        // gfx.rrectc(Pc(0.5), Pc(0.5), Pc(0.3), Pc(0.1), 1.0);
-        // gfx.area(Pc(0.4), Pc(0.1), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 11);
-        // gfx.area(Pc(0.6), Pc(0.1), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 12);
-        // gfx.area(Pc(0.8), Pc(0.1), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 13);
-
-        // gfx.area(Pc(0.2), Pc(0.5), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 14);
-        // gfx.area(Pc(0.4), Pc(0.5), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 15);
-        // gfx.area(Pc(0.6), Pc(0.5), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 16);
-        // gfx.area(Pc(0.8), Pc(0.5), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 17);
-
-        // gfx.area(Pc(0.2), Pc(0.8), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 18);
-        // gfx.area(Pc(0.4), Pc(0.8), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 19);
-        // gfx.area(Pc(0.6), Pc(0.8), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 20);
-        // gfx.area(Pc(0.8), Pc(0.8), Pc(0.3), Pc(0.3));
-        // self.font.draw(gfx, 21);
+        gfx.bold = 0.0;
+        gfx.stroke_color = [255, 0, 0, 255];
+        gfx.stroke_width = 0.5;
+        gfx.font("segoe-ui");
+        gfx.text("‰‰‰shit and\nsuch", Px(150), Px(110), Px(64));
+        gfx.no_img();
+        gfx.square(Px(10), Px(10), Px(64));
+        gfx.atlas();
+        gfx.rect(Pc(0.5), Pc(0.5), Px(1024), Px(1024));
     }
 }
 

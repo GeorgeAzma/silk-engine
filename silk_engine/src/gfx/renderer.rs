@@ -1,5 +1,6 @@
 // TODO: make roundness Unit
 // TODO: make stroke_width Unit
+// TODO: fix weird thin stroke/text/primitive
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -13,7 +14,8 @@ use crate::{
 };
 
 use super::{
-    BufUsage, GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Unit,
+    BufUsage, Font, GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx,
+    Unit,
     packer::{Guillotine, Packer, Rect},
     render_ctx::BufferImageCopy,
 };
@@ -94,19 +96,27 @@ pub struct Renderer {
     pub rotation: f32,
     pub stroke_width: f32,
     pub stroke_color: [u8; 4],
+    /// [-1, 0, 1] = [thin, normal, bold]
+    pub bold: f32,
     tex_coord: [u32; 2], // packed whxy
-    areas: Vec<[f32; 4]>,
+    font: String,
     old_color: [u8; 4],
     old_roundness: f32,
     old_rotation: f32,
     old_stroke_width: f32,
     old_stroke_color: [u8; 4],
+    old_bold: f32,
     old_tex_coord: [u32; 2],
+    old_font: String,
+    areas: Vec<[f32; 4]>,
     width: f32,
     height: f32,
     packer: Guillotine,
     imgs: HashMap<String, (Tracked<Vec<u8>>, Rect)>,
+    fonts: HashMap<String, (Font, HashMap<char, Rect>)>,
 }
+
+const SDF_PX: u32 = 128;
 
 impl Renderer {
     pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {
@@ -160,8 +170,17 @@ impl Renderer {
                 MemProp::GPU,
             );
             ctx.add_img_view("atlas view", "atlas");
+            ctx.add_sampler(
+                "atlas sampler",
+                vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                vk::SamplerAddressMode::CLAMP_TO_EDGE,
+                vk::Filter::LINEAR,
+                vk::Filter::LINEAR,
+                vk::SamplerMipmapMode::NEAREST,
+            );
 
             ctx.write_ds_img("render ds", "atlas view", ImgLayout::SHADER_READ, 1);
+            ctx.write_ds_sampler("render ds", "atlas sampler", 2);
         }
         Self {
             ctx,
@@ -174,18 +193,23 @@ impl Renderer {
             rotation: 0.0,
             stroke_width: 0.0,
             stroke_color: [0, 0, 0, 0],
+            bold: 0.5,
             tex_coord: [0, 0],
+            font: String::new(),
             old_color: [255, 255, 255, 255],
             old_roundness: 0.0,
             old_rotation: 0.0,
             old_stroke_width: 0.0,
             old_stroke_color: [0, 0, 0, 0],
+            old_bold: 0.5,
             old_tex_coord: [0, 0],
+            old_font: String::new(),
             areas: Vec::new(),
             width: 0.0,
             height: 0.0,
             packer,
             imgs: HashMap::new(),
+            fonts: HashMap::new(),
         }
     }
 
@@ -213,6 +237,16 @@ impl Renderer {
         self.color = hex.to_be_bytes()
     }
 
+    pub fn font(&mut self, font: &str) {
+        self.font = font.to_string();
+    }
+
+    pub fn add_font(&mut self, name: &str) {
+        let font = Font::new(name);
+        self.font = name.to_string();
+        self.fonts.insert(self.font.clone(), (font, HashMap::new()));
+    }
+
     pub fn add_img(&mut self, name: &str, width: u32, height: u32) -> &mut Tracked<Vec<u8>> {
         assert!(!self.imgs.contains_key(name), "img already in atlas");
         if let Some((x, y)) = self.packer.pack(width as u16, height as u16) {
@@ -233,11 +267,20 @@ impl Renderer {
     pub fn load_img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
         let mut img_data = ImageLoader::load(name);
         if img_data.channels != 4 {
-            img_data.img = ImageLoader::make4(&mut img_data.img);
+            img_data.img = ImageLoader::make4(&mut img_data.img, img_data.channels);
         }
         let tracked_img_data = self.add_img(name, img_data.width, img_data.height);
         tracked_img_data.copy_from_slice(&img_data.img);
         tracked_img_data
+    }
+
+    pub fn atlas(&mut self) {
+        let r = Rect::new(0, 0, self.packer.width(), self.packer.height()).packed_whxy();
+        self.tex_coord = [(r >> 32) as u32, r as u32];
+    }
+
+    pub fn no_img(&mut self) {
+        self.tex_coord = [0, 0];
     }
 
     pub fn img(&mut self, name: &str) -> &mut Tracked<Vec<u8>> {
@@ -248,6 +291,15 @@ impl Renderer {
         let r = img_data.1.packed_whxy();
         self.tex_coord = [(r >> 32) as u32, r as u32];
         &mut img_data.0
+    }
+
+    pub fn img_data(&self, name: &str) -> (&[u8], u32, u32) {
+        let img_data = self
+            .imgs
+            .get(name)
+            .unwrap_or_else(|| panic!("img not found in atlas: {name}"));
+        let (w, h) = img_data.1.wh();
+        (&img_data.0, w as u32, h as u32)
     }
 
     pub fn verts(&mut self, verts: &[Vertex]) {
@@ -344,6 +396,22 @@ impl Renderer {
         self.roundness -= r.min(0.999);
     }
 
+    pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) {
+        self.rectc(x, y, w, w)
+    }
+
+    pub fn square(&mut self, x: Unit, y: Unit, w: Unit) {
+        self.rect(x, y, w, w)
+    }
+
+    pub fn rsquare(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
+        self.rrect(x, y, w, w, r)
+    }
+
+    pub fn rsquarec(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
+        self.rrect(x, y, w, w, r)
+    }
+
     pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) {
         let (x0, y0, x1, y1) = (self.pc_x(x0), self.pc_y(y0), self.pc_x(x1), self.pc_y(y1));
         let (w, h) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
@@ -403,6 +471,69 @@ impl Renderer {
         self.roundness = old_roundness;
     }
 
+    fn char_rect(
+        c: char,
+        font: &Font,
+        char_rects: &mut HashMap<char, Rect>,
+        imgs: &mut HashMap<String, (Tracked<Vec<u8>>, Rect)>,
+        packer: &mut Guillotine,
+    ) -> Rect {
+        if !font.is_char_graphic(c) {
+            return Rect::default();
+        }
+        *char_rects.entry(c).or_insert_with(|| {
+            let img = font.gen_char_sdf(c, SDF_PX);
+            if let Some((x, y)) = packer.pack(img.width as u16, img.height as u16) {
+                let img_data = &mut imgs.entry(format!("{c}: {x}, {y}")).or_insert((
+                    Tracked::new(vec![0; img.width as usize * img.height as usize * 4]),
+                    Rect::new(x, y, img.width as u16, img.height as u16),
+                ));
+                img_data.0.copy_from_slice(&ImageLoader::make4(&img.img, 1));
+                img_data.1
+            } else {
+                panic!("failed to add img to atlas, out of space")
+            }
+        })
+    }
+
+    pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) {
+        let old_roundness = self.roundness;
+        self.roundness = -(self.bold + 1.0 + 1e-5);
+        let (x, y) = (self.pc_x(x), self.pc_y(y));
+        let (w, h) = (self.pc_x(w), self.pc_y(w));
+        let (font, char_rects) = self.fonts.get_mut(&self.font).unwrap_or_else(|| {
+            panic!(
+                "failed to render text \"{text}\", {}",
+                if self.font.as_str() == "" {
+                    format!("no font is active")
+                } else {
+                    format!("font does not exist: {}", self.font)
+                }
+            )
+        });
+        let rects_glyph_sizes = text
+            .chars()
+            .zip(font.layout(text).iter())
+            .map(|(c, &(lx, ly))| {
+                let r = Self::char_rect(c, font, char_rects, &mut self.imgs, &mut self.packer);
+                (lx, ly, r)
+            })
+            .collect::<Vec<_>>();
+        _ = &*char_rects;
+        let px = SDF_PX as f32;
+        for (lx, ly, r) in rects_glyph_sizes {
+            if r == Default::default() {
+                continue;
+            }
+            let (rw, rh) = r.wh();
+            let (rw, rh) = (rw as f32 / px * w, rh as f32 / px * h);
+            let r = r.packed_whxy();
+            self.tex_coord = [(r >> 32) as u32, r as u32];
+            self.instance(x + lx * w + rw, y + ly * h + rh, rw, rh);
+        }
+        self.roundness = old_roundness;
+    }
+
     pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
         let area = [self.pc_x(x), self.pc_y(y), self.pc_x(w), self.pc_y(h)];
         if self.areas.is_empty() {
@@ -436,6 +567,8 @@ impl Renderer {
         self.old_roundness = self.roundness;
         self.old_rotation = self.rotation;
         self.old_tex_coord = self.tex_coord;
+        self.old_font = self.font.clone();
+        self.old_bold = self.bold;
     }
 
     /// resets render params to values before begin_temp() was called
@@ -446,6 +579,8 @@ impl Renderer {
         self.roundness = self.old_roundness;
         self.rotation = self.old_rotation;
         self.tex_coord = self.old_tex_coord;
+        self.font = self.old_font.clone();
+        self.bold = self.old_bold;
     }
 
     pub(crate) fn render(&mut self) {
@@ -577,6 +712,8 @@ impl Renderer {
         self.rotation = 0.0;
         self.areas = Vec::new();
         self.tex_coord = [0, 0];
+        self.font = String::new();
+        self.bold = 0.5;
 
         self.old_color = self.color;
         self.old_stroke_color = self.stroke_color;
@@ -584,5 +721,7 @@ impl Renderer {
         self.old_roundness = self.roundness;
         self.old_rotation = self.rotation;
         self.old_tex_coord = self.tex_coord;
+        self.old_font = self.font.clone();
+        self.old_bold = self.bold;
     }
 }

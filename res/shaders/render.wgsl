@@ -22,6 +22,7 @@ struct VSOut {
 
 @group(0) @binding(0) var<uniform> res: vec2f;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
+@group(0) @binding(2) var atlas_sampler: sampler;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
@@ -51,31 +52,49 @@ fn elongated_rrect(p: vec2f, r: f32, h: vec2f) -> f32 {
 	return length(max(a, vec2f(0))) + min(max(a.x, a.y), 0.0) - r + min(max(q.x, q.y), 0.0); 
 }
 
+// problems (hard):
+// - rounded rects have slight transparent edge
+// - edge flickering when smaller than couple pixels
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
-    // problems (hard):
-    // - rounded rects have slight transparent edge
-    // - edge flickering when smaller than couple pixels
-    var r = 0.0;
-    if in.roundness < 1.0 {
-        r = elongated_rrect(in.uv * in.scale, in.roundness, in.scale - 1);
+    // hacky way to render text
+    if in.roundness < 0.0 {
+        // [-1, 0, 1] = [thin, normal, bold]
+        var bold = -(1.0 + in.roundness) * 2.0;
+        bold = exp2(bold);
+        let p = ((in.uv / 1.25 * 0.5 + 0.5) * vec2f(in.tex_coord.zw) + vec2f(in.tex_coord.xy)) / vec2f(textureDimensions(atlas).xy);
+        var r = 2.0 * (0.5 - textureSample(atlas, atlas_sampler, p).r);
+        var d = max(abs(dpdx(r)), abs(dpdy(r)));
+        let edge = saturate(bold - r / d);
+        let strk = saturate((r + in.stroke_width * 0.5) / d);
+        var col = mix(in.color, in.stroke_color, strk);
+        col.a *= edge;
+        if col.a < 0.001 {
+            discard;
+        }
+        return col;
     } else {
-        r = length(in.uv) - 1.0;
-    }
+        var r = 0.0;
+        if in.roundness < 1.0 {
+            r = elongated_rrect(in.uv * in.scale, in.roundness, in.scale - 1);
+        } else {
+            r = length(in.uv) - 1.0;
+        }
 
-    var d = max(abs(dpdx(r)), abs(dpdy(r)));
-    r -= d * 0.5;
-    d *= 1.5;
-    let edge = saturate(1.0 - in.roundness * 0.75 - r / d);
-    let strk = saturate((r + in.stroke_width) / d);
-    var col = mix(in.color, in.stroke_color, strk);
-    col.a *= edge;
-    if in.tex_coord.x != ~0u {
-        let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
-        col *= textureLoad(atlas, p, 0);
+        var d = max(abs(dpdx(r)), abs(dpdy(r)));
+        r -= d * 0.5;
+        d *= 1.5;
+        let edge = saturate(1.0 - in.roundness * 0.75 - r / d);
+        let strk = saturate((r + in.stroke_width) / d);
+        var col = mix(in.color, in.stroke_color, strk);
+        col.a *= edge;
+        if in.tex_coord.x != ~0u {
+            let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
+            col *= textureLoad(atlas, p, 0);
+        }
+        if col.a < 0.001 {
+            discard;
+        }
+        return col;
     }
-    if col.a < 0.001 {
-        discard;
-    }
-    return col;
 }

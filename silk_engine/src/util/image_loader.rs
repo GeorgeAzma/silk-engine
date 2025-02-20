@@ -42,15 +42,18 @@ impl ImageLoader {
         }
     }
 
-    pub fn make4(rgb: &mut [u8]) -> Vec<u8> {
-        assert_eq!(rgb.len() % 3, 0, "Non-RGB image can't be made to RGBA");
-        let mut rgba = vec![0u8; rgb.len() / 3 * 4];
-        let rgb_chunks = unsafe { rgb.as_chunks_unchecked::<3>() };
+    pub fn make4(data: &[u8], channels: u8) -> Vec<u8> {
+        let channels = channels as usize;
+        assert!(channels != 4, "already has 4 channels");
+        assert!(channels < 4, "invalid channel count");
+        assert_eq!(data.len() % channels, 0);
+        let mut rgba = vec![0u8; data.len() / channels * 4];
+        let rgb_chunks = data.chunks(channels);
         let rgba_chunks = unsafe { rgba.as_chunks_unchecked_mut::<4>() };
-        for (rgb, rgba) in rgb_chunks.iter().zip(rgba_chunks.iter_mut()) {
-            rgba[0] = rgb[0];
-            rgba[1] = rgb[1];
-            rgba[2] = rgb[2];
+        for (rgb, rgba) in rgb_chunks.zip(rgba_chunks.iter_mut()) {
+            for c in 0..channels {
+                rgba[c] = rgb[c];
+            }
             rgba[3] = 255;
         }
         rgba

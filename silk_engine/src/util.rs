@@ -14,15 +14,15 @@ mod ttf;
 mod vec;
 mod writer;
 
-pub(crate) use bmp::Bmp;
 pub(crate) use buddy_alloc::BuddyAlloc;
 pub(crate) use contain_range::ContainRange;
-pub(crate) use image_loader::{ImageData, ImageFormat, ImageLoader};
-pub(crate) use qoi::Qoi;
-pub(crate) use ttf::Ttf;
+pub(crate) use ttf::{GlyphData, Ttf};
 
+pub use bmp::Bmp;
 pub use cooldown::Cooldown;
+pub use image_loader::{ImageData, ImageFormat, ImageLoader};
 pub use mem::Mem;
+pub use qoi::Qoi;
 pub use rand::{Noise, Rand};
 pub use reader::{Reader, ReaderBe};
 pub use tracked::Tracked;
