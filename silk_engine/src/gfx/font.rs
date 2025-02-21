@@ -79,28 +79,28 @@ impl Font {
         }
     }
 
-    fn em(&self, em_unit: f32) -> f32 {
-        em_unit / self.em_units as f32
+    fn em(&self, em_unit: i16) -> f32 {
+        em_unit as f32 / self.em_units as f32
     }
 
     /// returns `str` layout, where 1.0 is `em_units`
     /// accounts for `[' ', '\n', '\r', '\t']`
-    pub fn layout(&self, str: &str) -> Vec<(f32, f32)> {
+    pub fn layout(&self, text: &str) -> Vec<(f32, f32)> {
         let (mut x, mut y) = (0.0, 0.0);
-        let mut positions = Vec::with_capacity(str.len());
+        let mut positions = Vec::with_capacity(text.len());
         let mut prev_c = '\0';
         let space_width = self
             .uni2glyph
             .get(&' ')
-            .map(|g| self.em(g.metric.advance_width as f32))
+            .map(|g| self.em(g.metric.advance_width))
             .unwrap_or(1.0);
-        let line_height: f32 = self.em((self.ascent - self.descent + self.line_gap) as f32);
-        let gap: f32 = 0.2;
-        for c in str.chars() {
+        let line_height: f32 = self.em(self.ascent - self.descent + self.line_gap);
+        let gap: f32 = 0.15;
+        for c in text.chars() {
             let mut pos = (0.0, 0.0);
             match c {
                 ' ' => {
-                    x += space_width;
+                    x += space_width + gap;
                 }
                 '\n' => {
                     x = 0.0;
@@ -114,14 +114,21 @@ impl Font {
                 }
                 _ => {
                     if let Some(glyph) = self.uni2glyph.get(&c) {
-                        if let Some(prev_glyph) = self.uni2glyph.get(&prev_c) {
-                            let kerning = self.kerning(prev_glyph, glyph);
-                            x += self.em(kerning as f32);
+                        let is_cjk = self.is_char_cjk(c);
+                        if !is_cjk {
+                            if let Some(prev_glyph) = self.uni2glyph.get(&prev_c) {
+                                let kerning = self.kerning(prev_glyph, glyph);
+                                x += self.em(kerning);
+                            }
                         }
-                        let x_off = self.em(glyph.metric.left_side_bearing as f32);
-                        let y_off = self.em((glyph.metric.ymin) as f32);
+                        let m = &glyph.metric;
+                        let x_off = self.em(m.xmin);
+                        let y_off = self.em(m.ymin);
                         pos = (x + x_off, y + y_off);
-                        x += self.em(glyph.metric.advance_width as f32) + gap;
+                        if is_cjk {
+                            x += self.em(m.width()) + gap
+                        }
+                        x += self.em(m.advance_width) + gap;
                         prev_c = c;
                     }
                 }
@@ -161,8 +168,8 @@ impl Font {
             return (0.0, 0.0);
         };
         (
-            self.em(glyph.metric.width() as f32),
-            self.em(glyph.metric.height() as f32),
+            self.em(glyph.metric.width()),
+            self.em(glyph.metric.height()),
         )
     }
 
@@ -170,7 +177,15 @@ impl Font {
         self.uni2glyph
             .get(&char)
             .map_or(false, |g| g.points.len() > 1)
-        // char.is_ascii_graphic() || (!char.is_ascii() && self.uni2glyph.contains_key(&char))
+    }
+
+    pub fn is_char_cjk(&self, char: char) -> bool {
+        matches!(char,
+            '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs
+            '\u{3040}'..='\u{309F}' |  // Hiragana
+            '\u{30A0}'..='\u{30FF}' |  // Katakana
+            '\u{FF00}'..='\u{FF9F}'    // Full-width Roman characters and half-width Katakana
+        )
     }
 
     pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
@@ -224,8 +239,8 @@ impl Font {
                         d = bd;
                     }
                 }
-                const E: f32 = 0.1;
-                let d = (d + E) / (2.0 * E) * 1.4;
+                const E: f32 = 0.0625;
+                let d = (d + E) / (2.0 * E);
                 if d <= 1.0 {
                     sdf[(y * w + x) as usize] |= (d.saturate() * 255.0) as u8;
                 }

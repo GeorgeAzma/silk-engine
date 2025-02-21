@@ -52,8 +52,6 @@ fn elongated_rrect(p: vec2f, r: f32, h: vec2f) -> f32 {
 	return length(max(a, vec2f(0))) + min(max(a.x, a.y), 0.0) - r + min(max(q.x, q.y), 0.0); 
 }
 
-const MUL = 1.4;
-
 // problems (hard):
 // - rounded rects have slight transparent edge
 // - edge flickering when smaller than couple pixels
@@ -64,14 +62,14 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
         // [-1, 0, 1] = [thin, normal, bold]
         var bold = -(1.0 + in.roundness);
         bold += 3.0 * abs(bold) * max(bold, 0.0);
-        let p = ((in.uv / 1.25 * 0.5 + 0.5) * vec2f(in.tex_coord.zw) + vec2f(in.tex_coord.xy)) / vec2f(textureDimensions(atlas).xy);
-        var r = 2.0 * (0.5 - bold * 0.05 - textureSample(atlas, atlas_sampler, p).r / MUL);
+        let p = ((in.uv / 1.125 * 0.5 + 0.5) * vec2f(in.tex_coord.zw) + vec2f(in.tex_coord.xy)) / vec2f(textureDimensions(atlas).xy);
+        var r = 2.0 * (0.5 - bold * 0.05 - textureSample(atlas, atlas_sampler, p).r);
         let pd = vec3f(dpdx(p.x), dpdy(p.y), 0.0);
         var px = textureSample(atlas, atlas_sampler, p + pd.xz).r;
         var py = textureSample(atlas, atlas_sampler, p + pd.zy).r;
         var nx = textureSample(atlas, atlas_sampler, p - pd.xz).r;
         var ny = textureSample(atlas, atlas_sampler, p - pd.zy).r;
-        var d = max(abs(px - nx), abs(py - ny)) / MUL;
+        var d = max(abs(px - nx), abs(py - ny));
         let strk = select(saturate((r + in.stroke_width * 0.28) / d), 0.0, in.stroke_width < 0.001);
         var col = mix(in.color, in.stroke_color, strk);
         let edge = saturate(1.0 - r / d);

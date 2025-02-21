@@ -116,6 +116,7 @@ impl Ttf {
             &glyph_offs,
             &hmetrics.glyph_hmetrics,
             &vmetrics.glyph_vmetrics,
+            &idx2uni,
         );
         let kernings = Self::read_kernings(&mut reader, &table_offs);
         Self {
@@ -390,7 +391,6 @@ impl Ttf {
                         }
                     }
                 }
-                // TODO: check if this is correct (along with other shit, there is too much shit everywhere)
                 2 => {
                     let class_def1_off = reader.read16();
                     let ret = reader.idx();
@@ -583,10 +583,13 @@ impl Ttf {
         glyph_offs: &[u32],
         glyph_hmetrics: &[(i16, i16)],
         glyph_vmetrics: &[(i16, i16)],
+        idx2uni: &[char],
     ) -> Vec<GlyphData> {
         let mut glyphs = vec![GlyphData::default(); glyph_offs.len() - 1];
         for i in 0..glyphs.len() {
-            glyphs[i] = Self::read_glyph(reader, glyph_offs, i as u16);
+            if !idx2uni[i].is_ascii() || idx2uni[i].is_ascii_graphic() {
+                glyphs[i] = Self::read_glyph(reader, glyph_offs, i as u16);
+            }
             glyphs[i].metric.advance_width = glyph_hmetrics[i].0;
             glyphs[i].metric.left_side_bearing = glyph_hmetrics[i].1;
             glyphs[i].metric.advance_height = glyph_vmetrics[i].0;
@@ -598,8 +601,7 @@ impl Ttf {
 
     fn read_glyph(reader: &mut ReaderBe, glyph_offs: &[u32], glyph_idx: u16) -> GlyphData {
         let glyph_off = glyph_offs[glyph_idx as usize];
-        let size = glyph_offs[glyph_idx as usize + 1] - glyph_off;
-        if size == 0 {
+        if glyph_off == glyph_offs[glyph_idx as usize + 1] {
             return GlyphData {
                 metric: GlyphMetrics::default(),
                 points: Vec::new(),
@@ -609,6 +611,14 @@ impl Ttf {
         }
         reader.goto(glyph_off as usize);
         let contour_count = reader.read16() as i16;
+        if contour_count == 0 {
+            return GlyphData {
+                metric: GlyphMetrics::default(),
+                points: Vec::new(),
+                contour_end_idxs: Vec::new(),
+                index: glyph_idx,
+            };
+        }
         let is_simple = contour_count >= 0;
         if is_simple {
             Self::read_simple_glyph(reader, contour_count)
@@ -745,10 +755,9 @@ impl Ttf {
         } else {
             (reader.read8() as i8 as i16, reader.read8() as i8 as i16)
         };
-        assert!(
-            args_xy,
-            "TODO: args1&2 are point idx to be matched, not offsets"
-        );
+        if !args_xy {
+            todo!("args1&2 are point idx to be matched, not offsets");
+        }
         let off_x = arg1;
         let off_y = arg2;
 
@@ -762,7 +771,7 @@ impl Ttf {
             jhat_y = ihat_x;
         } else if xy_scale {
             ihat_x = f2d14(reader.read16());
-            ihat_y = f2d14(reader.read16());
+            jhat_y = f2d14(reader.read16());
         } else if mat2x2 {
             ihat_x = f2d14(reader.read16());
             ihat_y = f2d14(reader.read16());
@@ -820,7 +829,6 @@ impl Ttf {
         points
     }
 
-    /// returns glyph index to unicode array
     fn read_idx2uni_mappings(reader: &mut ReaderBe, cmap_off: u32, num_glyphs: u16) -> Vec<char> {
         assert_ne!(num_glyphs, 0);
         let mut idx2uni = vec!['\0'; num_glyphs as usize];
@@ -828,28 +836,29 @@ impl Ttf {
         let _version = reader.read16();
         let num_tables = reader.read16();
         let mut cmap_subtable_off = 0;
-        let mut selected_unicode_ver_id = u16::MAX;
+        let mut selected_uni_ver_id: i32 = -1;
         for _ in 0..num_tables {
             let platform_id = reader.read16();
             let encoding_id = reader.read16();
             let off = reader.read32();
-            // unicode encoding
-            if platform_id == 0 {
-                if (encoding_id == 0 || encoding_id == 1 || encoding_id == 3 || encoding_id == 4)
-                    && encoding_id > selected_unicode_ver_id
-                {
-                    cmap_subtable_off = off;
-                    selected_unicode_ver_id = encoding_id;
+            match platform_id {
+                // unicode encoding
+                0 => {
+                    if matches!(encoding_id, 0 | 1 | 3 | 4)
+                        && encoding_id as i32 > selected_uni_ver_id
+                    {
+                        cmap_subtable_off = off;
+                        selected_uni_ver_id = encoding_id as i32;
+                    }
                 }
-            }
-            // microsoft encoding
-            else if platform_id == 3
-                && selected_unicode_ver_id == u16::MAX
-                && (encoding_id == 1 || encoding_id == 10)
-            {
-                cmap_subtable_off = off;
-            } else {
-                panic!("unsupported platform id: {platform_id}");
+                1 | 2 => {}
+                // microsoft encoding
+                3 => {
+                    if selected_uni_ver_id == -1 && matches!(encoding_id, 1 | 10) {
+                        cmap_subtable_off = off;
+                    }
+                }
+                _ => panic!("unsupported platform id: {platform_id}"),
             }
         }
         assert_ne!(
@@ -859,45 +868,39 @@ impl Ttf {
         reader.goto(cmap_off as usize + cmap_subtable_off as usize);
         let format = reader.read16();
         let mut has_read_missing_char_glyph = false;
-        assert!(
-            format == 12 || format == 4,
-            "unsupported font cmap format: {format}"
-        );
-        if format == 4 {
-            let _len = reader.read16();
-            let _lang_code = reader.read16();
-            let seg_count = reader.read16() / 2;
-            reader.skip(6); // search range, entry selector, range shift
-            let end_codes = reader.read_arr16(seg_count as usize);
-            reader.skip(2);
-            let start_codes = reader.read_arr16(seg_count as usize);
-            let id_deltas = reader.read_arr16(seg_count as usize);
-            let id_range_offs = (0..seg_count)
-                .map(|_| (reader.read16(), reader.idx()))
-                .collect::<Vec<_>>();
-            for i in 0..start_codes.len() {
-                let end_code = end_codes[i];
-                let mut cur_code = start_codes[i];
-                if cur_code == 65535 {
-                    break;
-                }
-                while cur_code <= end_code {
-                    let mut glyph_idx;
-                    if id_range_offs[i].0 == 0 {
-                        glyph_idx = cur_code.wrapping_add(id_deltas[i]);
-                    } else {
-                        let old_reader_off = reader.idx();
-                        let range_off_loc = id_range_offs[i].1 + id_range_offs[i].0 as usize;
-                        let glyph_idx_arr_loc =
-                            2 * (cur_code - start_codes[i]) as usize + range_off_loc;
-                        reader.goto(glyph_idx_arr_loc);
-                        glyph_idx = reader.read16();
-                        if glyph_idx != 0 {
-                            glyph_idx = glyph_idx.wrapping_add(id_deltas[i]);
-                        }
-                        reader.goto(old_reader_off);
+        match format {
+            4 => {
+                let _len = reader.read16();
+                let _lang_code = reader.read16();
+                let seg_count = reader.read16() / 2;
+                reader.skip(6); // search range, entry selector, range shift
+                let end_codes = reader.read_arr16(seg_count as usize);
+                reader.skip(2);
+                let start_codes = reader.read_arr16(seg_count as usize);
+                let id_deltas = reader.read_arr16(seg_count as usize);
+                let id_range_offs = (0..seg_count)
+                    .map(|_| (reader.read16(), reader.idx() - 2))
+                    .collect::<Vec<_>>();
+                for i in 0..start_codes.len() {
+                    let end_code = end_codes[i];
+                    let mut cur_code = start_codes[i];
+                    if cur_code == u16::MAX {
+                        break;
                     }
-                    if glyph_idx < num_glyphs {
+                    while cur_code <= end_code {
+                        let mut glyph_idx;
+                        if id_range_offs[i].0 == 0 {
+                            glyph_idx = cur_code.wrapping_add(id_deltas[i]);
+                        } else {
+                            let range_off_loc = id_range_offs[i].1 + id_range_offs[i].0 as usize;
+                            let glyph_idx_arr_loc =
+                                2 * (cur_code - start_codes[i]) as usize + range_off_loc;
+                            reader.goto(glyph_idx_arr_loc);
+                            glyph_idx = reader.read16();
+                            if glyph_idx != 0 {
+                                glyph_idx = glyph_idx.wrapping_add(id_deltas[i]);
+                            }
+                        }
                         // ornate parentheses have same glyph_idx as ascii parens
                         // because font may not support ornate paren rendering and renders it as ascii paren
                         // because of this it overwrote ascii paren's unicode
@@ -905,30 +908,30 @@ impl Ttf {
                         if idx2uni[glyph_idx as usize] == '\0' {
                             idx2uni[glyph_idx as usize] = char::from_u32(cur_code as u32).unwrap();
                         }
+                        has_read_missing_char_glyph |= glyph_idx == 0;
+                        cur_code += 1;
                     }
-                    has_read_missing_char_glyph |= glyph_idx == 0;
-                    cur_code += 1;
                 }
             }
-        } else if format == 12 {
-            reader.skip(10); // reserved, subtable byte length including header, lang code
-            let num_groups = reader.read32();
-            for _ in 0..num_groups {
-                let start_char_code = reader.read32();
-                let end_char_code = reader.read32();
-                let start_glyph_idx = reader.read32();
-                let num_chars = end_char_code - start_char_code + 1;
-                for char_code_off in 0..num_chars {
-                    let char_code = start_char_code + char_code_off;
-                    let glyph_idx = start_glyph_idx + char_code_off;
-                    if glyph_idx >= num_glyphs as u32 {
+            12 => {
+                reader.skip(10); // reserved, subtable byte length including header, lang code
+                let num_groups = reader.read32();
+                for _ in 0..num_groups {
+                    let start_char_code = reader.read32();
+                    let end_char_code = reader.read32();
+                    let start_glyph_idx = reader.read32();
+                    let num_chars = end_char_code - start_char_code + 1;
+                    for char_code_off in 0..num_chars {
+                        let char_code = start_char_code + char_code_off;
+                        let glyph_idx = start_glyph_idx + char_code_off;
                         if idx2uni[glyph_idx as usize] == '\0' {
                             idx2uni[glyph_idx as usize] = char::from_u32(char_code).unwrap();
                         }
+                        has_read_missing_char_glyph |= glyph_idx == 0;
                     }
-                    has_read_missing_char_glyph |= glyph_idx == 0;
                 }
             }
+            _ => panic!("unsupported font cmap format: {format}"),
         }
         if !has_read_missing_char_glyph {
             idx2uni[0] = '\u{65535}';

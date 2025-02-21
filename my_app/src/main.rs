@@ -91,22 +91,15 @@ impl App for MyApp<'_> {
 
         gfx.stroke_color = [255, 0, 0, 255];
         // gfx.stroke_width = 0.25;
+        gfx.font("zenmaru");
+        gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Px(50), Px(110), Px(24));
+        gfx.font("movistar");
+        gfx.text("quick jump AV", Px(150), Px(290), Px(24));
+        gfx.font("arial");
+        gfx.text("quick jump AV", Px(150), Px(210), Px(24));
         gfx.font("segoe-ui");
-        gfx.text(
-            "quick brown fox jumped over a lazy dog",
-            Px(150),
-            Px(110),
-            Px(110),
-        );
-        let bb = gfx.text(
-            "quick brown fox jumped over a lazy dog",
-            Px(50),
-            Px(70),
-            Px(8),
-        );
+        gfx.text("quick jump AV", Px(150), Px(250), Px(24));
         gfx.no_img();
-        gfx.alpha(64);
-        gfx.aabb(Px(bb.0), Px(bb.1), Px(bb.2), Px(bb.3));
         gfx.circle(Px(10), Px(10), Px(4));
         gfx.atlas();
         gfx.rect(Pc(0.5), Pc(0.5), Px(1024), Px(1024));
