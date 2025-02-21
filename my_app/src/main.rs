@@ -58,7 +58,7 @@ impl App for MyApp<'_> {
     }
 
     fn update(&mut self) {
-        if self.app.frame % 256 == 0 {
+        if self.app.frame % 32 == 0 {
             self.app
                 .window
                 .set_title(&format!("{:.3} ms", self.app.dt * 1000.0));
@@ -88,6 +88,11 @@ impl App for MyApp<'_> {
         //     gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
         // }
         // gfx.end_temp();
+
+        gfx.rrect(Pc(0.1), Pc(0.1), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rrect(Pc(0.2), Pc(0.1), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rrect(Pc(0.1), Pc(0.2), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rrect(Pc(0.2), Pc(0.2), Pc(0.1), Pc(0.1), 0.5);
 
         gfx.stroke_color = [255, 0, 0, 255];
         gfx.stroke_width = 0.25;
@@ -145,6 +150,11 @@ impl App for MyApp<'_> {
         );
         // gfx.atlas();
         // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
+        for x in 0..1000 {
+            for y in 0..100 {
+                gfx.circle(Px(x), Px(y), Px(1));
+            }
+        }
     }
 }
 

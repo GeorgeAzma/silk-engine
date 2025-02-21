@@ -135,7 +135,7 @@ pub struct Renderer {
     fonts: HashMap<String, (Font, HashMap<char, Rect>)>,
 }
 
-const SDF_PX: u32 = 128;
+const SDF_PX: u32 = 64;
 
 impl Renderer {
     pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {

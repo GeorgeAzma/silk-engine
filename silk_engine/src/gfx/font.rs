@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec3, Vectorf};
+use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec2u, Vec3, Vectorf};
 
 pub struct Font {
     uni2glyph: HashMap<char, GlyphData>,
@@ -143,52 +143,8 @@ impl Font {
         )
     }
 
+    // TODO: speedup sdf generation, takes 5ms for 64x64 chinese char gen
     pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
-        // https://www.shadertoy.com/view/ftdGDB
-        fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
-            const EPS: f32 = 1e-6;
-            let aa = b - a;
-            let bb = a - 2.0 * b + c;
-            let cc = aa * 2.0;
-            let d = a - p;
-
-            let kk = 1.0 / bb.len2();
-            let kx = kk * aa.dot(bb);
-            let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
-            let kz = kk * d.dot(aa);
-
-            let res;
-            let sgn;
-            let p1 = ky - kx * kx;
-            let p3 = p1 * p1 * p1;
-            let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-            let mut h = q * q + 4.0 * p3;
-            if h >= 0.0 {
-                h = h.sqrt();
-                let x = 0.5 * (Vec2::new(h, -h) - q);
-                let uv = x.sign() * x.abs().cbrt();
-                let t = (uv.x + uv.y - kx).saturate() + EPS;
-                let q = d + (cc + bb * t) * t;
-                res = q.len2();
-                sgn = (cc + 2.0 * bb * t).cross(q);
-            } else {
-                let z = (-p1).sqrt();
-                let v = (q / (p1 * z * 2.0)).acos() / 3.0;
-                let m = v.cos();
-                let n = v.sin() * 3f32.sqrt();
-                let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
-                let qx = d + (cc + bb * t.x) * t.x;
-                let dx = qx.len2();
-                let sx = (cc + 2.0 * bb * t.x).cross(qx);
-                let qy = d + (cc + bb * t.y) * t.y;
-                let dy = qy.len2();
-                let sy = (cc + 2.0 * bb * t.y).cross(qy);
-                res = dx.min(dy);
-                sgn = if dx < dy { sx } else { sy };
-            }
-            sgn.signum() * res.sqrt()
-        }
-
         if !self.is_char_graphic(char) {
             return ImageData::new(vec![], 0, 0, 0);
         }
@@ -208,7 +164,7 @@ impl Font {
         let mut csi = 0;
         let mut points = vec![];
         for &cei in glyph.contour_end_idxs.iter() {
-            let mut contour_points = Self::convert_points(
+            let mut contour_points = convert_points(
                 &glyph.points[csi..cei as usize + 1],
                 glyph.metric.xmin - (pad * mx as f32).round() as i16,
                 glyph.metric.ymin - (pad * my as f32).round() as i16,
@@ -219,22 +175,155 @@ impl Font {
             csi = cei as usize + 1;
         }
 
+        fn convert_points(
+            points: &[(i16, i16, bool)],
+            xmin: i16,
+            ymin: i16,
+            w: u16,
+            h: u16,
+        ) -> Vec<(f32, f32)> {
+            let mut new_points = Vec::with_capacity(points.len() * 2);
+            let norm_x = |x: i16| (x - xmin) as f32 / w as f32;
+            let norm_y = |y: i16| (y - ymin) as f32 / h as f32;
+            let on_curve_off = points.iter().position(|(_, _, c)| *c).unwrap();
+            for i0 in 0..points.len() {
+                let i0 = (i0 + on_curve_off/**/) % points.len();
+                let i1 = (i0 + on_curve_off + 1) % points.len();
+                let (x0, y0, c0) = points[i0];
+                let (x1, y1, c1) = points[i1];
+                let (x0, y0) = (norm_x(x0), norm_y(y0));
+                let (x1, y1) = (norm_x(x1), norm_y(y1));
+                new_points.push((x0, y0));
+                // insert midpoint between 2 on/off-curve points
+                if c0 == c1 {
+                    let mx = (x0 + x1) * 0.5;
+                    let my = (y0 + y1) * 0.5;
+                    new_points.push((mx, my));
+                }
+            }
+
+            let mut duped_points = Vec::with_capacity(new_points.len() * 2);
+            for i in (0..new_points.len()).step_by(2) {
+                duped_points.push(new_points[i]);
+                duped_points.push(new_points[(i + 1) % new_points.len()]);
+                duped_points.push(new_points[(i + 2) % new_points.len()]);
+            }
+            duped_points
+        }
+
+        struct Segment {
+            a: Vec2,
+            b: Vec2,
+            c: Vec2,
+            min: Vec2,
+            max: Vec2,
+        }
+
+        impl Segment {
+            // https://www.shadertoy.com/view/ftdGDB
+            fn sdf(&self, p: Vec2) -> f32 {
+                const EPS: f32 = 1e-6;
+                let aa = self.b - self.a;
+                let bb = self.a - 2.0 * self.b + self.c;
+                let cc = aa * 2.0;
+                let d = self.a - p;
+
+                let kk = 1.0 / bb.len2();
+                let kx = kk * aa.dot(bb);
+                let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
+                let kz = kk * d.dot(aa);
+
+                let res;
+                let sgn;
+                let p1 = ky - kx * kx;
+                let p3 = p1 * p1 * p1;
+                let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+                let mut h = q * q + 4.0 * p3;
+                if h >= 0.0 {
+                    h = h.sqrt();
+                    let x = 0.5 * (Vec2::new(h, -h) - q);
+                    let uv = x.sign() * x.abs().cbrt();
+                    let t = (uv.x + uv.y - kx).saturate() + EPS;
+                    let q = d + (cc + bb * t) * t;
+                    res = q.len2();
+                    sgn = (cc + 2.0 * bb * t).cross(q);
+                } else {
+                    let z = (-p1).sqrt();
+                    let v = (q / (p1 * z * 2.0)).acos() / 3.0;
+                    let m = v.cos();
+                    let n = v.sin() * 3f32.sqrt();
+                    let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
+                    let qx = d + (cc + bb * t.x) * t.x;
+                    let dx = qx.len2();
+                    let sx = (cc + 2.0 * bb * t.x).cross(qx);
+                    let qy = d + (cc + bb * t.y) * t.y;
+                    let dy = qy.len2();
+                    let sy = (cc + 2.0 * bb * t.y).cross(qy);
+                    res = dx.min(dy);
+                    sgn = if dx < dy { sx } else { sy };
+                }
+                sgn.signum() * res.sqrt()
+            }
+        }
+
+        struct SpatialGrid {
+            cells: Vec<Vec<usize>>,
+        }
+
+        impl SpatialGrid {
+            const CELLS: u32 = 8;
+            fn new(segments: &[Segment]) -> Self {
+                let mut cells = vec![vec![]; (Self::CELLS * Self::CELLS) as usize];
+                for (i, s) in segments.iter().enumerate() {
+                    let min: Vec2u = (s.min * Self::CELLS as f32).floor().into();
+                    let max: Vec2u = (s.max * Self::CELLS as f32).ceil().into();
+                    for y in min.y..=max.y {
+                        for x in min.x..=max.x {
+                            if x < Self::CELLS && y < Self::CELLS {
+                                let idx = y * Self::CELLS + x;
+                                cells[idx as usize].push(i as usize);
+                            }
+                        }
+                    }
+                }
+                Self { cells }
+            }
+
+            fn get(&self, p: Vec2) -> &[usize] {
+                let x = (p.x * Self::CELLS as f32).floor() as u32;
+                let y = (p.y * Self::CELLS as f32).floor() as u32;
+                if x < Self::CELLS && y < Self::CELLS {
+                    &self.cells[(y * Self::CELLS + x) as usize]
+                } else {
+                    &[]
+                }
+            }
+        }
+
+        let mut segments = Vec::with_capacity(points.len() / 3);
+        for i in 0..points.len() / 3 {
+            let idx = i as usize * 3;
+            let a = Vec2::from(points[idx + 0]);
+            let b = Vec2::from(points[idx + 1]);
+            let c = Vec2::from(points[idx + 2]);
+            let dir = (c - a).norm() * 5e-5;
+            let (a, b, c) = (a + dir, b + dir, c - dir);
+            let (min, max) = (a.min(b).min(c) - 0.05, a.max(b).max(c) + 0.05);
+            segments.push(Segment { a, b, c, min, max });
+        }
+        let grid = SpatialGrid::new(&segments);
+
         let mut sdf = vec![0; w as usize * h as usize];
         for y in 0..h {
             for x in 0..w {
                 let p = Vec2::new(x as f32, y as f32) / Vec2::from(size_px);
                 let mut d = f32::MAX;
-                for i in 0..points.len() / 3 {
-                    let idx = i as usize * 3;
-                    let a = Vec2::from(points[idx + 0]);
-                    let b = Vec2::from(points[idx + 1]);
-                    let c = Vec2::from(points[idx + 2]);
-                    let (min, max) = (a.min(b).min(c) - 0.05, a.max(b).max(c) + 0.05);
-                    if p.x < min.x || p.y < min.y || p.x > max.x || p.y > max.y {
+                for &i in grid.get(p) {
+                    let s = &segments[i];
+                    if p.x < s.min.x || p.x > s.max.x || p.y < s.min.y || p.y > s.max.y {
                         continue;
                     }
-                    let dir = (c - a).norm() * 5e-5;
-                    let bd = bezier_sdf(p, a + dir, b + dir, c - dir);
+                    let bd = s.sdf(p);
                     if bd.abs() < d.abs() {
                         d = bd;
                     }
@@ -247,41 +336,5 @@ impl Font {
             }
         }
         ImageData::new(sdf, w as u32, h as u32, 1)
-    }
-
-    fn convert_points(
-        points: &[(i16, i16, bool)],
-        xmin: i16,
-        ymin: i16,
-        w: u16,
-        h: u16,
-    ) -> Vec<(f32, f32)> {
-        let mut new_points = Vec::with_capacity(points.len() * 2);
-        let norm_x = |x: i16| (x - xmin) as f32 / w as f32;
-        let norm_y = |y: i16| (y - ymin) as f32 / h as f32;
-        let on_curve_off = points.iter().position(|(_, _, c)| *c).unwrap();
-        for i0 in 0..points.len() {
-            let i0 = (i0 + on_curve_off/**/) % points.len();
-            let i1 = (i0 + on_curve_off + 1) % points.len();
-            let (x0, y0, c0) = points[i0];
-            let (x1, y1, c1) = points[i1];
-            let (x0, y0) = (norm_x(x0), norm_y(y0));
-            let (x1, y1) = (norm_x(x1), norm_y(y1));
-            new_points.push((x0, y0));
-            // insert midpoint between 2 on/off-curve points
-            if c0 == c1 {
-                let mx = (x0 + x1) * 0.5;
-                let my = (y0 + y1) * 0.5;
-                new_points.push((mx, my));
-            }
-        }
-
-        let mut duped_points = Vec::with_capacity(new_points.len() * 2);
-        for i in (0..new_points.len()).step_by(2) {
-            duped_points.push(new_points[i]);
-            duped_points.push(new_points[(i + 1) % new_points.len()]);
-            duped_points.push(new_points[(i + 2) % new_points.len()]);
-        }
-        duped_points
     }
 }
