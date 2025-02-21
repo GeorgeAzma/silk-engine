@@ -90,19 +90,61 @@ impl App for MyApp<'_> {
         // gfx.end_temp();
 
         gfx.stroke_color = [255, 0, 0, 255];
-        // gfx.stroke_width = 0.25;
+        gfx.stroke_width = 0.25;
+        gfx.rgb(255, 255, 255);
+        // gfx.rect(Pc(0.0), Pc(0.0), Pc(1.0), Pc(1.0));
+        // gfx.rgb(0, 0, 0);
+
+        // gfx.stroke_blur = 1.0;
+
+        gfx.blur = 1.0;
+        gfx.circle(Pc(0.7), Pc(0.5), Pc(0.04));
+
+        gfx.blur = -1.0;
+        gfx.circle(Pc(0.8), Pc(0.5), Pc(0.04));
+
+        gfx.blur = 0.0;
+        gfx.circle(Pc(0.7), Pc(0.4), Pc(0.04));
+
+        gfx.blur = 1.0;
+        gfx.stroke_blur = 1.0;
+        gfx.circle(Pc(0.8), Pc(0.4), Pc(0.04));
+
+        gfx.blur = -1.0;
+        gfx.stroke_blur = 1.0;
+        gfx.circle(Pc(0.7), Pc(0.3), Pc(0.04));
+
+        gfx.blur = 0.0;
+        gfx.stroke_blur = 1.0;
+        gfx.circle(Pc(0.8), Pc(0.3), Pc(0.04));
+
+        gfx.bold = 1.0;
+        gfx.stroke_width = 0.5;
+        gfx.stroke_blur = 0.0;
+        gfx.blur = 0.0;
+        gfx.rgb(32, 123, 222);
+        // gfx.blur = -1.0;
+        // gfx.stroke_blur = 0.5;
         gfx.font("zenmaru");
         gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Px(50), Px(110), Px(24));
-        gfx.font("movistar");
-        gfx.text("quick jump AV", Px(150), Px(290), Px(24));
-        gfx.font("arial");
-        gfx.text("quick jump AV", Px(150), Px(210), Px(24));
         gfx.font("segoe-ui");
-        gfx.text("quick jump AV", Px(150), Px(250), Px(24));
-        gfx.no_img();
-        gfx.circle(Px(10), Px(10), Px(4));
-        gfx.atlas();
-        gfx.rect(Pc(0.5), Pc(0.5), Px(1024), Px(1024));
+        gfx.text("ok great now what", Px(150), Px(250), Px(24));
+        gfx.font("roboto");
+        gfx.text("ok great now what", Px(150), Px(350), Px(66));
+        gfx.font("opensans");
+        gfx.text("ok great now what", Px(150), Px(290), Px(24));
+        gfx.bold = 0.0;
+        gfx.stroke_width = 0.0;
+        gfx.stroke_blur = 0.0;
+        gfx.blur = 0.0;
+        gfx.text(
+            "quick brown fox jumped over a lazy dog",
+            Pc(0.1),
+            Px(190),
+            Px(8),
+        );
+        // gfx.atlas();
+        // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
     }
 }
 

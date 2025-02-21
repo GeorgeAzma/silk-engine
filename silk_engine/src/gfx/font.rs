@@ -2,51 +2,6 @@ use std::collections::HashMap;
 
 use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec3, Vectorf};
 
-// https://www.shadertoy.com/view/ftdGDB
-fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
-    const EPS: f32 = 1e-6;
-    let aa = b - a;
-    let bb = a - 2.0 * b + c;
-    let cc = aa * 2.0;
-    let d = a - p;
-
-    let kk = 1.0 / bb.len2();
-    let kx = kk * aa.dot(bb);
-    let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
-    let kz = kk * d.dot(aa);
-
-    let res;
-    let sgn;
-    let p1 = ky - kx * kx;
-    let p3 = p1 * p1 * p1;
-    let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-    let mut h = q * q + 4.0 * p3;
-    if h >= 0.0 {
-        h = h.sqrt();
-        let x = 0.5 * (Vec2::new(h, -h) - q);
-        let uv = x.sign() * x.abs().cbrt();
-        let t = (uv.x + uv.y - kx).saturate() + EPS;
-        let q = d + (cc + bb * t) * t;
-        res = q.len2();
-        sgn = (cc + 2.0 * bb * t).cross(q);
-    } else {
-        let z = (-p1).sqrt();
-        let v = (q / (p1 * z * 2.0)).acos() / 3.0;
-        let m = v.cos();
-        let n = v.sin() * 3f32.sqrt();
-        let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
-        let qx = d + (cc + bb * t.x) * t.x;
-        let dx = qx.len2();
-        let sx = (cc + 2.0 * bb * t.x).cross(qx);
-        let qy = d + (cc + bb * t.y) * t.y;
-        let dy = qy.len2();
-        let sy = (cc + 2.0 * bb * t.y).cross(qy);
-        res = dx.min(dy);
-        sgn = if dx < dy { sx } else { sy };
-    }
-    sgn.signum() * res.sqrt()
-}
-
 pub struct Font {
     uni2glyph: HashMap<char, GlyphData>,
     kernings: HashMap<u32, i16>,
@@ -189,6 +144,51 @@ impl Font {
     }
 
     pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
+        // https://www.shadertoy.com/view/ftdGDB
+        fn bezier_sdf(p: Vec2, a: Vec2, b: Vec2, c: Vec2) -> f32 {
+            const EPS: f32 = 1e-6;
+            let aa = b - a;
+            let bb = a - 2.0 * b + c;
+            let cc = aa * 2.0;
+            let d = a - p;
+
+            let kk = 1.0 / bb.len2();
+            let kx = kk * aa.dot(bb);
+            let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
+            let kz = kk * d.dot(aa);
+
+            let res;
+            let sgn;
+            let p1 = ky - kx * kx;
+            let p3 = p1 * p1 * p1;
+            let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+            let mut h = q * q + 4.0 * p3;
+            if h >= 0.0 {
+                h = h.sqrt();
+                let x = 0.5 * (Vec2::new(h, -h) - q);
+                let uv = x.sign() * x.abs().cbrt();
+                let t = (uv.x + uv.y - kx).saturate() + EPS;
+                let q = d + (cc + bb * t) * t;
+                res = q.len2();
+                sgn = (cc + 2.0 * bb * t).cross(q);
+            } else {
+                let z = (-p1).sqrt();
+                let v = (q / (p1 * z * 2.0)).acos() / 3.0;
+                let m = v.cos();
+                let n = v.sin() * 3f32.sqrt();
+                let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
+                let qx = d + (cc + bb * t.x) * t.x;
+                let dx = qx.len2();
+                let sx = (cc + 2.0 * bb * t.x).cross(qx);
+                let qy = d + (cc + bb * t.y) * t.y;
+                let dy = qy.len2();
+                let sy = (cc + 2.0 * bb * t.y).cross(qy);
+                res = dx.min(dy);
+                sgn = if dx < dy { sx } else { sy };
+            }
+            sgn.signum() * res.sqrt()
+        }
+
         if !self.is_char_graphic(char) {
             return ImageData::new(vec![], 0, 0, 0);
         }
@@ -229,7 +229,7 @@ impl Font {
                     let a = Vec2::from(points[idx + 0]);
                     let b = Vec2::from(points[idx + 1]);
                     let c = Vec2::from(points[idx + 2]);
-                    let (min, max) = (a.min(b).min(c) - 0.1, a.max(b).max(c) + 0.1);
+                    let (min, max) = (a.min(b).min(c) - 0.05, a.max(b).max(c) + 0.05);
                     if p.x < min.x || p.y < min.y || p.x > max.x || p.y > max.y {
                         continue;
                     }

@@ -30,7 +30,9 @@ pub struct Vertex {
     pub rotation: f32,
     pub stroke_width: f32,
     pub stroke_color: [u8; 4],
-    tex_coord: [u32; 2], // packed whxy
+    pub tex_coord: [u32; 2], // packed whxy
+    pub blur: f32,
+    pub stroke_blur: f32,
 }
 // TODO: tex_idx and textures
 #[allow(unused)]
@@ -60,6 +62,11 @@ impl Vertex {
         self
     }
 
+    fn blur(mut self, blur: f32) -> Self {
+        self.blur = blur;
+        self
+    }
+
     fn stk_col(mut self, stroke_color: [u8; 4]) -> Self {
         self.stroke_color = stroke_color;
         self
@@ -67,6 +74,11 @@ impl Vertex {
 
     fn stk_w(mut self, stroke_width: f32) -> Self {
         self.stroke_width = stroke_width;
+        self
+    }
+
+    fn stk_blur(mut self, stroke_blur: f32) -> Self {
+        self.stroke_blur = stroke_blur;
         self
     }
 
@@ -80,6 +92,8 @@ impl Vertex {
             stroke_width: renderer.stroke_width,
             stroke_color: renderer.stroke_color,
             tex_coord: renderer.tex_coord,
+            blur: renderer.blur,
+            stroke_blur: renderer.stroke_blur,
         }
     }
 }
@@ -98,6 +112,9 @@ pub struct Renderer {
     pub stroke_color: [u8; 4],
     /// [-1, 0, 1] = [thin, normal, bold]
     pub bold: f32,
+    /// negative is glow
+    pub blur: f32,
+    pub stroke_blur: f32,
     tex_coord: [u32; 2], // packed whxy
     font: String,
     old_color: [u8; 4],
@@ -106,6 +123,8 @@ pub struct Renderer {
     old_stroke_width: f32,
     old_stroke_color: [u8; 4],
     old_bold: f32,
+    old_blur: f32,
+    old_stroke_blur: f32,
     old_tex_coord: [u32; 2],
     old_font: String,
     areas: Vec<[f32; 4]>,
@@ -194,6 +213,8 @@ impl Renderer {
             stroke_width: 0.0,
             stroke_color: [0, 0, 0, 0],
             bold: 0.0,
+            blur: 0.0,
+            stroke_blur: 0.0,
             tex_coord: [0, 0],
             font: String::new(),
             old_color: [255, 255, 255, 255],
@@ -202,6 +223,8 @@ impl Renderer {
             old_stroke_width: 0.0,
             old_stroke_color: [0, 0, 0, 0],
             old_bold: 0.0,
+            old_blur: 0.0,
+            old_stroke_blur: 0.0,
             old_tex_coord: [0, 0],
             old_font: String::new(),
             areas: Vec::new(),
@@ -227,6 +250,10 @@ impl Renderer {
 
     pub fn hex(&mut self, hex: u32) {
         self.color = hex.to_be_bytes()
+    }
+
+    pub fn glow(&mut self, glow: f32) {
+        self.blur = -glow;
     }
 
     pub fn stroke_alpha(&mut self, a: u8) {
@@ -506,6 +533,7 @@ impl Renderer {
 
     /// returns bounding rect in pixels
     pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) -> (i32, i32, i32, i32) {
+        let old_tex_coord = self.tex_coord;
         assert!(
             self.font.as_str() != "",
             "failed to render text, no font is active"
@@ -553,6 +581,7 @@ impl Renderer {
             by = by.max(y + h * 2.0);
         }
         self.roundness = old_roundness;
+        self.tex_coord = old_tex_coord;
         use Unit::*;
         let (ax, ay, bx, by) = (
             self.px_x(Pc(ax)),
@@ -598,6 +627,8 @@ impl Renderer {
         self.old_tex_coord = self.tex_coord;
         self.old_font = self.font.clone();
         self.old_bold = self.bold;
+        self.old_blur = self.blur;
+        self.old_stroke_blur = self.stroke_blur;
     }
 
     /// resets render params to values before begin_temp() was called
@@ -610,6 +641,8 @@ impl Renderer {
         self.tex_coord = self.old_tex_coord;
         self.font = self.old_font.clone();
         self.bold = self.old_bold;
+        self.blur = self.old_blur;
+        self.stroke_blur = self.old_stroke_blur;
     }
 
     pub(crate) fn render(&mut self) {
@@ -743,6 +776,8 @@ impl Renderer {
         self.tex_coord = [0, 0];
         self.font = String::new();
         self.bold = 0.0;
+        self.blur = 0.0;
+        self.stroke_blur = 0.0;
 
         self.old_color = self.color;
         self.old_stroke_color = self.stroke_color;
@@ -752,5 +787,7 @@ impl Renderer {
         self.old_tex_coord = self.tex_coord;
         self.old_font = self.font.clone();
         self.old_bold = self.bold;
+        self.old_blur = self.blur;
+        self.old_stroke_blur = self.stroke_blur;
     }
 }
