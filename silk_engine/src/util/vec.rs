@@ -375,14 +375,24 @@ macro_rules! impl_vecf_extra {
 
 macro_rules! impl_ops {
     ($ty: ident, u32, $($comp: ident),+) => {
-        impl_op!(Add, add, wrapping_add, $ty, $comp_ty, $($comp),+);
-        impl_op!(Sub, sub, wrapping_sub, $ty, $comp_ty, $($comp),+);
-        impl_op!(Mul, mul, wrapping_mul, $ty, $comp_ty, $($comp),+);
-        impl_op!(Div, div, wrapping_div, $ty, $comp_ty, $($comp),+);
-        impl_op_assign!(AddAssign, add_assign, $ty, $comp_ty, $($comp),+);
-        impl_op_assign!(SubAssign, sub_assign, $ty, $comp_ty, $($comp),+);
-        impl_op_assign!(MulAssign, mul_assign, $ty, $comp_ty, $($comp),+);
-        impl_op_assign!(DivAssign, div_assign, $ty, $comp_ty, $($comp),+);
+        impl_op!(Add, add, wrapping_add, $ty, u32, $($comp),+);
+        impl_op!(Sub, sub, wrapping_sub, $ty, u32, $($comp),+);
+        impl_op!(Mul, mul, wrapping_mul, $ty, u32, $($comp),+);
+        impl_op!(Div, div, wrapping_div, $ty, u32, $($comp),+);
+        impl_op_assign!(AddAssign, add_assign, $ty, u32, $($comp),+);
+        impl_op_assign!(SubAssign, sub_assign, $ty, u32, $($comp),+);
+        impl_op_assign!(MulAssign, mul_assign, $ty, u32, $($comp),+);
+        impl_op_assign!(DivAssign, div_assign, $ty, u32, $($comp),+);
+    };
+    ($ty: ident, i32, $($comp: ident),+) => {
+        impl_op!(Add, add, wrapping_add, $ty, i32, $($comp),+);
+        impl_op!(Sub, sub, wrapping_sub, $ty, i32, $($comp),+);
+        impl_op!(Mul, mul, wrapping_mul, $ty, i32, $($comp),+);
+        impl_op!(Div, div, wrapping_div, $ty, i32, $($comp),+);
+        impl_op_assign!(AddAssign, add_assign, $ty, i32, $($comp),+);
+        impl_op_assign!(SubAssign, sub_assign, $ty, i32, $($comp),+);
+        impl_op_assign!(MulAssign, mul_assign, $ty, i32, $($comp),+);
+        impl_op_assign!(DivAssign, div_assign, $ty, i32, $($comp),+);
     };
     ($ty: ident, $comp_ty: ty, $($comp: ident),+) => {
         impl_op!(Add, add, add, $ty, $comp_ty, $($comp),+);
@@ -534,20 +544,19 @@ macro_rules! def_vec {
 }
 
 macro_rules! def_vecu {
-    (+, $ty: ident, $comp_ty: ty, $($comps: ident),+) => {
-        def_vec!($ty, $comp_ty, $($comps),*);
-        impl_bitops!($ty, $comp_ty, $($comps),*);
-        impl_rand!($ty, $($comps),*);
-    };
     ($ty: ident, $($comps: ident),+) => {
-        def_vecu!(+, $ty, u32, $($comps),*);
+        def_vec!($ty, u32, $($comps),*);
+        impl_bitops!($ty, u32, $($comps),*);
+        impl_rand!($ty, $($comps),*);
         impl_vecu!(+, $ty, u32, $($comps),*);
     };
 }
 
 macro_rules! def_veci {
     ($ty: ident, $($comps: ident),+) => {
-        def_vecu!(+, $ty, i32, $($comps),*);
+        def_vec!($ty, i32, $($comps),*);
+        impl_bitops!($ty, i32, $($comps),*);
+        impl_rand!($ty, $($comps),*);
         impl_veci!(+, $ty, i32, $($comps),*);
         impl_neg!($ty, $($comps),*);
     };
