@@ -50,7 +50,7 @@ impl Bezier for f32 {
 }
 
 macro_rules! impl_op {
-    ($trait: ident, $method: ident, $wrap_method: ident, $ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+    ($trait: ident, $method: ident, $wrap_method: ident, $ty: ident, $comp_ty: ty, $($comp: ident),+) => {
         impl $trait<&$ty> for $ty {
             type Output = Self;
             fn $method(self, rhs: &Self) -> Self {
@@ -90,7 +90,7 @@ macro_rules! impl_op {
 }
 
 macro_rules! impl_op_assign {
-    ($trait: ident, $method: ident, $ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+    ($trait: ident, $method: ident, $ty: ident, $comp_ty: ty, $($comp: ident),+) => {
         impl $trait<&$ty> for $ty {
             fn $method(&mut self, rhs: &Self) {
                 $(self.$comp.$method(rhs.$comp);)*
@@ -148,7 +148,7 @@ macro_rules! impl_splat {
 }
 
 macro_rules! impl_tuple_helper {
-    ($ty: ty, $tuple_ty: ty) => {
+    ($ty: ident, $tuple_ty: ty) => {
         impl From<$tuple_ty> for $ty {
             fn from(value: $tuple_ty) -> Self {
                 unsafe { std::mem::transmute(value) }
@@ -158,17 +158,17 @@ macro_rules! impl_tuple_helper {
 }
 
 macro_rules! impl_from_tuple {
-    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+    ($ty: ident, $comp_ty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
         impl_tuple_helper!($ty, (u32, u32, u32, u32));
         impl_tuple_helper!($ty, (i32, i32, i32, i32));
         impl_tuple_helper!($ty, (f32, f32, f32, f32));
     };
-    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident, $z: ident) => {
+    ($ty: ident, $comp_ty: ty, $x: ident, $y: ident, $z: ident) => {
         impl_tuple_helper!($ty, (u32, u32, u32));
         impl_tuple_helper!($ty, (i32, i32, i32));
         impl_tuple_helper!($ty, (f32, f32, f32));
     };
-    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident) => {
+    ($ty: ident, $comp_ty: ty, $x: ident, $y: ident) => {
         impl_tuple_helper!($ty, (u32, u32));
         impl_tuple_helper!($ty, (i32, i32));
         impl_tuple_helper!($ty, (f32, f32));
@@ -176,7 +176,7 @@ macro_rules! impl_from_tuple {
 }
 
 macro_rules! impl_vecu {
-    (+, $ty: ty, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
+    (+, $ty: ident, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
         impl Vectoru for $ty {
             impl_vecu!($comp_ty, $first_comp, $($comp),+);
         }
@@ -225,7 +225,7 @@ macro_rules! impl_vecu {
 }
 
 macro_rules! impl_veci {
-    (+, $ty: ty, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
+    (+, $ty: ident, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
         impl Vectori for $ty {
             impl_veci!($comp_ty, $first_comp, $($comp),+);
         }
@@ -250,7 +250,7 @@ macro_rules! impl_veci {
 }
 
 macro_rules! impl_vecf {
-    ($ty: ty, $vecu: ty, $first_comp: ident, $($comp: ident),+) => {
+    ($ty: ident, $vecu: ident, $first_comp: ident, $($comp: ident),+) => {
         impl Vectorf for $ty {
             type Vecu = $vecu;
 
@@ -313,7 +313,7 @@ macro_rules! impl_vecf {
 }
 
 macro_rules! impl_rand {
-    ($ty: ty, $($comp: ident),+) => {
+    ($ty: ident, $($comp: ident),+) => {
         impl Rand for $ty {
             fn rand(mut self) -> Self {
                 $(self.$comp = self.$comp.rand();)*
@@ -329,7 +329,7 @@ macro_rules! impl_rand {
 }
 
 macro_rules! impl_neg {
-    ($ty: ty, $($comp: ident),+) => {
+    ($ty: ident, $($comp: ident),+) => {
         impl Neg for $ty {
             type Output = Self;
             fn neg(mut self) -> Self {
@@ -341,7 +341,7 @@ macro_rules! impl_neg {
 }
 
 macro_rules! impl_vecf_extra {
-    ($ty: ty, $($comp: ident),+) => {
+    ($ty: ident, $($comp: ident),+) => {
         impl_rand!($ty, $($comp),*);
         impl_neg!($ty, $($comp),*);
 
@@ -398,7 +398,7 @@ macro_rules! impl_ops {
 }
 
 macro_rules! impl_bitops {
-    ($ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+    ($ty: ident, $comp_ty: ty, $($comp: ident),+) => {
         impl_op!(BitOr, bitor, bitor, $ty, $comp_ty, $($comp),+);
         impl_op!(BitAnd, bitand, bitand, $ty, $comp_ty, $($comp),+);
         impl_op!(BitXor, bitxor, bitxor, $ty, $comp_ty, $($comp),+);
@@ -419,20 +419,20 @@ macro_rules! def_const {
 }
 
 macro_rules! def_vec_neg_consts {
-    ($ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+    ($ty: ident, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
         def_const!(NEG_ONE, $cty, -1, -1, -1, -1);
         def_const!(NEG_X, $cty, -1, 0, 0, 0);
         def_const!(NEG_Y, $cty, 0, -1, 0, 0);
         def_const!(NEG_Z, $cty, 0, 0, -1, 0);
         def_const!(NEG_W, $cty, 0, 0, 0, -1);
     };
-    ($ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident) => {
+    ($ty: ident, $cty: ty, $x: ident, $y: ident, $z: ident) => {
         def_const!(NEG_ONE, $cty, -1, -1, -1);
         def_const!(NEG_X, $cty, -1, 0, 0);
         def_const!(NEG_Y, $cty, 0, -1, 0);
         def_const!(NEG_Z, $cty, 0, 0, -1);
     };
-    ($ty: ty, $cty: ty, $x: ident, $y: ident) => {
+    ($ty: ident, $cty: ty, $x: ident, $y: ident) => {
         def_const!(NEG_ONE, $cty, -1, -1);
         def_const!(NEG_X, $cty, -1, 0);
         def_const!(NEG_Y, $cty, 0, -1);
@@ -441,18 +441,18 @@ macro_rules! def_vec_neg_consts {
 }
 
 macro_rules! def_vec_consts {
-    (-, $ty: ty, i32, $($comp: ident),+) => {
+    (-, $ty: ident, i32, $($comp: ident),+) => {
         def_vec_neg_consts!($ty, i32, $($comp),*);
         def_vec_consts!(+, $ty, i32, $($comp),*);
     };
-    (-, $ty: ty, f32, $($comp: ident),+) => {
+    (-, $ty: ident, f32, $($comp: ident),+) => {
         def_vec_neg_consts!($ty, f32, $($comp),*);
         def_vec_consts!(+, $ty, f32, $($comp),*);
     };
-    (-, $ty: ty, $cty: ty, $($comp: ident),+) => {
+    (-, $ty: ident, $cty: ty, $($comp: ident),+) => {
         def_vec_consts!(+, $ty, $cty, $($comp),*);
     };
-    (+, $ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+    (+, $ty: ident, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
         def_const!(ZERO, $cty, 0, 0, 0, 0);
         def_const!(ONE, $cty, 1, 1, 1, 1);
         def_const!(
@@ -476,7 +476,7 @@ macro_rules! def_vec_consts {
         def_const!(Z, $cty, 0, 0, 1, 0);
         def_const!(W, $cty, 0, 0, 0, 1);
     };
-    (+, $ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident) => {
+    (+, $ty: ident, $cty: ty, $x: ident, $y: ident, $z: ident) => {
         def_const!(ZERO, $cty, 0, 0, 0);
         def_const!(ONE, $cty, 1, 1, 1);
         def_const!(MIN, $cty, <$cty>::MIN, <$cty>::MIN, <$cty>::MIN);
@@ -485,7 +485,7 @@ macro_rules! def_vec_consts {
         def_const!(Y, $cty, 0, 1, 0);
         def_const!(Z, $cty, 0, 0, 1);
     };
-    (+, $ty: ty, $cty: ty, $x: ident, $y: ident) => {
+    (+, $ty: ident, $cty: ty, $x: ident, $y: ident) => {
         def_const!(ZERO, $cty, 0, 0);
         def_const!(ONE, $cty, 1, 1);
         def_const!(MIN, $cty, <$cty>::MIN, <$cty>::MIN);
@@ -554,7 +554,7 @@ macro_rules! def_veci {
 }
 
 macro_rules! def_vecf {
-    ($ty: ident, $vecu: ty, $($comps: ident),+) => {
+    ($ty: ident, $vecu: ident, $($comps: ident),+) => {
         def_vec!($ty, f32, $($comps),*);
         impl_vecf_extra!($ty, $($comps),*);
         impl_vecf!($ty, $vecu, $($comps),*);
@@ -647,13 +647,13 @@ pub trait Vectori: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = 
     fn rem_euclid(self, div: Self) -> Self;
 }
 
-def_vecf!(Vec2, Vec2u, x, y);
-def_vecf!(Vec3, Vec3u, x, y, z);
-def_vecf!(Vec4, Vec4u, x, y, z, w);
-
 def_vecu!(Vec2u, x, y);
 def_vecu!(Vec3u, x, y, z);
 def_vecu!(Vec4u, x, y, z, w);
+
+def_vecf!(Vec2, Vec2u, x, y);
+def_vecf!(Vec3, Vec3u, x, y, z);
+def_vecf!(Vec4, Vec4u, x, y, z, w);
 
 def_veci!(Vec2i, x, y);
 def_veci!(Vec3i, x, y, z);
