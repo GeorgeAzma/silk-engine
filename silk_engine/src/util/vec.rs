@@ -1,5 +1,8 @@
 #![allow(unused)]
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
+use std::ops::{
+    Add, AddAssign, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Div, DivAssign,
+    Mul, MulAssign, Neg, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
+};
 
 use super::rand::{Noise, Rand};
 
@@ -15,7 +18,7 @@ pub trait ExtraFns:
 
 impl ExtraFns for f32 {
     fn step(self, b: Self) -> Self {
-        (b > self) as i32 as f32
+        if b < self { 0.0 } else { 1.0 }
     }
 
     fn smooth(self) -> Self {
@@ -47,23 +50,21 @@ impl Bezier for f32 {
 }
 
 macro_rules! impl_op {
-    ($trait: ident, $method: ident, $op: tt, $ty: ident, $comp_ty: ty, $($comp: ident),+) => {
+    ($trait: ident, $method: ident, $wrap_method: ident, $ty: ty, $comp_ty: ty, $($comp: ident),+) => {
         impl $trait<&$ty> for $ty {
             type Output = Self;
-            #[inline(always)]
             fn $method(self, rhs: &Self) -> Self {
-                Self {
-                    $($comp: self.$comp $op rhs.$comp),*
+                Self::Output {
+                    $($comp: self.$comp.$wrap_method(rhs.$comp)),*
                 }
             }
         }
 
         impl $trait<$ty> for $ty {
             type Output = Self;
-            #[inline(always)]
             fn $method(self, rhs: Self) -> Self {
-                Self {
-                    $($comp: self.$comp $op rhs.$comp),*
+                Self::Output {
+                    $($comp: self.$comp.$wrap_method(rhs.$comp)),*
                 }
             }
         }
@@ -71,39 +72,40 @@ macro_rules! impl_op {
         impl $trait<$comp_ty> for $ty {
             type Output = Self;
             fn $method(self, rhs: $comp_ty) -> Self {
-                Self {
-                    $($comp: self.$comp $op rhs),*
+                Self::Output {
+                    $($comp: self.$comp.$wrap_method(rhs)),*
                 }
             }
         }
 
         impl $trait<$ty> for $comp_ty {
             type Output = $ty;
-            #[inline(always)]
             fn $method(self, rhs: $ty) -> Self::Output {
-                rhs $op self
+                Self::Output {
+                    $($comp: self.$wrap_method(rhs.$comp)),*
+                }
             }
         }
     };
 }
 
 macro_rules! impl_op_assign {
-    ($trait: ident, $method: ident, $op: tt, $ty: ident, $comp_ty: ty, $($comp: ident),+) => {
+    ($trait: ident, $method: ident, $ty: ty, $comp_ty: ty, $($comp: ident),+) => {
         impl $trait<&$ty> for $ty {
             fn $method(&mut self, rhs: &Self) {
-                $(self.$comp $op rhs.$comp;)*
+                $(self.$comp.$method(rhs.$comp);)*
             }
         }
 
         impl $trait<$ty> for $ty {
             fn $method(&mut self, rhs: Self) {
-                $(self.$comp $op rhs.$comp;)*
+                $(self.$comp.$method(rhs.$comp);)*
             }
         }
 
         impl $trait<$comp_ty> for $ty {
             fn $method(&mut self, rhs: $comp_ty) {
-                $(self.$comp $op rhs;)*
+                $(self.$comp.$method(rhs);)*
             }
         }
     };
@@ -118,55 +120,194 @@ macro_rules! impl_vec_fn {
     }
 }
 
+macro_rules! fold {
+    ($fn: ident, $self: ident, $field1: ident, $($fields: ident),*) => {
+        $self.$field1.$fn(fold!($fn, $self, $($fields),+))
+    };
+    ($fn: ident, $self: ident, $field: ident) => {
+        $self.$field
+    };
+}
+
+macro_rules! impl_splat {
+    ($comp_ty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+        fn splat(x: $comp_ty) -> Self {
+            Self::new(x, x, x, x)
+        }
+    };
+    ($comp_ty: ty, $x: ident, $y: ident, $z: ident) => {
+        fn splat(x: $comp_ty) -> Self {
+            Self::new(x, x, x)
+        }
+    };
+    ($comp_ty: ty, $x: ident, $y: ident) => {
+        fn splat(x: $comp_ty) -> Self {
+            Self::new(x, x)
+        }
+    };
+}
+
+macro_rules! impl_tuple_helper {
+    ($ty: ty, $tuple_ty: ty) => {
+        impl From<$tuple_ty> for $ty {
+            fn from(value: $tuple_ty) -> Self {
+                unsafe { std::mem::transmute(value) }
+            }
+        }
+    };
+}
+
+macro_rules! impl_from_tuple {
+    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+        impl_tuple_helper!($ty, (u32, u32, u32, u32));
+        impl_tuple_helper!($ty, (i32, i32, i32, i32));
+        impl_tuple_helper!($ty, (f32, f32, f32, f32));
+    };
+    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident, $z: ident) => {
+        impl_tuple_helper!($ty, (u32, u32, u32));
+        impl_tuple_helper!($ty, (i32, i32, i32));
+        impl_tuple_helper!($ty, (f32, f32, f32));
+    };
+    ($ty: ty, $comp_ty: ty, $x: ident, $y: ident) => {
+        impl_tuple_helper!($ty, (u32, u32));
+        impl_tuple_helper!($ty, (i32, i32));
+        impl_tuple_helper!($ty, (f32, f32));
+    };
+}
+
 macro_rules! impl_vecu {
-    ($($comp: ident),+) => {
+    (+, $ty: ty, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
+        impl Vectoru for $ty {
+            impl_vecu!($comp_ty, $first_comp, $($comp),+);
+        }
+    };
+    ($comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
         fn max(mut self, rhs: Self) -> Self {
+            self.$first_comp = self.$first_comp.max(rhs.$first_comp);
             $(self.$comp = self.$comp.max(rhs.$comp);)*
             self
         }
 
         fn min(mut self, rhs: Self) -> Self {
+            self.$first_comp = self.$first_comp.min(rhs.$first_comp);
             $(self.$comp = self.$comp.min(rhs.$comp);)*
             self
         }
 
+        fn max_elem(self) -> $comp_ty {
+            fold!(max, self, $first_comp, $($comp),*)
+        }
+
+        fn min_elem(self) -> $comp_ty {
+            fold!(min, self, $first_comp, $($comp),*)
+        }
+
+        fn dot(self, rhs: Self) -> $comp_ty {
+            let mut result = self.$first_comp * rhs.$first_comp;
+            $(result += self.$comp * rhs.$comp;)*
+            result
+        }
+
         fn clamp(mut self, min: Self, max: Self) -> Self {
+            self.$first_comp = self.$first_comp.clamp(min.$first_comp, max.$first_comp);
             $(self.$comp = self.$comp.clamp(min.$comp, max.$comp);)*
             self
         }
+
+        fn rem(mut self, div: Self) -> Self {
+            self.$first_comp = self.$first_comp % div.$first_comp;
+            $(self.$comp = self.$comp % div.$comp;)*
+            self
+        }
+
+        impl_splat!($comp_ty, $first_comp, $($comp),*);
     };
 }
 
 macro_rules! impl_veci {
-    ($($comp: ident),+) => {
-        impl_vecu!($($comp),*);
+    (+, $ty: ty, $comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
+        impl Vectori for $ty {
+            impl_veci!($comp_ty, $first_comp, $($comp),+);
+        }
+    };
+    ($comp_ty: ty, $first_comp: ident, $($comp: ident),+) => {
+        impl_vecu!($comp_ty, $first_comp, $($comp),*);
 
-        impl_vec_fn!(abs, $($comp),*);
+        impl_vec_fn!(abs, $first_comp, $($comp),*);
 
         fn sign(mut self) -> Self {
+            self.$first_comp = self.$first_comp.signum();
             $(self.$comp = self.$comp.signum());*;
+            self
+        }
+
+        fn rem_euclid(mut self, div: Self) -> Self {
+            self.$first_comp = self.$first_comp.rem_euclid(div.$first_comp);
+            $(self.$comp = self.$comp.rem_euclid(div.$comp);)*
             self
         }
     };
 }
 
 macro_rules! impl_vecf {
-    ($($comp: ident),+) => {
-        impl_veci!($($comp),*);
+    ($ty: ty, $vecu: ty, $first_comp: ident, $($comp: ident),+) => {
+        impl Vectorf for $ty {
+            type Vecu = $vecu;
 
-        impl_vec_fn!(floor, $($comp),*);
-        impl_vec_fn!(round, $($comp),*);
-        impl_vec_fn!(ceil, $($comp),*);
-        impl_vec_fn!(fract, $($comp),*);
-        impl_vec_fn!(exp, $($comp),*);
-        impl_vec_fn!(sin, $($comp),*);
-        impl_vec_fn!(cos, $($comp),*);
-        impl_vec_fn!(sqrt, $($comp),*);
-        impl_vec_fn!(cbrt, $($comp),*);
+            impl_veci!(f32, $first_comp, $($comp),*);
 
-        fn pow(mut self, p: Self) -> Self {
-            $(self.$comp = self.$comp.powf(p.$comp);)*
-            self
+            impl_vec_fn!(floor, $first_comp, $($comp),*);
+            impl_vec_fn!(round, $first_comp, $($comp),*);
+            impl_vec_fn!(ceil, $first_comp, $($comp),*);
+            impl_vec_fn!(exp, $first_comp, $($comp),*);
+            impl_vec_fn!(sin, $first_comp, $($comp),*);
+            impl_vec_fn!(cos, $first_comp, $($comp),*);
+            impl_vec_fn!(sqrt, $first_comp, $($comp),*);
+            impl_vec_fn!(cbrt, $first_comp, $($comp),*);
+
+            fn len(self) -> f32 {
+                self.len2().sqrt()
+            }
+
+            fn norm(self) -> Self {
+                self / self.len()
+            }
+
+            fn dist(self, rhs: Self) -> f32 {
+                (rhs - self).len()
+            }
+
+            fn pow(mut self, p: Self) -> Self {
+                self.$first_comp = self.$first_comp.powf(p.$first_comp);
+                $(self.$comp = self.$comp.powf(p.$comp);)*
+                self
+            }
+
+            fn fract(mut self) -> Self {
+                self.$first_comp = self.$first_comp - self.$first_comp.floor();
+                $(self.$comp = self.$comp - self.$comp.floor();)*
+                self
+            }
+
+            fn angle_between(self, rhs: Self) -> f32 {
+                self.norm().dot(rhs.norm()).acos()
+            }
+
+            fn to_bits(self) -> Self::Vecu {
+                <$vecu>::new(self.$first_comp.to_bits(), $(self.$comp.to_bits()),*)
+            }
+        }
+
+        impl From<$ty> for $vecu {
+            fn from(v: $ty) -> $vecu {
+                <$vecu>::new(v.$first_comp as u32, $(v.$comp as u32),*)
+            }
+        }
+
+        impl From<$vecu> for $ty {
+            fn from(v: $vecu) -> Self {
+                <$ty>::new(v.$first_comp as f32, $(v.$comp as f32),*)
+            }
         }
     };
 }
@@ -186,6 +327,7 @@ macro_rules! impl_rand {
         }
     };
 }
+
 macro_rules! impl_neg {
     ($ty: ty, $($comp: ident),+) => {
         impl Neg for $ty {
@@ -198,7 +340,7 @@ macro_rules! impl_neg {
     };
 }
 
-macro_rules! impl_extra {
+macro_rules! impl_vecf_extra {
     ($ty: ty, $($comp: ident),+) => {
         impl_rand!($ty, $($comp),*);
         impl_neg!($ty, $($comp),*);
@@ -231,7 +373,203 @@ macro_rules! impl_extra {
     };
 }
 
+macro_rules! impl_ops {
+    ($ty: ty, u32, $($comp: ident),+) => {
+        impl_op!(Add, add, wrapping_add, $ty, $comp_ty, $($comp),+);
+        impl_op!(Sub, sub, wrapping_sub, $ty, $comp_ty, $($comp),+);
+        impl_op!(Mul, mul, wrapping_mul, $ty, $comp_ty, $($comp),+);
+        impl_op!(Div, div, wrapping_div, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(AddAssign, add_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(SubAssign, sub_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(MulAssign, mul_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(DivAssign, div_assign, $ty, $comp_ty, $($comp),+);
+    };
+    ($ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+        impl_op!(Add, add, add, $ty, $comp_ty, $($comp),+);
+        impl_op!(Sub, sub, sub, $ty, $comp_ty, $($comp),+);
+        impl_op!(Mul, mul, mul, $ty, $comp_ty, $($comp),+);
+        impl_op!(Div, div, div, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(AddAssign, add_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(SubAssign, sub_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(MulAssign, mul_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(DivAssign, div_assign, $ty, $comp_ty, $($comp),+);
+
+    };
+}
+
+macro_rules! impl_bitops {
+    ($ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+        impl_op!(BitOr, bitor, bitor, $ty, $comp_ty, $($comp),+);
+        impl_op!(BitAnd, bitand, bitand, $ty, $comp_ty, $($comp),+);
+        impl_op!(BitXor, bitxor, bitxor, $ty, $comp_ty, $($comp),+);
+        impl_op!(Shl, shl, shl, $ty, $comp_ty, $($comp),+);
+        impl_op!(Shr, shr, shr, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(BitOrAssign, bitor_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(BitAndAssign, bitand_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(BitXorAssign, bitxor_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(ShlAssign, shl_assign, $ty, $comp_ty, $($comp),+);
+        impl_op_assign!(ShrAssign, shr_assign, $ty, $comp_ty, $($comp),+);
+    };
+}
+
+macro_rules! def_const {
+    ($name: ident, $cty: ty, $($comp: expr),+) => {
+        pub const $name: Self = Self::new($($comp as $cty),*);
+    };
+}
+
+macro_rules! def_vec_neg_consts {
+    ($ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+        def_const!(NEG_ONE, $cty, -1, -1, -1, -1);
+        def_const!(NEG_X, $cty, -1, 0, 0, 0);
+        def_const!(NEG_Y, $cty, 0, -1, 0, 0);
+        def_const!(NEG_Z, $cty, 0, 0, -1, 0);
+        def_const!(NEG_W, $cty, 0, 0, 0, -1);
+    };
+    ($ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident) => {
+        def_const!(NEG_ONE, $cty, -1, -1, -1);
+        def_const!(NEG_X, $cty, -1, 0, 0);
+        def_const!(NEG_Y, $cty, 0, -1, 0);
+        def_const!(NEG_Z, $cty, 0, 0, -1);
+    };
+    ($ty: ty, $cty: ty, $x: ident, $y: ident) => {
+        def_const!(NEG_ONE, $cty, -1, -1);
+        def_const!(NEG_X, $cty, -1, 0);
+        def_const!(NEG_Y, $cty, 0, -1);
+        def_const!(NEG_Z, $cty, 0, 0);
+    };
+}
+
+macro_rules! def_vec_consts {
+    (-, $ty: ty, i32, $($comp: ident),+) => {
+        def_vec_neg_consts!($ty, i32, $($comp),*);
+        def_vec_consts!(+, $ty, i32, $($comp),*);
+    };
+    (-, $ty: ty, f32, $($comp: ident),+) => {
+        def_vec_neg_consts!($ty, f32, $($comp),*);
+        def_vec_consts!(+, $ty, f32, $($comp),*);
+    };
+    (-, $ty: ty, $cty: ty, $($comp: ident),+) => {
+        def_vec_consts!(+, $ty, $cty, $($comp),*);
+    };
+    (+, $ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident, $w: ident) => {
+        def_const!(ZERO, $cty, 0, 0, 0, 0);
+        def_const!(ONE, $cty, 1, 1, 1, 1);
+        def_const!(
+            MIN,
+            $cty,
+            <$cty>::MIN,
+            <$cty>::MIN,
+            <$cty>::MIN,
+            <$cty>::MIN
+        );
+        def_const!(
+            MAX,
+            $cty,
+            <$cty>::MAX,
+            <$cty>::MAX,
+            <$cty>::MAX,
+            <$cty>::MAX
+        );
+        def_const!(X, $cty, 1, 0, 0, 0);
+        def_const!(Y, $cty, 0, 1, 0, 0);
+        def_const!(Z, $cty, 0, 0, 1, 0);
+        def_const!(W, $cty, 0, 0, 0, 1);
+    };
+    (+, $ty: ty, $cty: ty, $x: ident, $y: ident, $z: ident) => {
+        def_const!(ZERO, $cty, 0, 0, 0);
+        def_const!(ONE, $cty, 1, 1, 1);
+        def_const!(MIN, $cty, <$cty>::MIN, <$cty>::MIN, <$cty>::MIN);
+        def_const!(MAX, $cty, <$cty>::MAX, <$cty>::MAX, <$cty>::MAX);
+        def_const!(X, $cty, 1, 0, 0);
+        def_const!(Y, $cty, 0, 1, 0);
+        def_const!(Z, $cty, 0, 0, 1);
+    };
+    (+, $ty: ty, $cty: ty, $x: ident, $y: ident) => {
+        def_const!(ZERO, $cty, 0, 0);
+        def_const!(ONE, $cty, 1, 1);
+        def_const!(MIN, $cty, <$cty>::MIN, <$cty>::MIN);
+        def_const!(MAX, $cty, <$cty>::MAX, <$cty>::MAX);
+        def_const!(X, $cty, 1, 0);
+        def_const!(Y, $cty, 0, 1);
+    };
+}
+
+macro_rules! def_vec {
+    ($ty: ident, $comp_ty: ty, $($comp: ident),+) => {
+        #[derive(Clone, Copy, Debug)]
+        pub struct $ty {
+            $(pub $comp: $comp_ty),*
+        }
+        impl_ops!($ty, $comp_ty, $($comp),*);
+
+        impl From<u32> for $ty {
+            fn from(value: u32) -> Self {
+                Self::splat(value as $comp_ty)
+            }
+        }
+
+        impl From<i32> for $ty {
+            fn from(value: i32) -> Self {
+                Self::splat(value as $comp_ty)
+            }
+        }
+
+        impl From<f32> for $ty {
+            fn from(value: f32) -> Self {
+                Self::splat(value as $comp_ty)
+            }
+        }
+
+        impl_from_tuple!($ty, $comp_ty, $($comp),+);
+
+        impl $ty {
+            def_vec_consts!(-, $ty, $comp_ty, $($comp),+);
+
+            pub const fn new($($comp: $comp_ty),+) -> Self {
+                Self { $($comp),* }
+            }
+        }
+    };
+}
+
+macro_rules! def_vecu {
+    (+, $ty: ident, $comp_ty: ty, $($comps: ident),+) => {
+        def_vec!($ty, $comp_ty, $($comps),*);
+        impl_bitops!($ty, $comp_ty, $($comps),*);
+        impl_rand!($ty, $($comps),*);
+    };
+    ($ty: ident, $($comps: ident),+) => {
+        def_vecu!(+, $ty, u32, $($comps),*);
+        impl_vecu!(+, $ty, u32, $($comps),*);
+    };
+}
+
+macro_rules! def_veci {
+    ($ty: ident, $($comps: ident),+) => {
+        def_vecu!(+, $ty, i32, $($comps),*);
+        impl_veci!(+, $ty, i32, $($comps),*);
+        impl_neg!($ty, $($comps),*);
+    };
+}
+
+macro_rules! def_vecf {
+    ($ty: ident, $vecu: ty, $($comps: ident),+) => {
+        def_vec!($ty, f32, $($comps),*);
+        impl_vecf_extra!($ty, $($comps),*);
+        impl_vecf!($ty, $vecu, $($comps),*);
+    };
+}
+
+#[macro_export]
+macro_rules! swiz {
+    ($swiz_ty: ty, $name: ident. $($comp: ident)+) => {
+        <$swiz_ty>::new($($name.$comp),+)
+    }
+}
+
 pub trait Vectorf: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = Self> {
+    type Vecu;
     fn splat(v: f32) -> Self;
     fn dot(self, rhs: Self) -> f32;
     fn len2(self) -> f32 {
@@ -265,6 +603,9 @@ pub trait Vectorf: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = 
     fn clamp(self, min: Self, max: Self) -> Self;
     fn sqrt(self) -> Self;
     fn cbrt(self) -> Self;
+    fn rem(self, div: Self) -> Self;
+    fn rem_euclid(self, div: Self) -> Self;
+    fn to_bits(self) -> Self::Vecu;
 }
 
 pub trait Vectoru: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = Self> {
@@ -281,6 +622,7 @@ pub trait Vectoru: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = 
     fn max(self, rhs: Self) -> Self;
     fn max_elem(self) -> u32;
     fn clamp(self, min: Self, max: Self) -> Self;
+    fn rem(self, div: Self) -> Self;
 }
 
 pub trait Vectori: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = Self> {
@@ -301,39 +643,31 @@ pub trait Vectori: Sized + Copy + Sub<Self, Output = Self> + Mul<Self, Output = 
     fn max(self, rhs: Self) -> Self;
     fn max_elem(self) -> i32;
     fn clamp(self, min: Self, max: Self) -> Self;
+    fn rem(self, div: Self) -> Self;
+    fn rem_euclid(self, div: Self) -> Self;
 }
 
-#[derive(Clone, Copy)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
-}
+def_vecf!(Vec2, Vec2u, x, y);
+def_vecf!(Vec3, Vec3u, x, y, z);
+def_vecf!(Vec4, Vec4u, x, y, z, w);
 
-impl_op!(Add, add, +, Vec2, f32, x, y);
-impl_op!(Sub, sub, -, Vec2, f32, x, y);
-impl_op!(Mul, mul, *, Vec2, f32, x, y);
-impl_op!(Div, div, /, Vec2, f32, x, y);
-impl_op_assign!(AddAssign, add_assign, +=, Vec2, f32, x, y);
-impl_op_assign!(SubAssign, sub_assign, -=, Vec2, f32, x, y);
-impl_op_assign!(MulAssign, mul_assign, *=, Vec2, f32, x, y);
-impl_op_assign!(DivAssign, div_assign, /=, Vec2, f32, x, y);
-impl_extra!(Vec2, x, y);
+def_vecu!(Vec2u, x, y);
+def_vecu!(Vec3u, x, y, z);
+def_vecu!(Vec4u, x, y, z, w);
+
+def_veci!(Vec2i, x, y);
+def_veci!(Vec3i, x, y, z);
+def_veci!(Vec4i, x, y, z, w);
 
 impl Vec2 {
-    const ZERO: Self = Self { x: 0.0, y: 0.0 };
-    const ONE: Self = Self { x: 1.0, y: 1.0 };
-    const NEG_ONE: Self = Self { x: -1.0, y: -1.0 };
-    const X: Self = Self { x: 1.0, y: 0.0 };
-    const Y: Self = Self { x: 0.0, y: 1.0 };
-    const NEG_X: Self = Self { x: -1.0, y: 0.0 };
-    const NEG_Y: Self = Self { x: 0.0, y: -1.0 };
-
-    pub const fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
+    pub fn angle(a: f32) -> Self {
+        let (s, c) = a.sin_cos();
+        Self::new(s, c)
     }
 
-    pub fn angle(a: f32) -> Self {
-        Self::new(a.cos(), a.sin())
+    pub fn rotate(self, a: f32) -> Self {
+        let (s, c) = a.sin_cos();
+        c * self + s * Vec2::new(-self.y, self.x)
     }
 
     pub fn cross(self, rhs: Self) -> f32 {
@@ -341,373 +675,17 @@ impl Vec2 {
     }
 }
 
-impl Noise for Vec2 {
-    fn hash(self) -> f32 {
-        let ux = (self.x * 141421356.0).to_bits();
-        let uy = (self.y * 2718281828.0).to_bits();
-        ((ux ^ uy) * 3141592653u32) as f32 / u32::MAX as f32
-    }
-
-    fn noise(self) -> f32 {
-        let ip = self.floor();
-        let u = self.fract().smooth();
-        let res = ip
-            .hash()
-            .lerp(Vec2::new(ip.x + 1.0, ip.y).hash(), u.x)
-            .lerp(
-                Vec2::new(ip.x, ip.y + 1.0)
-                    .hash()
-                    .lerp((ip + 1.0).hash(), u.x),
-                u.y,
-            );
-        res * res
-    }
-
-    fn voronoise(self, smooth: f32) -> f32 {
-        let hash3 = |p: &Self| {
-            let q = Vec3::new(
-                p.dot(Vec2::new(127.1, 311.7)),
-                p.dot(Vec2::new(269.5, 183.3)),
-                p.dot(Vec2::new(419.2, 371.9)),
-            );
-            (q.sin() * 43758.547).fract()
-        };
-        let p = self.floor();
-        let f = self.fract();
-        let k = 1.0 + 63.0 * (-smooth + 1.0).powf(4.0);
-        let mut va = 0.0;
-        let mut wt = 0.0;
-        for j in -2..=2 {
-            for i in -2..=2 {
-                let g = Vec2::new(i as f32, j as f32);
-                let o = hash3(&(p + &g)) * Vec3::splat(1.0);
-                let r = g - &f + Vec2::new(o.x, o.y);
-                let d = r.len2();
-                let ww = (1.0 - d.sqrt().sstep(0.0, std::f32::consts::SQRT_2)).powf(k);
-                va += o.z * ww;
-                wt += ww;
-            }
-        }
-        va / wt
-    }
-}
-
-impl Vectorf for Vec2 {
-    impl_vecf!(x, y);
-
-    fn splat(v: f32) -> Self {
-        Self::new(v, v)
-    }
-
-    fn dot(self, rhs: Self) -> f32 {
-        self.x * rhs.x + self.y * rhs.y
-    }
-
-    fn len(self) -> f32 {
-        self.len2().sqrt()
-    }
-
-    fn norm(self) -> Self {
-        self / self.len()
-    }
-
-    fn angle_between(self, rhs: Self) -> f32 {
-        self.norm().dot(rhs.norm())
-    }
-
-    fn min_elem(self) -> f32 {
-        self.x.min(self.y)
-    }
-
-    fn max_elem(self) -> f32 {
-        self.x.max(self.y)
-    }
-}
-
-impl From<f32> for Vec2 {
-    fn from(value: f32) -> Self {
-        Self::splat(value)
-    }
-}
-
-impl From<(f32, f32)> for Vec2 {
-    #[inline(always)]
-    fn from(value: (f32, f32)) -> Self {
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl From<u32> for Vec2 {
-    fn from(value: u32) -> Self {
-        Self::splat(value as f32)
-    }
-}
-
-impl From<Vec2u> for Vec2 {
-    fn from(value: Vec2u) -> Self {
-        Self::new(value.x as f32, value.y as f32)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Vec3 {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-}
-
-impl_op!(Add, add, +, Vec3, f32, x, y, z);
-impl_op!(Sub, sub, -, Vec3, f32, x, y, z);
-impl_op!(Mul, mul, *, Vec3, f32, x, y, z);
-impl_op!(Div, div, /, Vec3, f32, x, y, z);
-impl_op_assign!(AddAssign, add_assign, +=, Vec3, f32, x, y, z);
-impl_op_assign!(SubAssign, sub_assign, -=, Vec3, f32, x, y, z);
-impl_op_assign!(MulAssign, mul_assign, *=, Vec3, f32, x, y, z);
-impl_op_assign!(DivAssign, div_assign, /=, Vec3, f32, x, y, z);
-impl_extra!(Vec3, x, y, z);
-
 impl Vec3 {
-    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
-    pub const ONE: Self = Self::new(1.0, 1.0, 1.0);
-    pub const NEG_ONE: Self = Self::new(-1.0, -1.0, -1.0);
-    pub const X: Self = Self::new(1.0, 0.0, 0.0);
-    pub const Y: Self = Self::new(0.0, 1.0, 0.0);
-    pub const Z: Self = Self::new(0.0, 0.0, 1.0);
-    pub const NEG_X: Self = Self::new(-1.0, 0.0, 0.0);
-    pub const NEG_Y: Self = Self::new(0.0, -1.0, 0.0);
-    pub const NEG_Z: Self = Self::new(0.0, 0.0, -1.0);
-
-    pub const fn new(x: f32, y: f32, z: f32) -> Self {
-        Self { x, y, z }
-    }
-
     pub fn angle(a: f32, b: f32) -> Self {
         let bc = b.cos();
         Self::new(a.cos() * bc, a.sin() * bc, b.sin())
     }
-}
 
-impl Vectorf for Vec3 {
-    impl_vecf!(x, y, z);
-
-    fn splat(v: f32) -> Self {
-        Self::new(v, v, v)
-    }
-
-    fn dot(self, rhs: Self) -> f32 {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
-    }
-
-    fn len(self) -> f32 {
-        self.len2().sqrt()
-    }
-
-    fn norm(self) -> Self {
-        self / self.len()
-    }
-
-    fn dist(self, rhs: Self) -> f32 {
-        (rhs - self).len()
-    }
-
-    fn angle_between(self, rhs: Self) -> f32 {
-        self.norm().dot(rhs.norm())
-    }
-
-    fn min_elem(self) -> f32 {
-        self.x.min(self.y).min(self.z)
-    }
-
-    fn max_elem(self) -> f32 {
-        self.x.max(self.y).max(self.z)
-    }
-}
-
-impl From<f32> for Vec3 {
-    fn from(value: f32) -> Self {
-        Self::splat(value)
-    }
-}
-
-impl From<Vec3u> for Vec3 {
-    fn from(value: Vec3u) -> Self {
-        Self::new(value.x as f32, value.y as f32, value.z as f32)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Vec2u {
-    pub x: u32,
-    pub y: u32,
-}
-
-impl_op!(Add, add, +, Vec2u, u32, x, y);
-impl_op!(Sub, sub, -, Vec2u, u32, x, y);
-impl_op!(Mul, mul, *, Vec2u, u32, x, y);
-impl_op!(Div, div, /, Vec2u, u32, x, y);
-impl_op_assign!(AddAssign, add_assign, +=, Vec2u, u32, x, y);
-impl_op_assign!(SubAssign, sub_assign, -=, Vec2u, u32, x, y);
-impl_op_assign!(MulAssign, mul_assign, *=, Vec2u, u32, x, y);
-impl_op_assign!(DivAssign, div_assign, /=, Vec2u, u32, x, y);
-impl_rand!(Vec2u, x, y);
-
-impl Vec2u {
-    pub const ZERO: Self = Self::new(0, 0);
-    pub const ONE: Self = Self::new(1, 1);
-    pub const X: Self = Self::new(1, 0);
-    pub const Y: Self = Self::new(0, 1);
-
-    pub const fn new(x: u32, y: u32) -> Self {
-        Self { x, y }
-    }
-}
-
-impl Vectoru for Vec2u {
-    impl_vecu!(x, y);
-
-    fn splat(v: u32) -> Self {
-        Self::new(v, v)
-    }
-
-    fn dot(self, rhs: Self) -> u32 {
-        self.x * rhs.x + self.y * rhs.y
-    }
-
-    fn min_elem(self) -> u32 {
-        self.x.min(self.y)
-    }
-
-    fn max_elem(self) -> u32 {
-        self.x.max(self.y)
-    }
-}
-
-impl From<u32> for Vec2u {
-    fn from(value: u32) -> Self {
-        Self::splat(value)
-    }
-}
-
-impl From<(u32, u32)> for Vec2u {
-    fn from(value: (u32, u32)) -> Self {
-        unsafe { std::mem::transmute(value) }
-    }
-}
-
-impl From<Vec2> for Vec2u {
-    fn from(value: Vec2) -> Self {
-        Self::new(value.x as u32, value.y as u32)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Vec3u {
-    pub x: u32,
-    pub y: u32,
-    pub z: u32,
-}
-
-impl_op!(Add, add, +, Vec3u, u32, x, y, z);
-impl_op!(Sub, sub, -, Vec3u, u32, x, y, z);
-impl_op!(Mul, mul, *, Vec3u, u32, x, y, z);
-impl_op!(Div, div, /, Vec3u, u32, x, y, z);
-impl_op_assign!(AddAssign, add_assign, +=, Vec3u, u32, x, y, z);
-impl_op_assign!(SubAssign, sub_assign, -=, Vec3u, u32, x, y, z);
-impl_op_assign!(MulAssign, mul_assign, *=, Vec3u, u32, x, y, z);
-impl_op_assign!(DivAssign, div_assign, /=, Vec3u, u32, x, y, z);
-impl_rand!(Vec3u, x, y);
-
-impl Vec3u {
-    pub const ZERO: Self = Self::new(0, 0, 0);
-    pub const ONE: Self = Self::new(1, 1, 1);
-    pub const X: Self = Self::new(1, 0, 0);
-    pub const Y: Self = Self::new(0, 1, 0);
-    pub const Z: Self = Self::new(0, 0, 1);
-
-    pub const fn new(x: u32, y: u32, z: u32) -> Self {
-        Self { x, y, z }
-    }
-}
-
-impl Vectoru for Vec3u {
-    impl_vecu!(x, y);
-
-    fn splat(v: u32) -> Self {
-        Self::new(v, v, v)
-    }
-
-    fn dot(self, rhs: Self) -> u32 {
-        self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
-    }
-
-    fn min_elem(self) -> u32 {
-        self.x.min(self.y.min(self.z))
-    }
-
-    fn max_elem(self) -> u32 {
-        self.x.max(self.y.max(self.z))
-    }
-}
-
-impl From<u32> for Vec3u {
-    fn from(value: u32) -> Self {
-        Self::splat(value)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct Vec2i {
-    pub x: i32,
-    pub y: i32,
-}
-
-impl_op!(Add, add, +, Vec2i, i32, x, y);
-impl_op!(Sub, sub, -, Vec2i, i32, x, y);
-impl_op!(Mul, mul, *, Vec2i, i32, x, y);
-impl_op!(Div, div, /, Vec2i, i32, x, y);
-impl_op_assign!(AddAssign, add_assign, +=, Vec2i, i32, x, y);
-impl_op_assign!(SubAssign, sub_assign, -=, Vec2i, i32, x, y);
-impl_op_assign!(MulAssign, mul_assign, *=, Vec2i, i32, x, y);
-impl_op_assign!(DivAssign, div_assign, /=, Vec2i, i32, x, y);
-impl_rand!(Vec2i, x, y);
-impl_neg!(Vec2i, x, y);
-
-impl Vec2i {
-    pub const ZERO: Self = Self::new(0, 0);
-    pub const ONE: Self = Self::new(1, 1);
-    pub const NEG_ONE: Self = Self::new(-1, -1);
-    pub const X: Self = Self::new(1, 0);
-    pub const Y: Self = Self::new(0, 1);
-    pub const NEG_X: Self = Self::new(-1, 0);
-    pub const NEG_Y: Self = Self::new(0, -1);
-
-    pub const fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
-    }
-}
-
-impl Vectori for Vec2i {
-    impl_veci!(x, y);
-
-    fn splat(v: i32) -> Self {
-        Self::new(v, v)
-    }
-
-    fn dot(self, rhs: Self) -> i32 {
-        self.x * rhs.x + self.y * rhs.y
-    }
-
-    fn min_elem(self) -> i32 {
-        self.x.min(self.y)
-    }
-
-    fn max_elem(self) -> i32 {
-        self.x.max(self.y)
-    }
-}
-
-impl From<i32> for Vec2i {
-    fn from(value: i32) -> Self {
-        Self::splat(value)
+    pub fn cross(self, rhs: Self) -> Self {
+        Self::new(
+            self.y * rhs.z - self.z * rhs.y,
+            self.z * rhs.x - self.x * rhs.z,
+            self.x * rhs.y - self.y * rhs.x,
+        )
     }
 }
