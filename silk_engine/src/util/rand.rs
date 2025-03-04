@@ -1,4 +1,4 @@
-use super::{ExtraFns, Vec2, Vec2u, Vec3, Vec3u, Vec4, Vectorf, Vectoru};
+use super::vec::{ExtraFns, Vec2, Vec2u, Vec3, Vec3u, Vec4, Vectorf, Vectoru};
 use crate::swiz;
 use std::ops::Add;
 

@@ -374,7 +374,7 @@ macro_rules! impl_vecf_extra {
 }
 
 macro_rules! impl_ops {
-    ($ty: ty, u32, $($comp: ident),+) => {
+    ($ty: ident, u32, $($comp: ident),+) => {
         impl_op!(Add, add, wrapping_add, $ty, $comp_ty, $($comp),+);
         impl_op!(Sub, sub, wrapping_sub, $ty, $comp_ty, $($comp),+);
         impl_op!(Mul, mul, wrapping_mul, $ty, $comp_ty, $($comp),+);
@@ -384,7 +384,7 @@ macro_rules! impl_ops {
         impl_op_assign!(MulAssign, mul_assign, $ty, $comp_ty, $($comp),+);
         impl_op_assign!(DivAssign, div_assign, $ty, $comp_ty, $($comp),+);
     };
-    ($ty: ty, $comp_ty: ty, $($comp: ident),+) => {
+    ($ty: ident, $comp_ty: ty, $($comp: ident),+) => {
         impl_op!(Add, add, add, $ty, $comp_ty, $($comp),+);
         impl_op!(Sub, sub, sub, $ty, $comp_ty, $($comp),+);
         impl_op!(Mul, mul, mul, $ty, $comp_ty, $($comp),+);
