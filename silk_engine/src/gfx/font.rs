@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec2u, Vec3, Vectorf};
+use crate::util::{ExtraFns, GlyphData, ImageData, Ttf, Vec2, Vec2u, Vectorf};
 
 pub struct Font {
     uni2glyph: HashMap<char, GlyphData>,
@@ -143,8 +143,10 @@ impl Font {
         )
     }
 
-    // TODO: speedup sdf generation, takes 5ms for 64x64 chinese char gen
+    // TODO: speedup sdf generation, takes 2.4ms for 64x64 chinese char 鬱 gen
     pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
+        crate::scope_time!("gen '{char}' sdf {size_px}px");
+
         if !self.is_char_graphic(char) {
             return ImageData::new(vec![], 0, 0, 0);
         }
@@ -217,52 +219,35 @@ impl Font {
             c: Vec2,
             min: Vec2,
             max: Vec2,
+            line: bool,
         }
 
         impl Segment {
             // https://www.shadertoy.com/view/ftdGDB
             fn sdf(&self, p: Vec2) -> f32 {
-                const EPS: f32 = 1e-6;
-                let aa = self.b - self.a;
-                let bb = self.a - 2.0 * self.b + self.c;
-                let cc = aa * 2.0;
-                let d = self.a - p;
-
-                let kk = 1.0 / bb.len2();
-                let kx = kk * aa.dot(bb);
-                let ky = kk * (2.0 * aa.len2() + d.dot(bb)) / 3.0;
-                let kz = kk * d.dot(aa);
-
-                let res;
-                let sgn;
-                let p1 = ky - kx * kx;
-                let p3 = p1 * p1 * p1;
-                let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-                let mut h = q * q + 4.0 * p3;
-                if h >= 0.0 {
-                    h = h.sqrt();
-                    let x = 0.5 * (Vec2::new(h, -h) - q);
-                    let uv = x.sign() * x.abs().cbrt();
-                    let t = (uv.x + uv.y - kx).saturate() + EPS;
-                    let q = d + (cc + bb * t) * t;
-                    res = q.len2();
-                    sgn = (cc + 2.0 * bb * t).cross(q);
-                } else {
-                    let z = (-p1).sqrt();
-                    let v = (q / (p1 * z * 2.0)).acos() / 3.0;
-                    let m = v.cos();
-                    let n = v.sin() * 3f32.sqrt();
-                    let t = (Vec3::new(m + m, -n - m, n - m) * z - kx).saturate() + EPS;
-                    let qx = d + (cc + bb * t.x) * t.x;
-                    let dx = qx.len2();
-                    let sx = (cc + 2.0 * bb * t.x).cross(qx);
-                    let qy = d + (cc + bb * t.y) * t.y;
-                    let dy = qy.len2();
-                    let sy = (cc + 2.0 * bb * t.y).cross(qy);
-                    res = dx.min(dy);
-                    sgn = if dx < dy { sx } else { sy };
+                if self.line {
+                    let ba = self.c - self.a;
+                    let pa = p - self.a;
+                    let h = pa.dot(ba) / ba.len2();
+                    return pa.cross(ba).signum() * (ba * h.saturate() - pa).len();
                 }
-                sgn.signum() * res.sqrt()
+                let ab = self.b - self.a;
+                let d = self.c - 2.0 * self.b + self.a;
+                let mut t = ((p - self.a).dot(ab) / ab.len2()).saturate();
+                // Newton iters
+                for _ in 0..2 {
+                    let q = self.a + ab * (2.0 * t) + d * (t * t);
+                    let dq = ab * 2.0 + d * (2.0 * t);
+                    let f = (q - p).dot(dq);
+                    let df = dq.len2() + (q - p).dot(2.0 * d);
+                    let dt = -f / df;
+                    t = (t + dt).saturate();
+                }
+                let q = self.a + ab * (2.0 * t) + d * (t * t);
+                let dist = (q - p).len();
+                let dq = ab * 2.0 + d * (2.0 * t);
+                let sign = dq.cross(q - p).signum();
+                sign * dist
             }
         }
 
@@ -271,7 +256,7 @@ impl Font {
         }
 
         impl SpatialGrid {
-            const CELLS: u32 = 8;
+            const CELLS: u32 = 16;
             fn new(segments: &[Segment]) -> Self {
                 let mut cells = vec![vec![]; (Self::CELLS * Self::CELLS) as usize];
                 for (i, s) in segments.iter().enumerate() {
@@ -292,11 +277,7 @@ impl Font {
             fn get(&self, p: Vec2) -> &[usize] {
                 let x = (p.x * Self::CELLS as f32).floor() as u32;
                 let y = (p.y * Self::CELLS as f32).floor() as u32;
-                if x < Self::CELLS && y < Self::CELLS {
-                    &self.cells[(y * Self::CELLS + x) as usize]
-                } else {
-                    &[]
-                }
+                &self.cells[(y * Self::CELLS + x) as usize]
             }
         }
 
@@ -308,21 +289,45 @@ impl Font {
             let c = Vec2::from(points[idx + 2]);
             let dir = (c - a).norm() * 5e-5;
             let (a, b, c) = (a + dir, b + dir, c - dir);
-            let (min, max) = (a.min(b).min(c) - 0.05, a.max(b).max(c) + 0.05);
-            segments.push(Segment { a, b, c, min, max });
+            let (min, max) = (a.min(b).min(c) - 0.04, a.max(b).max(c) + 0.04);
+            let curve = (b - (a + c) * 0.5).len2() / (c - a).len2();
+            segments.push(Segment {
+                a,
+                b,
+                c,
+                min,
+                max,
+                line: curve < 0.01,
+            });
         }
+        segments.sort_unstable_by(|a, b| a.min.y.total_cmp(&b.min.y));
         let grid = SpatialGrid::new(&segments);
 
         let mut sdf = vec![0; w as usize * h as usize];
+        let rcp_size = Vec2::from(1.0 / size_px as f32);
         for y in 0..h {
             for x in 0..w {
-                let p = Vec2::new(x as f32, y as f32) / Vec2::from(size_px);
+                let p = Vec2::new(x as f32, y as f32) * rcp_size;
                 let mut d = f32::MAX;
-                for &i in grid.get(p) {
+                let segs = grid.get(p);
+                if segs.is_empty() {
+                    continue;
+                }
+                for &i in segs {
                     let s = &segments[i];
-                    if p.x < s.min.x || p.x > s.max.x || p.y < s.min.y || p.y > s.max.y {
+                    if p.y < s.min.y {
+                        break;
+                    }
+                    if p.x < s.min.x || p.x > s.max.x || p.y > s.max.y {
                         continue;
                     }
+                    // barycentric triangle intersection (useful for > 64px)
+                    // let c1 = (self.b - self.a).cross(p - self.a);
+                    // let c2 = (self.c - self.b).cross(p - self.b);
+                    // let c3 = (self.a - self.c).cross(p - self.c);
+                    // if !(c1 >= -0.02 && c2 >= -0.02 && c3 >= -0.02) {
+                    //     return 1e9;
+                    // }
                     let bd = s.sdf(p);
                     if bd.abs() < d.abs() {
                         d = bd;

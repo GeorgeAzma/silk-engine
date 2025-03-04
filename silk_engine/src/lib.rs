@@ -3,7 +3,8 @@
     once_cell_get_mut,
     slice_as_chunks,
     slice_as_array,
-    str_from_raw_parts
+    str_from_raw_parts,
+    portable_simd
 )]
 
 pub mod prelude;
@@ -494,7 +495,10 @@ impl<T: App> Engine<T> {
 impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         *PANIC_HOOK;
-        let monitor = event_loop.primary_monitor().unwrap();
+        let monitor = event_loop.primary_monitor().unwrap_or_else(|| {
+            crate::warn!("no primary monitor detected, falling back to first available");
+            event_loop.available_monitors().next().unwrap()
+        });
         // center window by default
         if self.window_attribs.position.is_none() {
             let PhysicalSize::<i32> { width, height } = self

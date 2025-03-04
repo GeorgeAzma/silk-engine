@@ -1,6 +1,9 @@
 use super::{alloc_callbacks, config::*, instance, queue_family_index};
 use ash::vk;
-use std::{ffi::CString, sync::LazyLock};
+use std::{
+    ffi::{CStr, CString},
+    sync::LazyLock,
+};
 
 static GPU_STUFF: LazyLock<(
     vk::PhysicalDevice,
@@ -121,14 +124,22 @@ pub fn gpu_limits() -> vk::PhysicalDeviceLimits {
     gpu_props().limits
 }
 
+#[allow(unused)]
 pub fn gpu_features() -> vk::PhysicalDeviceFeatures {
     GPU_STUFF.2
 }
 
+#[allow(unused)]
 pub fn gpu_extensions() -> &'static [CString] {
     &GPU_EXTENSIONS
 }
 
+#[allow(unused)]
+pub fn gpu_supports(ext: &CStr) -> bool {
+    GPU_EXTENSIONS.contains(&ext.to_owned())
+}
+
+#[allow(unused)]
 pub fn gpu_mem_props() -> vk::PhysicalDeviceMemoryProperties {
     *GPU_MEMORY_PROPS
 }

@@ -1,6 +1,6 @@
 use crate::{
     RES_PATH,
-    gfx::{alloc_callbacks, debug_name, gpu, instance, samples_u32_to_vk, shader::Shader},
+    gfx::{alloc_callbacks, debug_name, gpu, samples_u32_to_vk, shader::Shader},
 };
 use ash::vk;
 use std::sync::LazyLock;
@@ -11,7 +11,9 @@ fn pipeline_cache_path() -> String {
 
 #[cfg(debug_assertions)]
 static PIPELINE_EXEC_PROPS_LOADER: LazyLock<ash::khr::pipeline_executable_properties::Device> =
-    LazyLock::new(|| ash::khr::pipeline_executable_properties::Device::new(instance(), gpu()));
+    LazyLock::new(|| {
+        ash::khr::pipeline_executable_properties::Device::new(crate::gfx::instance(), gpu())
+    });
 
 static PIPELINE_CACHE: LazyLock<vk::PipelineCache> = LazyLock::new(|| {
     let cache = std::fs::read(pipeline_cache_path()).unwrap_or_default();
@@ -456,10 +458,16 @@ pub fn create_compute(
 
 #[cfg(debug_assertions)]
 fn log_pipeline_info(pipeline: vk::Pipeline) {
+    use super::gpu::gpu_supports;
+    if !gpu_supports(ash::khr::pipeline_executable_properties::NAME) {
+        return;
+    }
     unsafe {
-        let exec_props = PIPELINE_EXEC_PROPS_LOADER
+        let Ok(exec_props) = PIPELINE_EXEC_PROPS_LOADER
             .get_pipeline_executable_properties(&vk::PipelineInfoKHR::default().pipeline(pipeline))
-            .unwrap();
+        else {
+            return;
+        };
 
         for (i, exec_prop) in exec_props.iter().enumerate() {
             let desc = exec_prop
