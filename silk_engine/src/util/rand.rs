@@ -1,4 +1,4 @@
-use super::{ExtraFns, Vec2, Vec3, Vectorf};
+use super::{ExtraFns, Vec2, Vec2u, Vec3, Vec3u, Vec4, Vectorf, Vectoru};
 use crate::swiz;
 use std::ops::Add;
 
@@ -217,9 +217,25 @@ impl Rand for f64 {
 pub trait Noise:
     Sized + ExtraFns + Copy + From<f32> + std::ops::MulAssign + std::ops::MulAssign<f32>
 {
-    fn hash(self) -> f32;
+    fn hash(self) -> f32 {
+        panic!("type did not implement hash");
+    }
+    fn hash2(self) -> Vec2 {
+        panic!("type did not implement hash2");
+    }
+    fn hash3(self) -> Vec3 {
+        panic!("type did not implement hash3");
+    }
+    fn hash4(self) -> Vec4 {
+        panic!("type did not implement hash4");
+    }
 
-    fn noise(self) -> f32;
+    fn value(self) -> f32 {
+        panic!("type did not implement value noise");
+    }
+    fn simplex(self) -> f32 {
+        panic!("type did not implement simplex noise");
+    }
     fn voronoise(self, #[allow(unused)] smooth: f32) -> f32 {
         panic!("type did not implement voronoise");
     }
@@ -237,10 +253,10 @@ pub trait Noise:
         panic!("type did not implement tiled worley noise");
     }
 
-    fn fbm(self, oct: u32) -> f32 {
+    fn fbm(self, f: impl Fn(Self) -> f32, oct: u32) -> f32 {
         self.fbm_fn(
             |p, a| {
-                let n = p.noise();
+                let n = f(*p);
                 *a *= 0.5;
                 *p *= 2.0;
                 n
@@ -266,7 +282,7 @@ impl Noise for f32 {
         self.rand()
     }
 
-    fn noise(self) -> f32 {
+    fn value(self) -> f32 {
         let fl = self.abs().floor();
         let fr = self.abs().fract();
         fl.rand().lerp((fl + 1.0).rand(), fr.smooth())
@@ -280,7 +296,14 @@ impl Noise for Vec2 {
         ((ux ^ uy) * 3141592653u32) as f32 / u32::MAX as f32
     }
 
-    fn noise(self) -> f32 {
+    fn hash2(self) -> Vec2 {
+        let ux = (self.x * 141421356.0).to_bits();
+        let uy = (self.y * 2718281828.0).to_bits();
+        return Vec2::from(Vec2u::splat(ux ^ uy) * Vec2u::new(3141592653, 1618033988))
+            / u32::MAX as f32;
+    }
+
+    fn value(self) -> f32 {
         let ip = self.floor();
         let u = self.fract().smooth();
         let res = ip
@@ -293,6 +316,26 @@ impl Noise for Vec2 {
                 u.y,
             );
         res
+    }
+
+    fn simplex(self) -> f32 {
+        let i = (self + (self.x + self.y) * 0.366025).floor();
+        let a = self - i + (i.x + i.y) * 0.211324;
+        let m = a.y.step(a.x);
+        let o = Vec2::new(m, 1.0 - m);
+        let b = a - o + 0.211324;
+        let c = a - 0.577351;
+        let h = Vec3::ZERO.max(0.5 - Vec3::new(a.len2(), b.len2(), c.len2()));
+        let n = h
+            * h
+            * h
+            * h
+            * Vec3::new(
+                a.dot(i.hash2() - 0.5),
+                b.dot((i + o).hash2() - 0.5),
+                c.dot((i + 1.0).hash2() - 0.5),
+            );
+        return n.dot(Vec3::splat(70.0)) + 0.5;
     }
 
     fn noise_tile(self, scale: Self) -> f32 {
@@ -368,7 +411,14 @@ impl Noise for Vec3 {
         ((ux ^ uy ^ uz) * 3141592653u32) as f32 / u32::MAX as f32
     }
 
-    fn noise(self) -> f32 {
+    fn hash3(self) -> Vec3 {
+        let u = (self * Vec3::new(141421356.0, 2718281828.0, 1618033988.0)).to_bits();
+        return Vec3::from(
+            (u ^ Vec3u::new(u.y, u.x, u.z)) * Vec3u::new(1732050807, 2645751311, 3316624790),
+        ) / u32::MAX as f32;
+    }
+
+    fn value(self) -> f32 {
         let ip = self.floor();
         let u = self.fract().smooth();
 
@@ -395,6 +445,29 @@ impl Noise for Vec3 {
             );
 
         res
+    }
+
+    fn simplex(self) -> f32 {
+        let s = (self + self.dot(Vec3::splat(1.0 / 3.0))).floor();
+        let x = self - s + s.dot(Vec3::splat(1.0 / 6.0));
+        let e = Vec3::ZERO.step(x - swiz!(Vec3, x. y z x));
+        let i1 = e * (1.0 - swiz!(Vec3, e. z x y));
+        let i2 = 1.0 - swiz!(Vec3, e. z x y) * (1.0 - e);
+        let x1 = x - i1 + 1.0 / 6.0;
+        let x2 = x - i2 + 1.0 / 3.0;
+        let x3 = x - 0.5;
+        let mut w = Vec4::new(x.len2(), x1.len2(), x2.len2(), x3.len2());
+        w = Vec4::ZERO.max(0.6 - w);
+        let mut d = Vec4::new(
+            x.dot(s.hash3() - 0.5),
+            x1.dot((s + i1).hash3() - 0.5),
+            x2.dot((s + i2).hash3() - 0.5),
+            x3.dot((s + 1.0).hash3() - 0.5),
+        );
+        w *= w;
+        w *= w;
+        d *= w;
+        return d.dot(Vec4::splat(26.0)) + 0.5;
     }
 
     fn noise_tile(self, scale: Self) -> f32 {
