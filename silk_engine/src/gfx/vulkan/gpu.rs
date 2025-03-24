@@ -13,7 +13,7 @@ static GPU_STUFF: LazyLock<(
     let (gpu, gpu_props) = unsafe {
         instance()
             .enumerate_physical_devices()
-            .expect("No GPU found")
+            .expect("no GPUs found")
     }
     .iter()
     .map(|&gpu| {
@@ -67,14 +67,14 @@ static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
     required_gpu_extensions
         .iter()
         .filter(|re| !GPU_EXTENSIONS.contains(re))
-        .for_each(|re| panic!("Required vulkan gpu extension not found: {re:?}"));
+        .for_each(|re| panic!("required vulkan gpu extension not found: {re:?}"));
     let mut preferred_gpu_extensions = preferred_vulkan_gpu_extensions();
     preferred_gpu_extensions.retain(|pe| {
         GPU_EXTENSIONS
             .contains(pe)
             .then_some(true)
             .unwrap_or_else(|| {
-                println!("Preferred vulkan gpu extension not found: {pe:?}");
+                crate::warn!("preferred vulkan gpu extension not found: {pe:?}");
                 false
             })
     });
@@ -108,7 +108,7 @@ static GPU: LazyLock<ash::Device> = LazyLock::new(|| unsafe {
     let info = info.push_next(&mut pipeline_exec_props);
     instance()
         .create_device(physical_gpu(), &info, alloc_callbacks())
-        .expect("Failed to create VkDevice")
+        .expect("failed to create VkDevice")
 });
 
 pub fn physical_gpu() -> vk::PhysicalDevice {

@@ -9,6 +9,8 @@ struct Vertex {
     @location(7) tex_coord: vec2u, // packed whxy
     @location(8) blur: f32,
     @location(9) stroke_blur: f32,
+    @location(10) gradient: u32,
+    @location(11) gradient_dir: f32,
 }
 
 struct VSOut {
@@ -22,11 +24,18 @@ struct VSOut {
     @interpolate(flat) @location(6) tex_coord: vec4u,
     @interpolate(flat) @location(7) blur: f32,
     @interpolate(flat) @location(8) stroke_blur: f32,
+    @interpolate(flat) @location(9) gradient: vec4f,
+    @interpolate(flat) @location(10) gradient_dir: vec2f,
 }
 
 @group(0) @binding(0) var<uniform> res: vec2f;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
 @group(0) @binding(2) var atlas_sampler: sampler;
+
+fn srgb2lrgb(srgb: vec3f) -> vec3f { 
+	return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3f(2.4)), 
+	       step(vec3f(0.04045), srgb)); 
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
@@ -37,9 +46,11 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * res.yx / res * sin(in.rotation);
     out.pos = vec4f((in.pos * 2.0 - 1.0) + rot_uv * 2.0, 0, 1);
     out.color = unpack4x8unorm(in.color);
+    out.color = vec4f(srgb2lrgb(out.color.rgb), out.color.a);
     out.roundness = in.roundness;
     out.stroke_width = in.stroke_width;
     out.stroke_color = unpack4x8unorm(in.stroke_color);
+    out.stroke_color = vec4f(srgb2lrgb(out.stroke_color.rgb), out.stroke_color.a);
     out.scale = in.scale * res;
     out.scale /= min(out.scale.x, out.scale.y);
     if in.tex_coord.x > 0 {
@@ -49,6 +60,10 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     }
     out.blur = in.blur;
     out.stroke_blur = in.stroke_blur;
+    var gradient = unpack4x8unorm(in.gradient);
+    gradient = vec4f(srgb2lrgb(gradient.rgb), gradient.a);
+    out.gradient = select(gradient, out.color, abs(in.gradient_dir) > 1e9);
+    out.gradient_dir = vec2f(cos(in.gradient_dir), sin(in.gradient_dir));
     return out;
 }
 
@@ -91,42 +106,64 @@ fn render(in: VSOut, off: vec2f, blur: f32) -> vec2f {
     return vec2f(0);
 }
 
+fn lrgb2srgb(lrgb: vec3f) -> vec3f { 
+	return mix(12.92 * lrgb, 1.055 * pow(lrgb, vec3f(1.0 / 2.4)) - 0.055, 
+	       step(vec3f(0.0031308), lrgb)); 
+}
+
+fn oklab_mix(lin1: vec4f, lin2: vec4f, a: f32)  -> vec4f {
+    let cone2lms = mat3x3f(                
+         0.4121656120,  0.2118591070,  0.0883097947,
+         0.5362752080,  0.6807189584,  0.2818474174,
+         0.0514575653,  0.1074065790,  0.6302613616);
+    let lms2cone = mat3x3f(
+         4.0767245293, -1.2681437731, -0.0041119885,
+        -3.3072168827,  2.6093323231, -0.7034763098,
+         0.2307590544, -0.3411344290,  1.7068625689);
+    let lms1 = pow(cone2lms * lin1.rgb, vec3f(1.0 / 3.0));
+    let lms2 = pow(cone2lms * lin2.rgb, vec3f(1.0 / 3.0));
+    let lms = mix(lms1, lms2, a);
+    return vec4f(lms2cone * (lms * lms * lms), mix(lin1.a, lin2.a, a));
+}
+
 // problems (hard):
 // - rounded rects have slight transparent edge
 // - edge flickering when smaller than couple pixels
 @fragment
 fn fs_main(in: VSOut) -> @location(0) vec4f {
-    // hacky way to render text
-        // [-1, 0, 1] = [thin, normal, bold]
-        let blur = max(0.0, in.blur);
-        var esg = render(in, vec2f(0), blur);
-        var col = vec4f(0);
-        // supersampling for non-blurred render
-        if in.blur <= 0.0 {
-            let dx = length(dpdx(in.uv)) / 3.0;
-            let esxr = render(in, vec2f(-dx, 0), blur);
-            let esxb = render(in, vec2f(dx, 0), blur);
-            let dy = length(dpdy(in.uv)) / 3.0;
-            let esyr = render(in, vec2f(0, -dy), blur);
-            let esyb = render(in, vec2f(0, dy), blur);
-            esg = (esg + esxr + esxb + esyr + esyb) / 5.0;
-            if in.blur < 0.0 {
-                let glow = render(in, vec2f(0), -in.blur);
-                esg.y = mix(glow.y, 1.0, esg.y);
-                esg.x = mix(glow.x, 1.0, 1.0-esg.y);
-            }
-            col = mix(in.color, in.stroke_color, esg.y);
-            col.a *= esg.x;
-        } else {
-            col = mix(in.color, in.stroke_color, esg.y);
-            col.a *= esg.x;
+    // [-1, 0, 1] = [thin, normal, bold]
+    let blur = max(0.0, in.blur);
+    let grad = saturate(dot(in.uv, in.gradient_dir) * 0.5 + 0.5);
+    let color = oklab_mix(in.color, in.gradient, saturate(grad));
+    var esg = render(in, vec2f(0), blur);
+    var col = vec4f(0);
+    // supersampling for non-blurred render
+    if in.blur <= 0.0 {
+        let dx = length(dpdx(in.uv)) / 3.0;
+        let esxr = render(in, vec2f(-dx, 0), blur);
+        let esxb = render(in, vec2f(dx, 0), blur);
+        let dy = length(dpdy(in.uv)) / 3.0;
+        let esyr = render(in, vec2f(0, -dy), blur);
+        let esyb = render(in, vec2f(0, dy), blur);
+        esg = (esg + esxr + esxb + esyr + esyb) / 5.0;
+        if in.blur < 0.0 {
+            let glow = render(in, vec2f(0), -in.blur);
+            esg.y = mix(glow.y, 1.0, esg.y);
+            esg.x = mix(1.0, glow.x, esg.y);
         }
-        if in.roundness >= 0.0 && in.tex_coord.x != ~0u {
-            let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
-            col *= textureLoad(atlas, p, 0);
-        }
-        if col.a < 0.001 {
-            discard;
-        }
-        return col;
+        col = oklab_mix(color, in.stroke_color, esg.y);
+        col.a *= esg.x;
+    } else {
+        col = oklab_mix(color, in.stroke_color, esg.y);
+        col.a *= esg.x;
+    }
+    col = vec4f(lrgb2srgb(col.rgb), col.a);
+    if in.roundness >= 0.0 && in.tex_coord.x != ~0u {
+        let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
+        col *= textureLoad(atlas, p, 0);
+    }
+    if col.a < 0.001 {
+        discard;
+    }
+    return col;
 }

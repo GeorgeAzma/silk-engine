@@ -28,8 +28,8 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
     time::Instant,
 };
+pub use winit::dpi::{LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::{
-    dpi::{PhysicalPosition, PhysicalSize},
     event::WindowEvent,
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
@@ -118,6 +118,8 @@ impl<A: App> AppContext<A> {
             ctx.add_desc_set("fxaa ds", "fxaa", 0);
             ctx.write_ds_sampler("fxaa ds", "linear", 1);
         }
+        let mut renderer = Renderer::new(ctx.clone());
+        renderer.on_resize(&WindowResize::new(width, height));
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
@@ -138,7 +140,7 @@ impl<A: App> AppContext<A> {
             mouse_scroll: 0.0,
             ctx: ctx.clone(),
             surface_format: surf_fmt,
-            renderer: Renderer::new(ctx.clone()),
+            renderer,
             dispatchers: Default::default(),
         }));
         {
@@ -496,8 +498,12 @@ impl<T: App> winit::application::ApplicationHandler for Engine<T> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         *PANIC_HOOK;
         let monitor = event_loop.primary_monitor().unwrap_or_else(|| {
-            crate::warn!("no primary monitor detected, falling back to first available");
-            event_loop.available_monitors().next().unwrap()
+            let monitor = event_loop.available_monitors().next().unwrap();
+            crate::warn!(
+                "no primary monitor detected, falling back to first available: {}",
+                monitor.name().unwrap_or_default()
+            );
+            monitor
         });
         // center window by default
         if self.window_attribs.position.is_none() {

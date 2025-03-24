@@ -5,6 +5,9 @@ struct MyApp<'a> {
     app: &'a mut AppContext<Self>,
     packer: Guillotine,
     rects: Vec<(u16, u16, u16, u16)>,
+    batch: Vec<Vertex>,
+    dt_accum: f32,
+    max_dt: f32,
 }
 
 impl App for MyApp<'_> {
@@ -54,14 +57,36 @@ impl App for MyApp<'_> {
         println!("Rects: {}", rects.len());
         println!("Free Rects: {}", packer.free_rects.len());
         println!("Perim Sum: {perim}");
-        Self { app, packer, rects }
+        app.gfx().begin_batch();
+        app.gfx().rgb(32, 123, 222);
+        for x in 0..1000 {
+            for y in 0..100 {
+                app.gfx().circle(Px(x), Px(y), Px(1));
+            }
+        }
+        let batch = app.gfx().end_batch();
+        Self {
+            app,
+            packer,
+            rects,
+            batch,
+            dt_accum: 0.0,
+            max_dt: 0.0,
+        }
     }
 
     fn update(&mut self) {
-        if self.app.frame % 32 == 0 {
-            self.app
-                .window
-                .set_title(&format!("{:.3} ms", self.app.dt * 1000.0));
+        self.dt_accum += self.app.dt;
+        self.max_dt = self.max_dt.max(self.app.dt);
+        if self.app.frame % 64 == 63 {
+            let avg_dt = self.dt_accum / 64.0;
+            self.app.window.set_title(&format!(
+                "{:.2} ms  |  {:.2} ms",
+                avg_dt * 1000.0,
+                self.max_dt * 1000.0
+            ));
+            self.dt_accum = 0.0;
+            self.max_dt = 0.0;
         }
     }
 
@@ -89,14 +114,17 @@ impl App for MyApp<'_> {
         // }
         // gfx.end_temp();
 
-        gfx.rrect(Pc(0.1), Pc(0.1), Pc(0.1), Pc(0.1), 0.5);
-        gfx.rrect(Pc(0.2), Pc(0.1), Pc(0.1), Pc(0.1), 0.5);
-        gfx.rrect(Pc(0.1), Pc(0.2), Pc(0.1), Pc(0.1), 0.5);
-        gfx.rrect(Pc(0.2), Pc(0.2), Pc(0.1), Pc(0.1), 0.5);
+        gfx.gradient_dir(self.app.time);
+        gfx.rgb(255, 255, 0);
+        gfx.gradient_rgb(0, 0, 255);
+        gfx.rrect(Pc(0.1), Pc(0.6), Pc(0.005), Pc(0.005), 0.5);
+        gfx.rrect(Pc(0.2), Pc(0.6), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rrect(Pc(0.1), Pc(0.7), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rrect(Pc(0.2), Pc(0.7), Pc(0.1), Pc(0.1), 0.5);
 
         gfx.stroke_color = [255, 0, 0, 255];
         gfx.stroke_width = 0.25;
-        gfx.rgb(255, 255, 255);
+        gfx.rgb(16, 168, 127);
         // gfx.rect(Pc(0.0), Pc(0.0), Pc(1.0), Pc(1.0));
         // gfx.rgb(0, 0, 0);
 
@@ -150,11 +178,7 @@ impl App for MyApp<'_> {
         );
         // gfx.atlas();
         // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
-        for x in 0..1000 {
-            for y in 0..100 {
-                gfx.circle(Px(x), Px(y), Px(1));
-            }
-        }
+        gfx.batch(&self.batch);
     }
 }
 

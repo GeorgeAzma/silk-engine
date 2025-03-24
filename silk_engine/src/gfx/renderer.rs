@@ -1,3 +1,4 @@
+use core::f32;
 // TODO: make roundness Unit
 // TODO: make stroke_width Unit
 // TODO: fix weird thin stroke/text/primitive
@@ -21,7 +22,7 @@ use super::{
 };
 
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Vertex {
     pub pos: [f32; 2],
     pub scale: [f32; 2],
@@ -33,6 +34,8 @@ pub struct Vertex {
     pub tex_coord: [u32; 2], // packed whxy
     pub blur: f32,
     pub stroke_blur: f32,
+    pub gradient: [u8; 4],
+    pub gradient_dir: f32,
 }
 // TODO: tex_idx and textures
 #[allow(unused)]
@@ -82,6 +85,16 @@ impl Vertex {
         self
     }
 
+    fn grad(mut self, gradient: [u8; 4]) -> Self {
+        self.gradient = gradient;
+        self
+    }
+
+    fn grad_dir(mut self, gradient_dir: f32) -> Self {
+        self.gradient_dir = gradient_dir;
+        self
+    }
+
     fn with(renderer: &Renderer) -> Self {
         Self {
             pos: Default::default(),
@@ -94,6 +107,8 @@ impl Vertex {
             tex_coord: renderer.tex_coord,
             blur: renderer.blur,
             stroke_blur: renderer.stroke_blur,
+            gradient: renderer.gradient,
+            gradient_dir: renderer.gradient_dir,
         }
     }
 }
@@ -101,8 +116,6 @@ impl Vertex {
 // modify this in batch.wgsl too
 pub struct Renderer {
     ctx: Arc<Mutex<RenderCtx>>,
-    vertices: Vec<Vertex>,
-    vert_cnt: usize,
     instances: Vec<Vertex>,
     inst_cnt: usize,
     pub color: [u8; 4],
@@ -115,6 +128,9 @@ pub struct Renderer {
     /// negative is glow
     pub blur: f32,
     pub stroke_blur: f32,
+    pub gradient: [u8; 4],
+    /// f32::MAX means no gradient
+    pub gradient_dir: f32,
     tex_coord: [u32; 2], // packed whxy
     font: String,
     old_color: [u8; 4],
@@ -125,6 +141,8 @@ pub struct Renderer {
     old_bold: f32,
     old_blur: f32,
     old_stroke_blur: f32,
+    old_gradient: [u8; 4],
+    old_gradient_dir: f32,
     old_tex_coord: [u32; 2],
     old_font: String,
     areas: Vec<[f32; 4]>,
@@ -133,13 +151,13 @@ pub struct Renderer {
     packer: Guillotine,
     imgs: HashMap<String, (Tracked<Vec<u8>>, Rect)>,
     fonts: HashMap<String, (Font, HashMap<char, Rect>)>,
+    batch_idx: usize,
 }
 
 const SDF_PX: u32 = 64;
 
 impl Renderer {
     pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {
-        let vertices = vec![Vertex::default(); 1024];
         let instances = vec![Vertex::default(); 1024];
 
         // TODO: resizable packer
@@ -147,16 +165,10 @@ impl Renderer {
         {
             let mut ctx = ctx.lock().unwrap();
             ctx.add_buf(
-                "batch vbo",
-                (vertices.len() * size_of::<Vertex>()) as vk::DeviceSize,
-                BufUsage::VERT,
-                MemProp::CPU_CACHED,
-            );
-            ctx.add_buf(
                 "instance vbo",
                 (instances.len() * size_of::<Vertex>()) as vk::DeviceSize,
                 BufUsage::VERT,
-                MemProp::CPU_CACHED,
+                MemProp::CPU,
             );
             ctx.add_shader("render");
             let format = ctx.surface_format.format;
@@ -176,7 +188,7 @@ impl Renderer {
                 "render ubo",
                 2 * size_of::<f32>() as vk::DeviceSize,
                 BufUsage::UNIFORM,
-                MemProp::CPU_CACHED,
+                MemProp::CPU,
             );
             ctx.write_ds_buf("render ds", "render ubo", 0);
             ctx.add_img(
@@ -203,8 +215,6 @@ impl Renderer {
         }
         Self {
             ctx,
-            vertices,
-            vert_cnt: 0,
             instances,
             inst_cnt: 0,
             color: [255, 255, 255, 255],
@@ -215,6 +225,8 @@ impl Renderer {
             bold: 0.0,
             blur: 0.0,
             stroke_blur: 0.0,
+            gradient: [255, 255, 255, 255],
+            gradient_dir: f32::MAX,
             tex_coord: [0, 0],
             font: String::new(),
             old_color: [255, 255, 255, 255],
@@ -225,6 +237,8 @@ impl Renderer {
             old_bold: 0.0,
             old_blur: 0.0,
             old_stroke_blur: 0.0,
+            old_gradient: [255, 255, 255, 255],
+            old_gradient_dir: f32::MAX,
             old_tex_coord: [0, 0],
             old_font: String::new(),
             areas: Vec::new(),
@@ -233,6 +247,7 @@ impl Renderer {
             packer,
             imgs: HashMap::new(),
             fonts: HashMap::new(),
+            batch_idx: usize::MAX,
         }
     }
 
@@ -270,6 +285,30 @@ impl Renderer {
 
     pub fn stroke_hex(&mut self, hex: u32) {
         self.stroke_color = hex.to_be_bytes()
+    }
+
+    pub fn gradient_alpha(&mut self, a: u8) {
+        self.gradient[3] = a;
+    }
+
+    pub fn gradient_rgb(&mut self, r: u8, g: u8, b: u8) {
+        self.gradient = [r, g, b, 255];
+    }
+
+    pub fn gradient_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
+        self.gradient = [r, g, b, a];
+    }
+
+    pub fn gradient_hex(&mut self, hex: u32) {
+        self.gradient = hex.to_be_bytes()
+    }
+
+    pub fn gradient_dir(&mut self, radians: f32) {
+        self.gradient_dir = radians;
+    }
+
+    pub fn no_gradient(&mut self) {
+        self.gradient_dir = f32::MAX;
     }
 
     pub fn font(&mut self, font: &str) {
@@ -337,20 +376,6 @@ impl Renderer {
         (&img_data.0, w as u32, h as u32)
     }
 
-    pub fn verts(&mut self, verts: &[Vertex]) {
-        let new_vert_cnt = self.vert_cnt + verts.len();
-        if new_vert_cnt >= self.vertices.len() {
-            self.vertices
-                .resize((new_vert_cnt + 1).next_power_of_two(), Vertex::default());
-        }
-        self.vertices[self.vert_cnt..new_vert_cnt].copy_from_slice(verts);
-        self.vert_cnt = new_vert_cnt;
-    }
-
-    pub fn vert(&mut self, vert: Vertex) {
-        self.verts(&[vert]);
-    }
-
     fn pc_x(&self, unit: Unit) -> f32 {
         match unit {
             Unit::Px(px) => px as f32 / self.width,
@@ -399,6 +424,32 @@ impl Renderer {
             self.instances
                 .resize((self.inst_cnt + 1).next_power_of_two(), Vertex::default());
         }
+    }
+
+    pub fn begin_batch(&mut self) {
+        self.batch_idx = self.inst_cnt;
+    }
+
+    pub fn end_batch(&mut self) -> Vec<Vertex> {
+        assert!(
+            self.batch_idx != usize::MAX,
+            "can't end instance batch that has not begun"
+        );
+        assert!(self.batch_idx < self.inst_cnt, "no instances in batch");
+        let batch = self.instances[self.batch_idx..self.inst_cnt].to_vec();
+        self.inst_cnt = self.batch_idx;
+        self.batch_idx = usize::MAX;
+        batch
+    }
+
+    pub fn batch(&mut self, instances: &[Vertex]) {
+        let new_inst_cnt = self.inst_cnt + instances.len();
+        if new_inst_cnt >= self.instances.len() {
+            self.instances
+                .resize((new_inst_cnt + 1).next_power_of_two(), Vertex::default());
+        }
+        self.instances[self.inst_cnt..new_inst_cnt].copy_from_slice(instances);
+        self.inst_cnt = new_inst_cnt;
     }
 
     /// centered rect
@@ -629,6 +680,8 @@ impl Renderer {
         self.old_bold = self.bold;
         self.old_blur = self.blur;
         self.old_stroke_blur = self.stroke_blur;
+        self.old_gradient = self.gradient;
+        self.old_gradient_dir = self.gradient_dir;
     }
 
     /// resets render params to values before begin_temp() was called
@@ -643,19 +696,17 @@ impl Renderer {
         self.bold = self.old_bold;
         self.blur = self.old_blur;
         self.stroke_blur = self.old_stroke_blur;
+        self.gradient = self.old_gradient;
+        self.gradient_dir = self.old_gradient_dir;
     }
 
     pub(crate) fn render(&mut self) {
-        if self.vert_cnt != 0 && self.inst_cnt == 0 {
+        if self.inst_cnt == 0 {
             return;
         }
         let mut ctx = self.ctx.lock().unwrap();
         ctx.bind_pipeline("render");
         ctx.bind_ds("render ds");
-        if self.vert_cnt != 0 {
-            ctx.bind_vbo("batch vbo");
-            ctx.draw(self.vert_cnt as u32, 1);
-        }
         if self.inst_cnt != 0 {
             ctx.bind_vbo("instance vbo");
             ctx.draw(4, self.inst_cnt as u32);
@@ -678,13 +729,6 @@ impl Renderer {
     pub(crate) fn flush(&mut self) {
         // update instance buffers
         let mut ctx = self.ctx.lock().unwrap();
-        if self.vert_cnt != 0 {
-            let vbo_size = (self.vertices.len() * size_of::<Vertex>()) as vk::DeviceSize;
-            if ctx.buf_size("batch vbo") < vbo_size {
-                ctx.recreate_buf("batch vbo", vbo_size);
-            }
-            ctx.write_buf("batch vbo", &self.vertices[..self.vert_cnt]);
-        }
         if self.inst_cnt != 0 {
             let inst_vbo_size = (self.instances.len() * size_of::<Vertex>()) as vk::DeviceSize;
             if ctx.buf_size("instance vbo") < inst_vbo_size {
@@ -765,7 +809,6 @@ impl Renderer {
     }
 
     pub(crate) fn reset(&mut self) {
-        self.vert_cnt = 0;
         self.inst_cnt = 0;
         self.color = [255, 255, 255, 255];
         self.stroke_color = [0; 4];
@@ -778,6 +821,8 @@ impl Renderer {
         self.bold = 0.0;
         self.blur = 0.0;
         self.stroke_blur = 0.0;
+        self.gradient = [255, 255, 255, 255];
+        self.gradient_dir = f32::MAX;
 
         self.old_color = self.color;
         self.old_stroke_color = self.stroke_color;
@@ -789,5 +834,9 @@ impl Renderer {
         self.old_bold = self.bold;
         self.old_blur = self.blur;
         self.old_stroke_blur = self.stroke_blur;
+        self.old_gradient = self.gradient;
+        self.old_gradient_dir = self.gradient_dir;
+
+        self.batch_idx = usize::MAX;
     }
 }

@@ -9,7 +9,7 @@ mod vulkan;
 pub use font::Font;
 pub use packer::{Guillotine, Packer, Shelf};
 pub use render_ctx::{BufferImageCopy, DebugScope, RenderCtx, debug_name, debug_tag};
-pub use renderer::Renderer;
+pub use renderer::{Renderer, Vertex};
 pub use unit::Unit;
 pub use unit::Unit::*;
 pub use vulkan::*;

@@ -1,5 +1,5 @@
 pub use crate::{
-    App, AppContext, Engine,
+    App, AppContext, Engine, LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize,
     event::*,
     gfx::*,
     input::{Key, Mouse},
