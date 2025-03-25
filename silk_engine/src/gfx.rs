@@ -500,16 +500,18 @@ impl Gfx {
 
     /// rounded centered rect
     pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
-        self.roundness += r.min(0.999);
+        let old_roundness = self.roundness;
+        self.roundness = r.min(0.999);
         self.rectc(x, y, w, h);
-        self.roundness -= r.min(0.999);
+        self.roundness = old_roundness;
     }
 
     /// rounded rect
     pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
-        self.roundness += r.min(0.999);
+        let old_roundness = self.roundness;
+        self.roundness = r.min(0.999);
         self.rect(x, y, w, h);
-        self.roundness -= r.min(0.999);
+        self.roundness = old_roundness;
     }
 
     pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) {
