@@ -2,8 +2,8 @@ struct Vertex {
     @location(0) pos: vec2f,
     @location(1) scale: vec2f,
     @location(2) color: u32,
-    @location(3) roundness: f32,
-    @location(4) rotation: f32, // negative for text
+    @location(3) roundness: f32, // negative for text
+    @location(4) rotation: f32,
     @location(5) stroke_width: f32,
     @location(6) stroke_color: u32,
     @location(7) tex_coord: vec2u, // packed whxy
@@ -12,6 +12,7 @@ struct Vertex {
     @location(10) gradient: u32,
     @location(11) gradient_dir: f32, // f32::MAX is no gradient
 }
+// savable 4 + 4 + 0 + 3 + 2 + 3 + 0 + 0 + 3 + 3 + 0 + 3 = 26 (total 60)
 
 struct VSOut {
     @builtin(position) pos: vec4f,
@@ -63,7 +64,7 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     var gradient = unpack4x8unorm(in.gradient);
     gradient = vec4f(srgb2lrgb(gradient.rgb), gradient.a);
     out.gradient = select(gradient, out.color, abs(in.gradient_dir) > 1e9);
-    out.gradient_dir = vec2f(cos(in.gradient_dir), sin(in.gradient_dir));
+    out.gradient_dir = select(vec2f(cos(in.gradient_dir), sin(in.gradient_dir)), vec2f(0), abs(in.gradient_dir) > 1e9);
     return out;
 }
 
@@ -135,18 +136,23 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
     // [-1, 0, 1] = [thin, normal, bold]
     let blur = max(0.0, in.blur);
     var grad = smoothstep(-1.0, 1.0, dot(in.uv, in.gradient_dir));
-    let color = oklab_mix(in.color, in.gradient, grad);
+    var color = in.color;
+    if dot(in.gradient_dir, in.gradient_dir) > 0.01 {
+        color = oklab_mix(color, in.gradient, grad);
+    }
     var esg = render(in, vec2f(0), blur);
     var col = vec4f(0);
-    // supersampling for non-blurred render
     if in.blur <= 0.0 {
-        let dx = length(dpdx(in.uv)) / 3.0;
-        let esxr = render(in, vec2f(-dx, 0), blur);
-        let esxb = render(in, vec2f(dx, 0), blur);
-        let dy = length(dpdy(in.uv)) / 3.0;
-        let esyr = render(in, vec2f(0, -dy), blur);
-        let esyb = render(in, vec2f(0, dy), blur);
-        esg = (esg + esxr + esxb + esyr + esyb) / 5.0;
+        // supersampling for non-blurred text render
+        if in.roundness < 0.0 {
+            let dx = length(dpdx(in.uv)) / 3.0;
+            let esxr = render(in, vec2f(-dx, 0), blur);
+            let esxb = render(in, vec2f(dx, 0), blur);
+            let dy = length(dpdy(in.uv)) / 3.0;
+            let esyr = render(in, vec2f(0, -dy), blur);
+            let esyb = render(in, vec2f(0, dy), blur);
+            esg = (esg + esxr + esxb + esyr + esyb) / 5.0;
+        }
         if in.blur < 0.0 {
             let glow = render(in, vec2f(0), -in.blur);
             esg.y = mix(glow.y, 1.0, esg.y);

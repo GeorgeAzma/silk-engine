@@ -62,13 +62,14 @@ impl App for MyApp<'_> {
         app.gfx.begin_batch();
         app.gfx.rgb(32, 123, 222);
         for x in 0..1000 {
-            for y in 0..100 {
+            for y in 0..300 {
                 app.gfx.circle(Px(x), Px(y), Px(1));
             }
         }
         let batch = app.gfx.end_batch();
 
         let uid = app.sfx.load("steingen").loops(4).play(&app.sfx);
+        app.sfx.pause_stream();
 
         Self {
             app,
@@ -84,12 +85,14 @@ impl App for MyApp<'_> {
     fn update(&mut self) {
         self.dt_accum += self.app.dt;
         self.max_dt = self.max_dt.max(self.app.dt);
-        if self.app.frame % 64 == 63 {
-            let avg_dt = self.dt_accum / 64.0;
+        if self.app.frame % 128 == 0 {
+            let avg_dt = self.dt_accum / 128.0;
             self.app.window.set_title(&format!(
-                "{:.2} ms  |  {:.2} ms",
+                "{:.2} ms  |  {:.2} ms  |  {} fps  |  {} fps",
                 avg_dt * 1000.0,
-                self.max_dt * 1000.0
+                self.max_dt * 1000.0,
+                (1.0 / avg_dt).round(),
+                (1.0 / self.max_dt).round(),
             ));
             self.dt_accum = 0.0;
             self.max_dt = 0.0;
@@ -192,6 +195,10 @@ impl App for MyApp<'_> {
             Px(190),
             Px(8),
         );
+        gfx.rgb(255, 255, 255);
+        gfx.no_gradient();
+        gfx.font("zenmaru");
+        gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Pc(0.7), Pc(0.7), Px(8));
         // gfx.atlas();
         // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
         gfx.batch(&self.batch);

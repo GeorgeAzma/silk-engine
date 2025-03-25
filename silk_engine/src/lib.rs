@@ -153,9 +153,11 @@ impl<A: App> AppContext<A> {
         if self.width != 0 && self.height != 0 {
             scope_time!("render {}", self.frame; self.frame < 4);
 
+            self.my_app.as_mut().unwrap().render(&mut self.gfx);
+
+            // do as much CPU work above this as possible
             self.ctx().wait_prev_frame();
 
-            self.my_app.as_mut().unwrap().render(&mut self.gfx);
             self.gfx.flush();
 
             let optimal_size = self.ctx().begin_frame();

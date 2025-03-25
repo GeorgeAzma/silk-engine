@@ -55,15 +55,15 @@ impl Shader {
                 .write(&ir_module, &info, None, &None, &mut spirv)
                 .unwrap();
 
-            // write spirv cache
-            #[cfg(not(debug_assertions))]
-            *crate::INIT_PATHS;
-            #[cfg(not(debug_assertions))]
-            std::fs::write(
-                &shader_cache_path(name),
-                crate::util::cast_slice(&spirv[..]),
-            )
-            .unwrap();
+            // write spirv cache // FIXME: temporarely disabled caching
+            // #[cfg(not(debug_assertions))]
+            // *crate::INIT_PATHS;
+            // #[cfg(not(debug_assertions))]
+            // std::fs::write(
+            //     &shader_cache_path(name),
+            //     crate::util::cast_slice(&spirv[..]),
+            // )
+            // .unwrap();
 
             spirv
         };
