@@ -12,13 +12,15 @@ pub mod prelude;
 mod event;
 mod gfx;
 mod input;
+mod sfx;
 mod util;
 
 use ash::vk;
 use event::{Dispatcher, Event, WindowResize};
-use gfx::{ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Renderer, queue_idle};
+use gfx::{Gfx, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, queue_idle};
 
 use input::*;
+use sfx::Sfx;
 use std::{
     any::TypeId,
     collections::HashMap,
@@ -53,7 +55,7 @@ pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
 pub trait App: Sized {
     fn new(app: *mut AppContext<Self>) -> Self;
     fn update(&mut self);
-    fn render(&mut self, gfx: &mut Renderer);
+    fn render(&mut self, gfx: &mut Gfx);
     fn event(&mut self, _e: WindowEvent) {}
 }
 
@@ -77,7 +79,8 @@ pub struct AppContext<A: App> {
     pub mouse_scroll: f32,
     pub surface_format: vk::Format,
     ctx: Arc<Mutex<RenderCtx>>,
-    renderer: Renderer,
+    pub gfx: Gfx,
+    pub sfx: Sfx,
     dispatchers: HashMap<TypeId, Box<dyn std::any::Any + Send + Sync>>,
 }
 
@@ -99,8 +102,11 @@ impl<A: App> AppContext<A> {
 
         let ctx = Arc::new(Mutex::new(RenderCtx::new(&window)));
         let surf_fmt = ctx.lock().unwrap().surface_format.format;
-        let mut renderer = Renderer::new(ctx.clone());
-        renderer.on_resize(&WindowResize::new(width, height));
+        let mut gfx = Gfx::new(ctx.clone());
+        gfx.on_resize(&WindowResize::new(width, height));
+
+        let sfx = Sfx::new();
+
         let app = Arc::new(Mutex::new(Self {
             my_app: None,
             window,
@@ -121,7 +127,8 @@ impl<A: App> AppContext<A> {
             mouse_scroll: 0.0,
             ctx: ctx.clone(),
             surface_format: surf_fmt,
-            renderer,
+            gfx,
+            sfx,
             dispatchers: Default::default(),
         }));
         {
@@ -148,8 +155,8 @@ impl<A: App> AppContext<A> {
 
             self.ctx().wait_prev_frame();
 
-            self.my_app.as_mut().unwrap().render(&mut self.renderer);
-            self.renderer.flush();
+            self.my_app.as_mut().unwrap().render(&mut self.gfx);
+            self.gfx.flush();
 
             let optimal_size = self.ctx().begin_frame();
             self.resize(optimal_size.width, optimal_size.height);
@@ -178,7 +185,7 @@ impl<A: App> AppContext<A> {
                     ""
                 },
             );
-            self.renderer.render();
+            self.gfx.render();
             self.ctx().end_render();
 
             // make sure swap_img is ready for presenting
@@ -194,7 +201,7 @@ impl<A: App> AppContext<A> {
             let optimal_size = self.ctx.lock().unwrap().end_frame(&self.window);
             self.resize(optimal_size.width, optimal_size.height);
         }
-        self.renderer.reset();
+        self.gfx.reset();
 
         self.input.reset();
         self.frame += 1;
@@ -213,7 +220,7 @@ impl<A: App> AppContext<A> {
         self.width = width;
         self.height = height;
         let e = WindowResize::new(width, height);
-        self.renderer.on_resize(&e);
+        self.gfx.on_resize(&e);
         self.dispatcher().post(&e);
         if width != 0 && height != 0 {
             let mut ctx = self.ctx.lock().unwrap();
@@ -287,10 +294,6 @@ impl<A: App> AppContext<A> {
     expose!(input.[mouse_down, mouse_released, mouse_pressed](m: Mouse) -> bool);
     expose!(input.[key_down, key_released, key_pressed](k: Key) -> bool);
     expose!(input.focused() -> bool);
-
-    pub fn gfx(&mut self) -> &mut Renderer {
-        &mut self.renderer
-    }
 
     pub fn ctx(&mut self) -> std::sync::MutexGuard<'_, RenderCtx> {
         self.ctx.lock().unwrap()

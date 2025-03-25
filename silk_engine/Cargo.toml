@@ -10,5 +10,6 @@ license = "MIT"
 [dependencies]
 ash = "0.38.0"
 ash-window = "0.13.0"
-naga = { version = "23.0.0", features = ["spv-in", "spv-out", "wgsl-in"] }
-winit = { version = "0.30.5", features = ["rwh_06"] }
+cpal = "0.15.3"
+naga = { version = "24.0.0", features = ["spv-in", "spv-out", "wgsl-in"] }
+winit = { version = "0.30.9", features = ["rwh_06"] }

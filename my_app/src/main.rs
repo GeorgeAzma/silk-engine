@@ -8,6 +8,7 @@ struct MyApp<'a> {
     batch: Vec<Vertex>,
     dt_accum: f32,
     max_dt: f32,
+    uid: usize,
 }
 
 impl App for MyApp<'_> {
@@ -57,14 +58,22 @@ impl App for MyApp<'_> {
         println!("Rects: {}", rects.len());
         println!("Free Rects: {}", packer.free_rects.len());
         println!("Perim Sum: {perim}");
-        app.gfx().begin_batch();
-        app.gfx().rgb(32, 123, 222);
+
+        app.gfx.begin_batch();
+        app.gfx.rgb(32, 123, 222);
         for x in 0..1000 {
             for y in 0..100 {
-                app.gfx().circle(Px(x), Px(y), Px(1));
+                app.gfx.circle(Px(x), Px(y), Px(1));
             }
         }
-        let batch = app.gfx().end_batch();
+        let batch = app.gfx.end_batch();
+
+        let uid = app
+            .sfx
+            .gen_stereo(1.0, |t| ((t * TAU * 440.0).sin(), -(t * TAU * 440.0).sin()))
+            .loops(4)
+            .play(&app.sfx);
+
         Self {
             app,
             packer,
@@ -72,6 +81,7 @@ impl App for MyApp<'_> {
             batch,
             dt_accum: 0.0,
             max_dt: 0.0,
+            uid,
         }
     }
 
@@ -90,29 +100,35 @@ impl App for MyApp<'_> {
         }
     }
 
-    fn render(&mut self, gfx: &mut Renderer) {
-        // gfx.begin_temp();
-        // gfx.stroke_width = 0.2;
-        // gfx.stroke_color = [32, 128, 48, 128];
-        // gfx.color = [64, 255, 96, 128];
-        // for fr in self.packer.free_rects.iter() {
-        //     let (x, y, w, h) = fr.xywh();
-        //     let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
-        //     let (x, y) = (x as f32 / pw, y as f32 / ph);
-        //     let (w, h) = (w as f32 / pw, h as f32 / ph);
-        //     gfx.rect(Mn(x), Mn(y), Mn(w), Mn(h));
-        // }
+    fn render(&mut self, gfx: &mut Gfx) {
+        let sfx = &self.app.sfx;
+        if self.app.key_pressed(Key::Space) {
+            sfx.pause(self.uid);
+        }
 
-        // gfx.stroke_width = 0.2;
-        // gfx.stroke_color = [128, 32, 48, 128];
-        // gfx.color = [255, 48, 96, 128];
-        // for &(x, y, w, h) in self.rects.iter() {
-        //     let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
-        //     let (x, y) = (x as f32 / pw, y as f32 / ph);
-        //     let (w, h) = (w as f32 / pw, h as f32 / ph);
-        //     gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
-        // }
-        // gfx.end_temp();
+        gfx.begin_temp();
+        gfx.stroke_width = 0.2;
+        gfx.stroke_color = [32, 128, 48, 128];
+        gfx.color = [64, 255, 96, 128];
+        for fr in self.packer.free_rects.iter() {
+            let (x, y, w, h) = fr.xywh();
+            let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
+            let (x, y) = (x as f32 / pw, y as f32 / ph);
+            let (w, h) = (w as f32 / pw, h as f32 / ph);
+            gfx.rect(Mn(x), Mn(y), Mn(w), Mn(h));
+        }
+
+        gfx.stroke_width = 0.2;
+        gfx.stroke_color = [128, 32, 48, 128];
+        gfx.color = [255, 48, 96, 128];
+        for &(x, y, w, h) in self.rects.iter() {
+            let (pw, ph) = (self.packer.width() as f32, self.packer.height() as f32);
+            let (x, y) = (x as f32 / pw, y as f32 / ph);
+            let (w, h) = (w as f32 / pw, h as f32 / ph);
+            gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
+        }
+        gfx.end_temp();
+
         gfx.gradient_dir = 0.0;
         gfx.rgb(255, 0, 0);
         gfx.gradient_rgb(255, 255, 0);

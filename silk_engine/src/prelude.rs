@@ -3,11 +3,13 @@ pub use crate::{
     event::*,
     gfx::*,
     input::{Key, Mouse},
+    sfx::*,
     util::*,
 };
 
 pub use std::{
     collections::{HashMap, HashSet},
+    f32::consts::{PI, TAU},
     ptr::{null, null_mut},
     rc::Rc,
     sync::{Arc, LazyLock, Mutex},
