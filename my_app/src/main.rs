@@ -113,23 +113,26 @@ impl App for MyApp<'_> {
         //     gfx.rrect(Mn(x), Mn(y), Mn(w), Mn(h), 0.4);
         // }
         // gfx.end_temp();
+        gfx.gradient_dir = 0.0;
+        gfx.rgb(255, 0, 0);
+        gfx.gradient_rgb(255, 255, 0);
+        gfx.rect(Pc(0.2), Pc(0.8), Pc(0.1), Pc(0.1));
 
-        gfx.gradient_dir(self.app.time);
         gfx.rgb(255, 255, 0);
+        gfx.gradient_rgb(0, 255, 0);
+        gfx.rect(Pc(0.3), Pc(0.8), Pc(0.05), Pc(0.1));
+
+        gfx.rgb(0, 255, 0);
+        gfx.gradient_rgb(0, 255, 255);
+        gfx.rect(Pc(0.35), Pc(0.8), Pc(0.05), Pc(0.1));
+
+        gfx.rgb(0, 255, 255);
         gfx.gradient_rgb(0, 0, 255);
-        gfx.rrect(Pc(0.1), Pc(0.6), Pc(0.005), Pc(0.005), 0.5);
-        gfx.rrect(Pc(0.2), Pc(0.6), Pc(0.1), Pc(0.1), 0.5);
-        gfx.rrect(Pc(0.1), Pc(0.7), Pc(0.1), Pc(0.1), 0.5);
-        gfx.rrect(Pc(0.2), Pc(0.7), Pc(0.1), Pc(0.1), 0.5);
+        gfx.rect(Pc(0.4), Pc(0.8), Pc(0.1), Pc(0.1));
 
         gfx.stroke_color = [255, 0, 0, 255];
         gfx.stroke_width = 0.25;
-        gfx.rgb(16, 168, 127);
-        // gfx.rect(Pc(0.0), Pc(0.0), Pc(1.0), Pc(1.0));
-        // gfx.rgb(0, 0, 0);
-
-        // gfx.stroke_blur = 1.0;
-
+        gfx.rgb(255, 255, 255);
         gfx.blur = 1.0;
         gfx.circle(Pc(0.7), Pc(0.5), Pc(0.04));
 
@@ -155,17 +158,18 @@ impl App for MyApp<'_> {
         gfx.stroke_width = 0.5;
         gfx.stroke_blur = 0.0;
         gfx.blur = 0.0;
+        gfx.stroke_rgb(255, 111, 32);
         gfx.rgb(32, 123, 222);
         // gfx.blur = -1.0;
         // gfx.stroke_blur = 0.5;
         gfx.font("zenmaru");
         gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Px(50), Px(110), Px(24));
         gfx.font("segoe-ui");
-        gfx.text("ok great now what", Px(150), Px(250), Px(24));
+        gfx.text("stuff be workin", Px(150), Px(250), Px(24));
         gfx.font("roboto");
-        gfx.text("ok great now what", Px(150), Px(350), Px(66));
+        gfx.text("stuff be workin", Px(150), Px(350), Px(66));
         gfx.font("opensans");
-        gfx.text("ok great now what", Px(150), Px(290), Px(24));
+        gfx.text("stuff be workin", Px(150), Px(290), Px(24));
         gfx.bold = 0.0;
         gfx.stroke_width = 0.0;
         gfx.stroke_blur = 0.0;

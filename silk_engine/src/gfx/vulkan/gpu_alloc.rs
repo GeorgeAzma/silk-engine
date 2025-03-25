@@ -298,6 +298,23 @@ impl GpuAlloc {
         self.alloc_buf(new_size, buf_alloc.usage, pool_props)
     }
 
+    pub fn resize_mappable_buf(
+        &mut self,
+        buffer: vk::Buffer,
+        new_size: vk::DeviceSize,
+    ) -> vk::Buffer {
+        assert!(self.is_mappable(buffer), "buffer must be mappable");
+        let buf_alloc = *self.buf_alloc(buffer);
+        let old_size = buf_alloc.size;
+        let pool_props = self.mem_pools[buf_alloc.mem_type_idx as usize].props;
+        let new_buf = self.alloc_buf(new_size, buf_alloc.usage, pool_props);
+        let new_ptr = self.map(new_buf);
+        let new_slice = unsafe { std::slice::from_raw_parts_mut(new_ptr, old_size as usize) };
+        self.read_mapped(buffer, new_slice);
+        self.dealloc_buf(buffer);
+        new_buf
+    }
+
     pub fn map(&mut self, buffer: vk::Buffer) -> *mut u8 {
         self.map_range(buffer, 0, vk::WHOLE_SIZE)
     }
@@ -374,7 +391,7 @@ impl GpuAlloc {
         buffer: vk::Buffer,
         data: &T,
         off: vk::DeviceSize,
-    ) {
+    ) -> *mut u8 {
         unsafe {
             assert!(
                 self.buf_size(buffer) - off >= size_of_val(data) as vk::DeviceSize,
@@ -389,6 +406,7 @@ impl GpuAlloc {
             );
             let mem_ptr = self.map(buffer).byte_add(off as usize);
             mem_ptr.copy_from_nonoverlapping(data as *const T as *const u8, size_of_val(data));
+            mem_ptr
         }
     }
 

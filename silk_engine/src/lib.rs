@@ -16,10 +16,7 @@ mod util;
 
 use ash::vk;
 use event::{Dispatcher, Event, WindowResize};
-use gfx::{
-    GraphicsPipelineInfo, ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Renderer,
-    queue_idle,
-};
+use gfx::{ImageInfo, ImgLayout, ImgUsage, MSAA, MemProp, RenderCtx, Renderer, queue_idle};
 
 use input::*;
 use std::{
@@ -102,22 +99,6 @@ impl<A: App> AppContext<A> {
 
         let ctx = Arc::new(Mutex::new(RenderCtx::new(&window)));
         let surf_fmt = ctx.lock().unwrap().surface_format.format;
-        {
-            let mut ctx = ctx.lock().unwrap();
-            ctx.add_shader("fxaa");
-            ctx.add_pipeline(
-                "fxaa",
-                "fxaa",
-                GraphicsPipelineInfo::default()
-                    .blend_attachment_empty()
-                    .dyn_size()
-                    .color_attachment(surf_fmt)
-                    .topology(vk::PrimitiveTopology::TRIANGLE_STRIP),
-                &[],
-            );
-            ctx.add_desc_set("fxaa ds", "fxaa", 0);
-            ctx.write_ds_sampler("fxaa ds", "linear", 1);
-        }
         let mut renderer = Renderer::new(ctx.clone());
         renderer.on_resize(&WindowResize::new(width, height));
         let app = Arc::new(Mutex::new(Self {
@@ -174,8 +155,10 @@ impl<A: App> AppContext<A> {
             self.resize(optimal_size.width, optimal_size.height);
 
             // make sure rendered_img is ready to be written in fs color output
+            let swap_img = self.ctx().cur_img();
+            let swap_img_view = self.ctx().cur_img_view();
             self.ctx().set_img_layout(
-                "rendered image",
+                &swap_img,
                 ImgLayout::COLOR,
                 vk::PipelineStageFlags2::TOP_OF_PIPE,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
@@ -188,7 +171,7 @@ impl<A: App> AppContext<A> {
             self.ctx().begin_render(
                 width,
                 height,
-                "rendered image view",
+                &swap_img_view,
                 if MSAA > 1 {
                     "sampled rendered image view"
                 } else {
@@ -198,65 +181,13 @@ impl<A: App> AppContext<A> {
             self.renderer.render();
             self.ctx().end_render();
 
-            // make sure rendered_img color output is written to read in fxaa fs shader
-            self.ctx().set_img_layout(
-                "rendered image",
-                ImgLayout::SHADER_READ,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags2::FRAGMENT_SHADER,
-                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags2::SHADER_READ,
-            );
-
-            // make sure fxaa_img is ready to be written in fs color output
-            self.ctx().set_img_layout(
-                "fxaa image",
-                ImgLayout::COLOR,
-                vk::PipelineStageFlags2::TOP_OF_PIPE,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags2::NONE,
-                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-            );
-
-            // FXAA
-            self.ctx()
-                .begin_render(width, height, "fxaa image view", "");
-            self.ctx().bind_pipeline("fxaa");
-            self.ctx().bind_ds("fxaa ds");
-            self.ctx().draw(3, 1);
-            self.ctx().end_render();
-
-            // make sure fxaa_img color output is written
-            self.ctx().set_img_layout(
-                "fxaa image",
-                ImgLayout::SRC,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags2::BLIT,
-                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-                vk::AccessFlags2::TRANSFER_READ,
-            );
-
-            // make sure swap_img is ready to be blitted to
-            let swap_img = self.ctx().cur_img();
-            self.ctx().set_img_layout(
-                &swap_img,
-                ImgLayout::DST,
-                vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::PipelineStageFlags2::BLIT,
-                vk::AccessFlags2::NONE,
-                vk::AccessFlags2::TRANSFER_WRITE,
-            );
-
-            // blit fxaa_img into swap_img for presenting
-            self.ctx().blit("fxaa image", &swap_img);
-
             // make sure swap_img is ready for presenting
             self.ctx().set_img_layout(
                 &swap_img,
                 ImgLayout::PRESENT,
-                vk::PipelineStageFlags2::BLIT,
                 vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-                vk::AccessFlags2::TRANSFER_WRITE,
+                vk::PipelineStageFlags2::BOTTOM_OF_PIPE,
+                vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
                 vk::AccessFlags2::NONE,
             );
 
@@ -314,21 +245,6 @@ impl<A: App> AppContext<A> {
                 );
                 ctx.add_img_view("sampled rendered image view", "sampled rendered image");
             }
-
-            // rewrite rendered ds image
-            ctx.write_ds_img("fxaa ds", "rendered image view", ImgLayout::SHADER_READ, 0);
-            // resize fxaa image
-            ctx.try_remove_img("fxaa image");
-            ctx.add_img(
-                "fxaa image",
-                &ImageInfo::new()
-                    .width(width)
-                    .height(height)
-                    .format(self.surface_format)
-                    .usage(ImgUsage::COLOR | ImgUsage::SRC),
-                MemProp::GPU,
-            );
-            ctx.add_img_view("fxaa image view", "fxaa image");
         }
         self.resize(optimal_size.width, optimal_size.height);
     }

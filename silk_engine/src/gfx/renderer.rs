@@ -116,8 +116,9 @@ impl Vertex {
 // modify this in batch.wgsl too
 pub struct Renderer {
     ctx: Arc<Mutex<RenderCtx>>,
-    instances: Vec<Vertex>,
+    instances: *mut Vertex,
     inst_cnt: usize,
+    inst_len: usize,
     pub color: [u8; 4],
     pub roundness: f32,
     pub rotation: f32,
@@ -158,15 +159,13 @@ const SDF_PX: u32 = 64;
 
 impl Renderer {
     pub fn new(ctx: Arc<Mutex<RenderCtx>>) -> Self {
-        let instances = vec![Vertex::default(); 1024];
-
         // TODO: resizable packer
         let packer = Guillotine::new(1024, 1024);
         {
             let mut ctx = ctx.lock().unwrap();
             ctx.add_buf(
                 "instance vbo",
-                (instances.len() * size_of::<Vertex>()) as vk::DeviceSize,
+                (4096 * size_of::<Vertex>()) as vk::DeviceSize,
                 BufUsage::VERT,
                 MemProp::CPU,
             );
@@ -213,10 +212,14 @@ impl Renderer {
             ctx.write_ds_img("render ds", "atlas view", ImgLayout::SHADER_READ, 1);
             ctx.write_ds_sampler("render ds", "atlas sampler", 2);
         }
+        let instance_buf = ctx.lock().unwrap().buf("instance vbo");
+        let inst_len = ctx.lock().unwrap().buf_size("instance vbo") as usize / size_of::<Vertex>();
+        let instances = ctx.lock().unwrap().gpu_alloc.map(instance_buf) as *mut Vertex;
         Self {
             ctx,
             instances,
             inst_cnt: 0,
+            inst_len,
             color: [255, 255, 255, 255],
             roundness: 0.0,
             rotation: 0.0,
@@ -301,10 +304,6 @@ impl Renderer {
 
     pub fn gradient_hex(&mut self, hex: u32) {
         self.gradient = hex.to_be_bytes()
-    }
-
-    pub fn gradient_dir(&mut self, radians: f32) {
-        self.gradient_dir = radians;
     }
 
     pub fn no_gradient(&mut self) {
@@ -418,11 +417,18 @@ impl Renderer {
         y = y * area[3] + area[1];
         w *= area[2];
         h *= area[3];
-        self.instances[self.inst_cnt] = Vertex::with(self).pos(x, y).scale(w, h);
+        let vert = Vertex::with(self).pos(x, y).scale(w, h);
+        unsafe {
+            self.instances.add(self.inst_cnt).write(vert);
+        }
         self.inst_cnt += 1;
-        if self.inst_cnt >= self.instances.len() {
-            self.instances
-                .resize((self.inst_cnt + 1).next_power_of_two(), Vertex::default());
+        if self.inst_cnt >= self.inst_len {
+            let new_len = (self.inst_cnt + 1).next_power_of_two();
+            let new_size = (new_len * size_of::<Vertex>()) as vk::DeviceSize;
+            let mut ctx = self.ctx.lock().unwrap();
+            ctx.resize_buf("instance vbo", new_size);
+            self.instances = ctx.map_buf("instance vbo") as *mut Vertex;
+            self.inst_len = new_len;
         }
     }
 
@@ -436,7 +442,13 @@ impl Renderer {
             "can't end instance batch that has not begun"
         );
         assert!(self.batch_idx < self.inst_cnt, "no instances in batch");
-        let batch = self.instances[self.batch_idx..self.inst_cnt].to_vec();
+        let batch = unsafe {
+            std::slice::from_raw_parts(
+                self.instances.add(self.batch_idx),
+                self.inst_cnt - self.batch_idx,
+            )
+        }
+        .to_vec();
         self.inst_cnt = self.batch_idx;
         self.batch_idx = usize::MAX;
         batch
@@ -444,11 +456,21 @@ impl Renderer {
 
     pub fn batch(&mut self, instances: &[Vertex]) {
         let new_inst_cnt = self.inst_cnt + instances.len();
-        if new_inst_cnt >= self.instances.len() {
-            self.instances
-                .resize((new_inst_cnt + 1).next_power_of_two(), Vertex::default());
+        if new_inst_cnt >= self.inst_len {
+            let new_len = (new_inst_cnt + 1).next_power_of_two();
+            let new_size = (new_len * size_of::<Vertex>()) as vk::DeviceSize;
+            let mut ctx = self.ctx.lock().unwrap();
+            ctx.resize_buf("instance vbo", new_size);
+            self.instances = ctx.map_buf("instance vbo") as *mut Vertex;
+            self.inst_len = new_len;
         }
-        self.instances[self.inst_cnt..new_inst_cnt].copy_from_slice(instances);
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.instances.add(self.inst_cnt),
+                new_inst_cnt - self.inst_cnt,
+            )
+        }
+        .copy_from_slice(instances);
         self.inst_cnt = new_inst_cnt;
     }
 
@@ -729,13 +751,6 @@ impl Renderer {
     pub(crate) fn flush(&mut self) {
         // update instance buffers
         let mut ctx = self.ctx.lock().unwrap();
-        if self.inst_cnt != 0 {
-            let inst_vbo_size = (self.instances.len() * size_of::<Vertex>()) as vk::DeviceSize;
-            if ctx.buf_size("instance vbo") < inst_vbo_size {
-                ctx.recreate_buf("instance vbo", inst_vbo_size);
-            }
-            ctx.write_buf("instance vbo", &self.instances[..self.inst_cnt]);
-        }
         // update atlas
         let img_datas = self.imgs.values_mut().filter(|i| i.0.is_dirty());
         let mut off = 0;

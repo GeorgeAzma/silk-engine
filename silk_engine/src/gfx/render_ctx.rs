@@ -645,11 +645,27 @@ impl RenderCtx {
         self.gpu_alloc.dealloc_buf(buf);
     }
 
-    pub fn recreate_buf(&mut self, name: &str, size: u64) -> vk::Buffer {
+    pub fn realloc_buf(&mut self, name: &str, size: u64) -> vk::Buffer {
         let buffer = self.bufs.get_mut(name).unwrap();
         *buffer = self.gpu_alloc.realloc_buf(*buffer, size);
         debug_name(name, *buffer);
         *buffer
+    }
+
+    pub fn resize_buf(&mut self, name: &str, size: u64) -> vk::Buffer {
+        let buffer = self.bufs.get_mut(name).unwrap();
+        if self.gpu_alloc.is_mappable(*buffer) {
+            *buffer = self.gpu_alloc.resize_mappable_buf(*buffer, size);
+            debug_name(name, *buffer);
+            *buffer
+        } else {
+            let old_size = self.buf_size(name);
+            let staging = self.staging_buf(old_size);
+            self.copy_buf(name, &staging);
+            let buffer = self.realloc_buf(name, size);
+            self.copy_buf(&staging, name);
+            buffer
+        }
     }
 
     pub fn buf(&self, name: &str) -> vk::Buffer {
@@ -932,7 +948,7 @@ impl RenderCtx {
 
     pub fn staging_buf(&mut self, size: vk::DeviceSize) -> String {
         if self.buf_size("staging") < size {
-            self.recreate_buf("staging", (size + 1).next_power_of_two());
+            self.realloc_buf("staging", (size + 1).next_power_of_two());
         }
         "staging".to_string()
     }
@@ -988,6 +1004,15 @@ impl RenderCtx {
             let staging_buf = self.buf(&staging);
             self.copy_buf_off(name, &staging, off, 0);
             self.gpu_alloc.read_mapped(staging_buf, data);
+        }
+    }
+
+    pub fn map_buf(&mut self, name: &str) -> *mut u8 {
+        let buf = self.buf(name);
+        if self.gpu_alloc.is_mappable(buf) {
+            self.gpu_alloc.map(buf)
+        } else {
+            panic!("buffer({name}) is not mappable")
         }
     }
 

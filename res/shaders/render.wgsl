@@ -3,14 +3,14 @@ struct Vertex {
     @location(1) scale: vec2f,
     @location(2) color: u32,
     @location(3) roundness: f32,
-    @location(4) rotation: f32, // negative is bold
+    @location(4) rotation: f32, // negative for text
     @location(5) stroke_width: f32,
     @location(6) stroke_color: u32,
     @location(7) tex_coord: vec2u, // packed whxy
-    @location(8) blur: f32,
+    @location(8) blur: f32, // negative is glow
     @location(9) stroke_blur: f32,
     @location(10) gradient: u32,
-    @location(11) gradient_dir: f32,
+    @location(11) gradient_dir: f32, // f32::MAX is no gradient
 }
 
 struct VSOut {
@@ -74,6 +74,9 @@ fn elongated_rrect(p: vec2f, r: f32, h: vec2f) -> f32 {
 }
 
 fn render(in: VSOut, off: vec2f, blur: f32) -> vec2f {
+    if in.roundness == 0.0 {
+        return vec2f(1, 0);
+    }
     let uv = in.uv + off;
     if in.roundness < 0.0 {
         let bold = -(1.0 + in.roundness);
@@ -85,12 +88,11 @@ fn render(in: VSOut, off: vec2f, blur: f32) -> vec2f {
         var nx = textureSample(atlas, atlas_sampler, p - pd.xz).r;
         var ny = textureSample(atlas, atlas_sampler, p - pd.zy).r;
         let d = max(abs(px - nx), abs(py - ny)) * (bold * 0.5 + 1.0);
-        // let d = max(abs(dpdx(r)), abs(dpdy(r)));
         let edge = saturate(1.0 - r / mix(d, 1.0, blur));
-        let strk = select(saturate((r + in.stroke_width * 0.5 * (1.0 + bold)) / mix(d, 1.0, in.stroke_blur + blur)), 0.0, in.stroke_width < 0.001);
+        let strk = select(saturate((r + in.stroke_width * 0.5 * (1.0 + bold)) / mix(d, 1.0, in.stroke_blur + blur)), 0.0, in.stroke_width < 0.001 && in.blur >= 0.0);
         return vec2f(edge, strk);
     } else {
-        var r = 0.0;
+        var r = 0.0; 
         if in.roundness < 1.0 {
             r = elongated_rrect(uv * in.scale, in.roundness, in.scale - 1);
         } else {
@@ -100,10 +102,9 @@ fn render(in: VSOut, off: vec2f, blur: f32) -> vec2f {
         r -= d * 0.5;
         d *= 1.5;
         let edge = saturate(1.0 - in.roundness * 0.75 - r / mix(d, 0.5, blur));
-        let strk = select(saturate((r + in.stroke_width * 1.05) / mix(d, 0.5, in.stroke_blur + blur)), 0.0, in.stroke_width < 0.001);
+        let strk = select(saturate((r + in.stroke_width * 1.05) / mix(d, 0.5, in.stroke_blur + blur)), 0.0, in.stroke_width < 0.001 && in.blur >= 0.0);
         return vec2f(edge, strk);
     }
-    return vec2f(0);
 }
 
 fn lrgb2srgb(lrgb: vec3f) -> vec3f { 
@@ -133,8 +134,8 @@ fn oklab_mix(lin1: vec4f, lin2: vec4f, a: f32)  -> vec4f {
 fn fs_main(in: VSOut) -> @location(0) vec4f {
     // [-1, 0, 1] = [thin, normal, bold]
     let blur = max(0.0, in.blur);
-    let grad = saturate(dot(in.uv, in.gradient_dir) * 0.5 + 0.5);
-    let color = oklab_mix(in.color, in.gradient, saturate(grad));
+    var grad = smoothstep(-1.0, 1.0, dot(in.uv, in.gradient_dir));
+    let color = oklab_mix(in.color, in.gradient, grad);
     var esg = render(in, vec2f(0), blur);
     var col = vec4f(0);
     // supersampling for non-blurred render
