@@ -60,10 +60,11 @@ impl App for MyApp<'_> {
         println!("Perim Sum: {perim}");
 
         app.gfx.begin_batch();
+        app.gfx.font("roboto");
         app.gfx.rgb(32, 123, 222);
         for x in 0..1000 {
             for y in 0..300 {
-                app.gfx.circle(Px(x), Px(y), Px(1));
+                app.gfx.text("a", Px(x), Px(y), Px(1));
             }
         }
         let batch = app.gfx.end_batch();

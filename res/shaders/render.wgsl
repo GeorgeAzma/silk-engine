@@ -1,6 +1,6 @@
 struct Vertex {
-    @location(0) pos: vec2f,
-    @location(1) scale: vec2f,
+    @location(0) pos: u32,
+    @location(1) scale: u32,
     @location(2) color: u32,
     @location(3) roundness: f32, // negative for text
     @location(4) rotation: f32,
@@ -12,7 +12,7 @@ struct Vertex {
     @location(10) gradient: u32,
     @location(11) gradient_dir: f32, // f32::MAX is no gradient
 }
-// savable 4 + 4 + 0 + 3 + 2 + 3 + 0 + 0 + 3 + 3 + 0 + 3 = 26 (total 60)
+// savable 000323003303 = 26 (total 52)
 
 struct VSOut {
     @builtin(position) pos: vec4f,
@@ -43,16 +43,17 @@ fn vs_main(@builtin(vertex_index) vert_idx: u32, in: Vertex) -> VSOut {
     var out: VSOut;
     var uv = vec2f(vec2u(vert_idx % 2u, vert_idx / 2u));
     out.uv = (uv * 2.0 - 1.0) * (1.05 + max(0.17 * abs(in.blur), -(in.roundness + 1.0) * 0.1));
-    let suv = out.uv * in.scale;
+    let scale = unpack2x16unorm(in.scale);
+    let suv = out.uv * scale;
     let rot_uv = suv * cos(in.rotation) + vec2f(-1, 1) * suv.yx * res.yx / res * sin(in.rotation);
-    out.pos = vec4f((in.pos * 2.0 - 1.0) + rot_uv * 2.0, 0, 1);
+    out.pos = vec4f((unpack2x16unorm(in.pos) * 2.0 - 1.0) + rot_uv * 2.0, 0, 1);
     out.color = unpack4x8unorm(in.color);
     out.color = vec4f(srgb2lrgb(out.color.rgb), out.color.a);
     out.roundness = in.roundness;
     out.stroke_width = in.stroke_width;
     out.stroke_color = unpack4x8unorm(in.stroke_color);
     out.stroke_color = vec4f(srgb2lrgb(out.stroke_color.rgb), out.stroke_color.a);
-    out.scale = in.scale * res;
+    out.scale = scale * res;
     out.scale /= min(out.scale.x, out.scale.y);
     if in.tex_coord.x > 0 {
         out.tex_coord = vec4u(in.tex_coord.y >> 16, in.tex_coord.y, in.tex_coord.x >> 48, in.tex_coord.x >> 32) & vec4u(0xFFFF);
@@ -81,7 +82,7 @@ fn render(in: VSOut, off: vec2f, blur: f32) -> vec2f {
     let uv = in.uv + off;
     if in.roundness < 0.0 {
         let bold = -(1.0 + in.roundness);
-        let p = ((uv / 1.125 * 0.5 + 0.5) * vec2f(in.tex_coord.zw) + vec2f(in.tex_coord.xy)) / vec2f(textureDimensions(atlas).xy);
+        let p = ((uv / 1.125 * 0.5 + 0.5) * vec2f(in.tex_coord.zw) + vec2f(in.tex_coord.xy)) / vec2f(textureDimensions(atlas));
         var r = 2.0 * (0.5 - textureSample(atlas, atlas_sampler, p).r * (bold * 0.5 + 1.0));
         let pd = vec3f(dpdx(p.x), dpdy(p.y), 0.0);
         var px = textureSample(atlas, atlas_sampler, p + pd.xz).r;
@@ -114,6 +115,11 @@ fn lrgb2srgb(lrgb: vec3f) -> vec3f {
 }
 
 fn oklab_mix(lin1: vec4f, lin2: vec4f, a: f32)  -> vec4f {
+    if (a <= 0.0) {
+        return lin1;
+    } else if a >= 1.0 {
+        return lin2;
+    }
     let cone2lms = mat3x3f(                
          0.4121656120,  0.2118591070,  0.0883097947,
          0.5362752080,  0.6807189584,  0.2818474174,
@@ -158,13 +164,9 @@ fn fs_main(in: VSOut) -> @location(0) vec4f {
             esg.y = mix(glow.y, 1.0, esg.y);
             esg.x = mix(1.0, glow.x, esg.y);
         }
-        col = oklab_mix(color, in.stroke_color, esg.y);
-        col.a *= esg.x;
-    } else {
-        col = oklab_mix(color, in.stroke_color, esg.y);
-        col.a *= esg.x;
     }
-    col = vec4f(lrgb2srgb(col.rgb), col.a);
+    col = oklab_mix(color, in.stroke_color, esg.y);
+    col = vec4f(lrgb2srgb(col.rgb), col.a * esg.x);
     if in.roundness >= 0.0 && in.tex_coord.x != ~0u {
         let p = vec2u((in.uv * 0.5 + 0.5) * vec2f(in.tex_coord.zw)) + in.tex_coord.xy;
         col *= textureLoad(atlas, p, 0);

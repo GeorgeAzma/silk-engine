@@ -32,8 +32,8 @@ use crate::{
 #[repr(C)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Vertex {
-    pub pos: [f32; 2],
-    pub scale: [f32; 2],
+    pub pos: u32,
+    pub scale: u32,
     pub color: [u8; 4],
     pub roundness: f32,
     pub rotation: f32,
@@ -49,12 +49,12 @@ pub struct Vertex {
 #[allow(unused)]
 impl Vertex {
     fn pos(mut self, x: f32, y: f32) -> Self {
-        self.pos = [x, y];
+        self.pos = (x * 65535.0) as u32 | ((y * 65535.0) as u32) << 16;
         self
     }
 
     fn scale(mut self, w: f32, h: f32) -> Self {
-        self.scale = [w, h];
+        self.scale = (w * 65535.0) as u32 | ((h * 65535.0) as u32) << 16;
         self
     }
 
