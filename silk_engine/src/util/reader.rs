@@ -14,6 +14,10 @@ impl<'a> Reader<'a> {
         self.idx
     }
 
+    pub fn remaining(&self) -> usize {
+        self.bytes.len() - self.idx
+    }
+
     pub fn goto(&mut self, idx: usize) {
         self.idx = idx;
     }
@@ -80,6 +84,10 @@ impl<'a> ReaderBe<'a> {
 
     pub fn idx(&self) -> usize {
         self.idx
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.bytes.len() - self.idx
     }
 
     pub fn goto(&mut self, idx: usize) {

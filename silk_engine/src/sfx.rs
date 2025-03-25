@@ -8,7 +8,14 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-use crate::util::ExtraFns;
+use crate::util::{ExtraFns, Wav};
+
+#[derive(Clone, Default, Debug)]
+pub struct AudioData {
+    pub samples: Vec<f32>,
+    pub sample_rate: u32,
+    pub channels: u16,
+}
 
 #[derive(Clone)]
 pub struct Source {
@@ -39,10 +46,6 @@ impl Source {
 
     pub fn new(samples: &[f32]) -> Self {
         Self::from_vec(samples.to_vec())
-    }
-
-    pub fn load(_name: &str) -> Self {
-        todo!("custom wav loading")
     }
 
     pub fn loops(&mut self, loops: usize) -> &mut Self {
@@ -159,8 +162,42 @@ impl Sfx {
         return uid;
     }
 
-    pub fn load(&self, _name: &str) {
-        todo!("custom wav loading")
+    pub fn load(&self, name: &str) -> Source {
+        let AudioData {
+            samples,
+            sample_rate,
+            channels,
+        } = Wav::load(name);
+        assert_eq!(
+            sample_rate,
+            self.sample_rate(),
+            "sample rate mismatch (need to implement resampling)"
+        );
+        if channels != self.channels() {
+            let in_ch = channels as usize;
+            let out_ch = self.channels() as usize;
+            let frames = samples.len() / in_ch;
+            let mut out = Vec::with_capacity(frames * out_ch);
+            for frame in samples.chunks_exact(in_ch) {
+                match (in_ch, out_ch) {
+                    (1, 2) => {
+                        let mono = frame[0];
+                        out.extend([mono, mono]);
+                    }
+                    (2, 1) => {
+                        let avg = (frame[0] + frame[1]) * 0.5;
+                        out.push(avg);
+                    }
+                    _ => {
+                        for ch in 0..out_ch {
+                            let sample = frame.get(ch % in_ch).copied().unwrap_or(0.0);
+                            out.push(sample);
+                        }
+                    }
+                }
+            }
+        }
+        Source::from_vec(samples)
     }
 
     pub fn gen_mono(&self, secs: f32, mut f: impl FnMut(f32) -> f32) -> Source {

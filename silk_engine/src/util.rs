@@ -13,6 +13,7 @@ mod reader;
 mod tracked;
 mod ttf;
 mod vec;
+mod wav;
 mod writer;
 
 pub(crate) use buddy_alloc::BuddyAlloc;
@@ -29,6 +30,7 @@ pub use rand::Rand;
 pub use reader::{Reader, ReaderBe};
 pub use tracked::Tracked;
 pub use vec::{Bezier, ExtraFns, Vec2, Vec2u, Vec3, Vectorf, Vectoru};
+pub use wav::Wav;
 pub use writer::Writer;
 
 #[macro_export]

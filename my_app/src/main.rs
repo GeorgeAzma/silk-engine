@@ -68,11 +68,7 @@ impl App for MyApp<'_> {
         }
         let batch = app.gfx.end_batch();
 
-        let uid = app
-            .sfx
-            .gen_stereo(1.0, |t| ((t * TAU * 440.0).sin(), -(t * TAU * 440.0).sin()))
-            .loops(4)
-            .play(&app.sfx);
+        let uid = app.sfx.load("steingen").loops(4).play(&app.sfx);
 
         Self {
             app,
