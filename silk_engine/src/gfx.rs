@@ -14,9 +14,9 @@ pub use unit::Unit::*;
 pub use vulkan::*;
 
 use core::f32;
-// TODO: make roundness Unit
-// TODO: make stroke_width Unit
-// TODO: fix weird thin stroke/text/primitive
+// TODO:
+// - make roundness Unit
+// - make stroke_width Unit
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -45,7 +45,7 @@ pub struct Vertex {
     pub gradient: [u8; 4],
     pub gradient_dir: f32,
 }
-// TODO: tex_idx and textures
+
 #[allow(unused)]
 impl Vertex {
     fn pos(mut self, x: f32, y: f32) -> Self {
@@ -173,9 +173,9 @@ impl Gfx {
             let mut ctx = ctx.lock().unwrap();
             ctx.add_buf(
                 "instance vbo",
-                (4096 * size_of::<Vertex>()) as vk::DeviceSize,
+                (1024 * size_of::<Vertex>()) as vk::DeviceSize,
                 BufUsage::VERT,
-                MemProp::CPU,
+                MemProp::CPU_CACHED,
             );
             ctx.add_shader("render");
             let format = ctx.surface_format.format;
@@ -473,12 +473,12 @@ impl Gfx {
             self.inst_len = new_len;
         }
         unsafe {
-            std::slice::from_raw_parts_mut(
+            std::ptr::copy_nonoverlapping(
+                instances.as_ptr(),
                 self.instances.add(self.inst_cnt),
-                new_inst_cnt - self.inst_cnt,
+                instances.len(),
             )
-        }
-        .copy_from_slice(instances);
+        };
         self.inst_cnt = new_inst_cnt;
     }
 

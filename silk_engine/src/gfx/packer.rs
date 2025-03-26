@@ -18,6 +18,7 @@ impl Rect {
         )
     }
 
+    #[allow(unused)]
     pub fn xy(self) -> (u16, u16) {
         let r = self.0;
         ((r >> 16) as u16, r as u16)
@@ -32,11 +33,13 @@ impl Rect {
         self.0
     }
 
+    #[allow(unused)]
     pub fn area(self) -> u32 {
         let (w, h) = self.wh();
         w as u32 * h as u32
     }
 
+    #[allow(unused)]
     pub fn perim(self) -> u32 {
         let (w, h) = self.wh();
         w as u32 + h as u32
@@ -106,7 +109,7 @@ pub trait Packer: Sized {
 pub struct Guillotine {
     width: u16,
     height: u16,
-    pub free_rects: Vec<Rect>, // FIXME: remove pub, it was for testing
+    free_rects: Vec<Rect>,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]

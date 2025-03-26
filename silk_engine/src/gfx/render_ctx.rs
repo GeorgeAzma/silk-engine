@@ -953,7 +953,7 @@ impl RenderCtx {
         "staging".to_string()
     }
 
-    // TODO: don't begin cmd if cur cmd ends at convenient time
+    // TODO: do not begin cmd if cur cmd ends at convenient time
     // TODO: automatic pipeline barrier system
     pub fn copy_buf_off(
         &mut self,
@@ -1295,7 +1295,7 @@ impl RenderCtx {
         debug_name("swapchain", self.swapchain);
 
         if old_swapchain != Default::default() {
-            // FIXME: assumes swapchain image count is constant
+            // NOTE: assumes swapchain image count is constant
             for i in 0..desired_img_cnt {
                 let img_name = format!("swapchain image {i}");
                 let img_views = self.imgs[&img_name].views.clone();
@@ -1482,29 +1482,6 @@ impl Drop for RenderCtx {
                 }
             }
         }
-        // TODO: shader modules are weird
-        // implement system like:
-        // ctx().add_shader_module("vert")
-        // ctx().add_shader_module("frag")
-        // ctx().add_shader(["vert", "frag"])
-        // ctx().add_shader("wgsl")
-        // where add_shader generates dsl bindings
-        // and pipeline stages with modules
-        // ctx().remove_shader_module("vert")
-        // ctx().remove_shader_module("frag")
-        // ctx().remove_shader_module("wgsl")
-        // destroys shader modules
-        // can also debug check for dangling shaders
-        // for shader in self.shaders.values() {
-        //     for ps in shader.pipeline_stages.iter() {
-        //         let module = ps.module;
-        //         if !module.is_null() {
-        //             unsafe {
-        //                 gpu().destroy_shader_module(module, alloc_callbacks());
-        //             }
-        //         }
-        //     }
-        // }
         for fence in self.fences.values() {
             let fence = fence.fence;
             if !fence.is_null() {

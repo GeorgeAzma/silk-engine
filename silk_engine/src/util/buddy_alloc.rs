@@ -53,7 +53,6 @@ impl BuddyAlloc {
 
     /// grow and add/extend free ranges\
     /// or shrink and remove outside ranges
-    #[allow(unused)] // TODO: use
     pub fn resize(&mut self, new_size: usize) {
         self.size = new_size;
         let new_size2 = new_size.next_power_of_two();

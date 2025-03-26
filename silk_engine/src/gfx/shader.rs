@@ -55,7 +55,7 @@ impl Shader {
                 .write(&ir_module, &info, None, &None, &mut spirv)
                 .unwrap();
 
-            // write spirv cache // FIXME: temporarely disabled caching
+            // write spirv cache // NOTE: temporarely disabled caching
             // #[cfg(not(debug_assertions))]
             // *crate::INIT_PATHS;
             // #[cfg(not(debug_assertions))]

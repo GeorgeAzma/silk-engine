@@ -12,7 +12,7 @@ struct Vertex {
     @location(10) gradient: u32,
     @location(11) gradient_dir: f32, // f32::MAX is no gradient
 }
-// savable 000323003303 = 26 (total 52)
+// savable 000323003302 = 16 (total 52)
 
 struct VSOut {
     @builtin(position) pos: vec4f,

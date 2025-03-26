@@ -11,6 +11,7 @@ unsafe impl Sync for MemBlock {}
 #[derive(Clone)]
 struct MemBlock {
     off: vk::DeviceSize,
+    size: vk::DeviceSize,
     mem: vk::DeviceMemory,
     mapped_ranges: ContainRange,
     map_ptr: *mut u8,
@@ -45,6 +46,12 @@ impl MemBlock {
             } else {
                 ""
             };
+            crate::log!(
+                "Alloc Mem Block({}, {}{})",
+                crate::util::Mem::b(size as usize),
+                ty.to_uppercase(),
+                cached.to_uppercase(),
+            );
             super::debug_name(
                 &format!(
                     "{ty}{cached} mem block({})",
@@ -55,6 +62,7 @@ impl MemBlock {
         }
         Self {
             off,
+            size,
             mem,
             mapped_ranges: Default::default(),
             map_ptr: std::ptr::null_mut(),
@@ -98,7 +106,7 @@ impl MemPool {
         if !self.mems.is_empty() {
             return;
         }
-        const BLOCK_SIZE: vk::DeviceSize = 128 * (1 << 20); // 128 MiB
+        const BLOCK_SIZE: vk::DeviceSize = 16 * (1 << 20); // 16 MiB
         let block_size = BLOCK_SIZE.next_power_of_two();
         self.mems = vec![MemBlock::new(0, block_size, self.mem_type_idx)];
         self.buddy = BuddyAlloc::new(block_size as usize);
@@ -107,12 +115,12 @@ impl MemPool {
     fn find_off_mem_block(&mut self, off: vk::DeviceSize) -> &mut MemBlock {
         let mut last_mem_block_idx = 0;
         for i in 1..self.mems.len() {
+            let size = self.mems[i].off - self.mems[i - 1].off;
+            assert_eq!(size, self.mems[i - 1].size);
             assert_eq!(
-                (self.mems[i].off - self.mems[i - 1].off).next_power_of_two(),
-                self.mems[i].off - self.mems[i - 1].off,
-                "{} != {}",
-                self.mems[i].off,
-                self.mems[i - 1].off,
+                size.next_power_of_two(),
+                size,
+                "mem-block is not power of two sized",
             );
             if off >= self.mems[i - 1].off && off < self.mems[i].off {
                 return &mut self.mems[i - 1];
@@ -122,10 +130,19 @@ impl MemPool {
         &mut self.mems[last_mem_block_idx]
     }
 
-    // TODO: make resizing work
     fn alloc(&mut self, size: vk::DeviceSize) -> (vk::DeviceSize, &MemBlock) {
         self.init();
-        let off = self.buddy.alloc(size as usize);
+        let mut off = self.buddy.alloc(size as usize);
+        while off == usize::MAX {
+            let old_len = self.buddy.len();
+            self.buddy.resize(old_len * 2);
+            off = self.buddy.alloc(size as usize);
+            self.mems.push(MemBlock::new(
+                old_len as vk::DeviceSize,
+                (self.buddy.len() - old_len) as vk::DeviceSize,
+                self.mem_type_idx,
+            ));
+        }
         crate::log!(
             "Mem Pool({:?}) Alloc: off({}), size({})",
             self.props,
@@ -133,7 +150,10 @@ impl MemPool {
             crate::util::Mem::b(size as usize)
         );
         assert_ne!(off, usize::MAX);
-        (off as vk::DeviceSize, &self.mems[0])
+        let mem_block = self.find_off_mem_block(off as vk::DeviceSize);
+        let off_in_block = off as vk::DeviceSize - mem_block.off;
+        assert!(off_in_block + size <= mem_block.size);
+        (off_in_block, mem_block)
     }
 
     fn dealloc(&mut self, offset: vk::DeviceSize, size: vk::DeviceSize) {

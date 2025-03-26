@@ -3,10 +3,11 @@ use crate::gfx::alloc_callbacks;
 use super::gpu;
 use ash::vk::{self, Handle};
 
-// TODO: manage DSLs and desc pools, free them together
-// TODO: track desc allocs and create new pools based on that
-// TODO: allocate desc sets together
-// For now it just uses single large desc pool
+// TODO:
+// - manage DSLs and desc pools, free them together
+// - track desc allocs and create new pools based on that
+// - alloc DS together
+// this just uses single large desc pool
 pub struct DescAlloc {
     pool: vk::DescriptorPool,
 }

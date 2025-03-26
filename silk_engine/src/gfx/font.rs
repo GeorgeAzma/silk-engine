@@ -143,7 +143,6 @@ impl Font {
         )
     }
 
-    // TODO: speedup sdf generation, takes 2.4ms for 64x64 chinese char 鬱 gen
     pub fn gen_char_sdf(&self, char: char, size_px: u32) -> ImageData {
         crate::scope_time!("gen '{char}' sdf {size_px}px");
 
