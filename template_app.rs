@@ -1,6 +1,6 @@
-use silk_engine::*;
+use silk_engine::prelude::*;
 
-pub struct MyApp<'a> {
+struct MyApp<'a> {
     app: &'a mut AppContext<Self>,
 }
 
@@ -12,7 +12,7 @@ impl App for MyApp<'_> {
 
     fn update(&mut self) {}
 
-    fn render(&mut self, gfx: &mut Renderer) {}
+    fn render(&mut self, gfx: &mut Gfx) {}
 }
 
 fn main() {
