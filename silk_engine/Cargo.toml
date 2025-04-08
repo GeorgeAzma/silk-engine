@@ -11,5 +11,5 @@ license = "MIT"
 ash = "0.38.0"
 ash-window = "0.13.0"
 cpal = "0.15.3"
-naga = { version = "24.0.0", features = ["spv-in", "spv-out", "wgsl-in"] }
+naga = { version = "24.0.0", features = ["spv-out", "wgsl-in"] }
 winit = { version = "0.30.9", features = ["rwh_06"] }
