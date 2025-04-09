@@ -114,7 +114,7 @@ impl Font {
     fn kerning(&self, a: &GlyphData, b: &GlyphData) -> i16 {
         *self
             .kernings
-            .get(&((a.index as u32) << 16 | b.index as u32))
+            .get(&(((a.index as u32) << 16) | b.index as u32))
             .unwrap_or(&0)
     }
 
@@ -130,8 +130,7 @@ impl Font {
 
     pub fn is_char_graphic(&self, char: char) -> bool {
         self.uni2glyph
-            .get(&char)
-            .map_or(false, |g| g.points.len() > 1)
+            .get(&char).is_some_and(|g| g.points.len() > 1)
     }
 
     pub fn is_char_cjk(&self, char: char) -> bool {
@@ -265,7 +264,7 @@ impl Font {
                         for x in min.x..=max.x {
                             if x < Self::CELLS && y < Self::CELLS {
                                 let idx = y * Self::CELLS + x;
-                                cells[idx as usize].push(i as usize);
+                                cells[idx as usize].push(i);
                             }
                         }
                     }
@@ -282,8 +281,8 @@ impl Font {
 
         let mut segments = Vec::with_capacity(points.len() / 3);
         for i in 0..points.len() / 3 {
-            let idx = i as usize * 3;
-            let a = Vec2::from(points[idx + 0]);
+            let idx = i * 3;
+            let a = Vec2::from(points[idx]);
             let b = Vec2::from(points[idx + 1]);
             let c = Vec2::from(points[idx + 2]);
             let dir = (c - a).norm() * 5e-5;

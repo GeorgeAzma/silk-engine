@@ -4,7 +4,7 @@ use super::{
     alloc_callbacks, format_size, gpu,
     vulkan::{DSLBinding, PipelineStageInfo},
 };
-use crate::{RES_PATH, log};
+use crate::{log, RES_PATH};
 use ash::vk;
 
 fn shader_path(name: &str) -> String {
@@ -41,11 +41,7 @@ impl Shader {
             _ => false,
         };
         let mut spirv = vec![];
-        if !spv_outdated {
-            log!("Shader cache loaded: \"{name}.spv\"");
-            let spv = std::fs::read(shader_cache_path(name)).unwrap();
-            spirv = crate::util::cast_slice(&spv[..]).to_owned();
-        } else {
+        if spv_outdated {
             log!("Shader loaded: \"{name}.wgsl\"");
             // validate wgsl
             let info = naga::valid::Validator::new(
@@ -67,10 +63,14 @@ impl Shader {
             // write spirv cache
             *crate::INIT_PATHS;
             std::fs::write(
-                &shader_cache_path(name),
+                shader_cache_path(name),
                 crate::util::cast_slice(&spirv[..]),
             )
             .unwrap();
+        } else {
+            log!("Shader cache loaded: \"{name}.spv\"");
+            let spv = std::fs::read(shader_cache_path(name)).unwrap();
+            spirv = crate::util::cast_slice(&spv[..]).to_owned();
         }
         let dsl_infos = Self::get_dsl_infos(&ir_module);
         Self {

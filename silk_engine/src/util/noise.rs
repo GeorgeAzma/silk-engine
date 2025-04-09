@@ -94,27 +94,27 @@ impl Noise for Vec2 {
     fn hash2(self) -> Vec2 {
         let ux = (self.x * 141421356.0).to_bits();
         let uy = (self.y * 2718281828.0).to_bits();
-        return Vec2::from((ux ^ uy) * Vec2u::new(3141592653, 1618033988)) / u32::MAX as f32;
+        Vec2::from((ux ^ uy) * Vec2u::new(3141592653, 1618033988)) / u32::MAX as f32
     }
 
     fn value(self) -> f32 {
         let i = self.floor();
         let u = self.fract().smooth();
-        let res = i
+        
+        i
             .hash()
             .lerp((i + Vec2::X).hash(), u.x)
-            .lerp((i + Vec2::Y).hash().lerp((i + 1.0).hash(), u.x), u.y);
-        res
+            .lerp((i + Vec2::Y).hash().lerp((i + 1.0).hash(), u.x), u.y)
     }
 
     fn value_tile(self, scale: Self) -> f32 {
         let i = self.floor();
         let u = self.fract().smooth();
         let hash = |v: Vec2| (v / scale).fract().hash();
-        let res = hash(i)
+        
+        hash(i)
             .lerp(hash(i + Vec2::X), u.x)
-            .lerp(hash(i + Vec2::Y).lerp(hash(i + 1.0), u.x), u.y);
-        res
+            .lerp(hash(i + Vec2::Y).lerp(hash(i + 1.0), u.x), u.y)
     }
 
     fn perlin(self) -> f32 {
@@ -126,7 +126,7 @@ impl Noise for Vec2 {
         let b = hash_dir(i + Self::X).dot(f - Self::X);
         let c = hash_dir(i + Self::Y).dot(f - Self::Y);
         let d = hash_dir(i + Self::XY).dot(f - Self::XY);
-        return a.lerp(b, u.x).lerp(c.lerp(d, u.x), u.y) * 0.7 + 0.5;
+        a.lerp(b, u.x).lerp(c.lerp(d, u.x), u.y) * 0.7 + 0.5
     }
 
     fn perlin_tile(self, scale: Self) -> f32 {
@@ -138,7 +138,7 @@ impl Noise for Vec2 {
         let b = hash_dir(i + Self::X).dot(f - Self::X);
         let c = hash_dir(i + Self::Y).dot(f - Self::Y);
         let d = hash_dir(i + Self::XY).dot(f - Self::XY);
-        return a.lerp(b, u.x).lerp(c.lerp(d, u.x), u.y) * 0.7 + 0.5;
+        a.lerp(b, u.x).lerp(c.lerp(d, u.x), u.y) * 0.7 + 0.5
     }
 
     fn simplex(self) -> f32 {
@@ -157,14 +157,14 @@ impl Noise for Vec2 {
                 b.dot((i + o).hash2() - 0.5),
                 c.dot((i + 1.0).hash2() - 0.5),
             );
-        return n.dot(Vec3::splat(70.0)) + 0.5;
+        n.dot(Vec3::splat(70.0)) + 0.5
     }
 
     fn voronoi(self, smooth: f32) -> f32 {
         let hash32 = |p: Vec2| {
             let mut p3 = (p.xyx() / Vec3::new(0.1031, 0.1030, 0.0973)).fract();
             p3 += p3.dot(p3.yxz() + 33.33);
-            return ((p3.xxy() + p3.yzz()) * p3.zyx()).fract();
+            ((p3.xxy() + p3.yzz()) * p3.zyx()).fract()
         };
         let smooth = 1.0 / smooth;
         let p = self.floor();
@@ -181,7 +181,7 @@ impl Noise for Vec2 {
                 wt += ww;
             }
         }
-        return va / wt;
+        va / wt
     }
 
     fn worley(self) -> f32 {
@@ -195,7 +195,7 @@ impl Noise for Vec2 {
                 w = w.min(c.len2());
             }
         }
-        return 1.0 - w.sqrt();
+        1.0 - w.sqrt()
     }
 
     fn worley_tile(self, scale: Self) -> f32 {
@@ -209,7 +209,7 @@ impl Noise for Vec2 {
                 w = w.min(c.len2());
             }
         }
-        return 1.0 - w.sqrt();
+        1.0 - w.sqrt()
     }
 }
 
@@ -223,14 +223,14 @@ impl Noise for Vec3 {
 
     fn hash2(self) -> Vec2 {
         let u = (self * Vec3::new(141421356.0, 2718281828.0, 1618033988.0)).to_bits();
-        return Vec2::from((u.x ^ u.y ^ u.z) * Vec2u::new(1732050807, 2645751311))
-            / u32::MAX as f32;
+        Vec2::from((u.x ^ u.y ^ u.z) * Vec2u::new(1732050807, 2645751311))
+            / u32::MAX as f32
     }
 
     fn hash3(self) -> Vec3 {
         let u = (self * Vec3::new(141421356.0, 2718281828.0, 1618033988.0)).to_bits();
-        return Vec3::from((u.x ^ u.y ^ u.z) * Vec3u::new(1732050807, 2645751311, 3316624790))
-            / u32::MAX as f32;
+        Vec3::from((u.x ^ u.y ^ u.z) * Vec3u::new(1732050807, 2645751311, 3316624790))
+            / u32::MAX as f32
     }
 
     fn value(self) -> f32 {
@@ -278,7 +278,7 @@ impl Noise for Vec3 {
         let d1 = hash_dir(i + Self::XYZ).dot(f - Self::XYZ);
         let z0 = a0.lerp(b0, u.x).lerp(c0.lerp(d0, u.x), u.y);
         let z1 = a1.lerp(b1, u.x).lerp(c1.lerp(d1, u.x), u.y);
-        return z0.lerp(z1, u.z) * 0.7 + 0.5;
+        z0.lerp(z1, u.z) * 0.7 + 0.5
     }
 
     fn perlin_tile(self, scale: Self) -> f32 {
@@ -296,7 +296,7 @@ impl Noise for Vec3 {
         let d1 = hash_dir(i + Self::XYZ).dot(f - Self::XYZ);
         let z0 = a0.lerp(b0, u.x).lerp(c0.lerp(d0, u.x), u.y);
         let z1 = a1.lerp(b1, u.x).lerp(c1.lerp(d1, u.x), u.y);
-        return z0.lerp(z1, u.z) * 0.7 + 0.5;
+        z0.lerp(z1, u.z) * 0.7 + 0.5
     }
 
     fn simplex(self) -> f32 {
@@ -319,7 +319,7 @@ impl Noise for Vec3 {
         w *= w;
         w *= w;
         d *= w;
-        return d.dot(Vec4::splat(26.0)) + 0.5;
+        d.dot(Vec4::splat(26.0)) + 0.5
     }
 
     fn worley(self) -> f32 {
@@ -335,7 +335,7 @@ impl Noise for Vec3 {
                 }
             }
         }
-        return 1.0 - w.sqrt();
+        1.0 - w.sqrt()
     }
 
     fn worley_tile(self, scale: Self) -> f32 {
@@ -351,6 +351,6 @@ impl Noise for Vec3 {
                 }
             }
         }
-        return 1.0 - w.sqrt();
+        1.0 - w.sqrt()
     }
 }

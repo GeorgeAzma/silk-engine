@@ -49,12 +49,12 @@ pub struct Vertex {
 #[allow(unused)]
 impl Vertex {
     fn pos(mut self, x: f32, y: f32) -> Self {
-        self.pos = (x * 65535.0) as u32 | ((y * 65535.0) as u32) << 16;
+        self.pos = (x * 65535.0) as u32 | (((y * 65535.0) as u32) << 16);
         self
     }
 
     fn scale(mut self, w: f32, h: f32) -> Self {
-        self.scale = (w * 65535.0) as u32 | ((h * 65535.0) as u32) << 16;
+        self.scale = (w * 65535.0) as u32 | (((h * 65535.0) as u32) << 16);
         self
     }
 

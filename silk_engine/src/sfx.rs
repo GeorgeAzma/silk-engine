@@ -159,7 +159,7 @@ impl Sfx {
         let mut sources = self.sources.lock().unwrap();
         source.uid = uid;
         sources.push(source.to_owned());
-        return uid;
+        uid
     }
 
     pub fn load(&self, name: &str) -> Source {

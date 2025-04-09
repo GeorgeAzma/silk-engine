@@ -219,7 +219,7 @@ impl Ttf {
                         let first_glyph = reader.read16();
                         let second_glyph = reader.read16();
                         let value = reader.read16() as i16;
-                        kernings.insert((first_glyph as u32) << 16 | second_glyph as u32, value);
+                        kernings.insert(((first_glyph as u32) << 16) | second_glyph as u32, value);
                     }
                 }
                 1 => {}
@@ -386,7 +386,7 @@ impl Ttf {
                             let first_glyph = first_glyphs[i];
                             if kern != 0 {
                                 kernings
-                                    .push(((first_glyph as u32) << 16 | second_glyph as u32, kern))
+                                    .push((((first_glyph as u32) << 16) | second_glyph as u32, kern))
                             }
                         }
                     }
@@ -431,7 +431,7 @@ impl Ttf {
                             if let Some((v1, v2)) = value_records.get(index) {
                                 let kern = v1 + v2;
                                 if kern != 0 {
-                                    let key = (first_glyph as u32) << 16 | second_glyph as u32;
+                                    let key = ((first_glyph as u32) << 16) | second_glyph as u32;
                                     kernings.push((key, kern));
                                 }
                             }
