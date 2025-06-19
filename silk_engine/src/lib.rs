@@ -1,7 +1,6 @@
 #![feature(
     mapped_lock_guards,
     once_cell_get_mut,
-    slice_as_chunks,
     slice_as_array,
     str_from_raw_parts,
     portable_simd
@@ -48,7 +47,6 @@ pub static INIT_PATHS: LazyLock<()> = LazyLock::new(|| {
     fs::create_dir_all(format!("{RES_PATH}/shaders")).unwrap_or_default();
     fs::create_dir_all(format!("{RES_PATH}/images")).unwrap_or_default();
     fs::create_dir_all(format!("{RES_PATH}/fonts")).unwrap_or_default();
-    #[cfg(not(debug_assertions))]
     fs::create_dir_all(format!("{RES_PATH}/cache/shaders")).unwrap_or_default();
 });
 

@@ -15,15 +15,14 @@ impl App for MyApp<'_> {
         app.gfx.begin_batch();
         app.gfx.font("roboto");
         app.gfx.rgb(32, 123, 222);
-        for x in 0..1920 {
-            for y in 0..1080 {
+        for x in 0..192 {
+            for y in 0..108 {
                 app.gfx.text("a", Px(x), Px(y), Px(1));
             }
         }
         let batch = app.gfx.end_batch();
 
         let uid = app.sfx.load("steingen").loops(4).play(&app.sfx);
-        app.sfx.pause_stream();
 
         Self {
             app,

@@ -161,18 +161,19 @@ impl Sfx {
         sources.push(source.to_owned());
         uid
     }
-
     pub fn load(&self, name: &str) -> Source {
         let AudioData {
-            samples,
+            mut samples,
             sample_rate,
             channels,
         } = Wav::load(name);
-        assert_eq!(
-            sample_rate,
-            self.sample_rate(),
-            "sample rate mismatch (need to implement resampling)"
-        );
+
+        // Resample if sample rates don't match
+        if sample_rate != self.sample_rate() {
+            samples = self.resample(samples, sample_rate, channels);
+        }
+
+        // Convert channels if they don't match
         if channels != self.channels() {
             let in_ch = channels as usize;
             let out_ch = self.channels() as usize;
@@ -196,6 +197,7 @@ impl Sfx {
                     }
                 }
             }
+            samples = out;
         }
         Source::from_vec(samples)
     }
@@ -285,5 +287,41 @@ impl Sfx {
             BufferSize::Default => unreachable!(),
             BufferSize::Fixed(size) => size,
         }
+    }
+
+    /// Resample audio data using linear interpolation
+    fn resample(&self, samples: Vec<f32>, from_rate: u32, channels: u16) -> Vec<f32> {
+        let to_rate = self.sample_rate();
+        if from_rate == to_rate {
+            return samples;
+        }
+
+        let ch = channels as usize;
+        let in_frames = samples.len() / ch;
+        let out_frames = ((in_frames as f64 * to_rate as f64) / from_rate as f64).ceil() as usize;
+        let mut resampled = Vec::with_capacity(out_frames * ch);
+
+        let ratio = from_rate as f64 / to_rate as f64;
+
+        for out_frame in 0..out_frames {
+            let src_pos = out_frame as f64 * ratio;
+            let src_frame = src_pos.floor() as usize;
+            let frac = src_pos - src_frame as f64;
+
+            for ch_idx in 0..ch {
+                let sample = if src_frame + 1 < in_frames {
+                    let sample0 = samples[src_frame * ch + ch_idx];
+                    let sample1 = samples[(src_frame + 1) * ch + ch_idx];
+                    sample0 + (sample1 - sample0) * frac as f32
+                } else if src_frame < in_frames {
+                    samples[src_frame * ch + ch_idx]
+                } else {
+                    0.0
+                };
+                resampled.push(sample);
+            }
+        }
+
+        resampled
     }
 }

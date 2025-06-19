@@ -30,8 +30,12 @@ macro_rules! dps {
 impl DescAlloc {
     pub fn new() -> Self {
         const MAX_SETS: u32 = 16;
-        const POOL_SIZES: [vk::DescriptorPoolSize; 2] =
-            [dps!(UNIFORM_BUFFER, 32), dps!(STORAGE_BUFFER, 16)];
+        const POOL_SIZES: [vk::DescriptorPoolSize; 4] = [
+            dps!(UNIFORM_BUFFER, 32),
+            dps!(STORAGE_BUFFER, 16),
+            dps!(SAMPLED_IMAGE, 16),
+            dps!(SAMPLER, 16),
+        ];
         Self {
             pool: unsafe {
                 gpu()

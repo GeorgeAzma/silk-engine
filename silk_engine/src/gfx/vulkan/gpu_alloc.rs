@@ -237,11 +237,14 @@ impl GpuAlloc {
                 .bind_image_memory(image, mem_block.mem, alloc_off)
                 .unwrap()
         };
-        self.img_allocs.insert(image.as_raw(), ImageAlloc {
-            mem_type_idx,
-            buddy_off: alloc_off + mem_block.off,
-            aligned_size,
-        });
+        self.img_allocs.insert(
+            image.as_raw(),
+            ImageAlloc {
+                mem_type_idx,
+                buddy_off: alloc_off + mem_block.off,
+                aligned_size,
+            },
+        );
         image
     }
 
@@ -289,15 +292,18 @@ impl GpuAlloc {
                 .bind_buffer_memory(buffer, mem_block.mem, alloc_off)
                 .unwrap()
         };
-        self.buf_allocs.insert(buffer.as_raw(), BufferAlloc {
-            mem_type_idx,
-            off: alloc_off,
-            buddy_off: mem_block.off + alloc_off,
-            size,
-            aligned_size,
-            usage,
-            mapped_range: (0, 0),
-        });
+        self.buf_allocs.insert(
+            buffer.as_raw(),
+            BufferAlloc {
+                mem_type_idx,
+                off: alloc_off,
+                buddy_off: mem_block.off + alloc_off,
+                size,
+                aligned_size,
+                usage,
+                mapped_range: (0, 0),
+            },
+        );
         buffer
     }
 

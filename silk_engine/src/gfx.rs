@@ -121,7 +121,6 @@ impl Vertex {
     }
 }
 
-// modify this in batch.wgsl too
 pub struct Gfx {
     ctx: Arc<Mutex<RenderCtx>>,
     instances: *mut Vertex,
@@ -175,7 +174,7 @@ impl Gfx {
                 "instance vbo",
                 (1024 * size_of::<Vertex>()) as vk::DeviceSize,
                 BufUsage::VERT,
-                MemProp::CPU_CACHED,
+                MemProp::CPU_GPU,
             );
             ctx.add_shader("render");
             let format = ctx.surface_format.format;
@@ -461,7 +460,6 @@ impl Gfx {
         self.batch_idx = usize::MAX;
         batch
     }
-
     pub fn batch(&mut self, instances: &[Vertex]) {
         let new_inst_cnt = self.inst_cnt + instances.len();
         if new_inst_cnt >= self.inst_len {
