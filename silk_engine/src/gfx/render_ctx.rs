@@ -4,6 +4,7 @@ use ash::vk::{self, Handle};
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
+use super::HDR;
 use crate::{scope_time, util::Mem};
 
 use super::{
@@ -118,14 +119,38 @@ impl RenderCtx {
                 .get_physical_device_surface_formats(physical_gpu(), surface)
                 .expect("failed to get surface formats")
         };
-        let surface_format = surface_formats
-            .iter()
-            .find(|&format| format.format == vk::Format::B8G8R8A8_UNORM)
-            .cloned()
-            .unwrap_or(vk::SurfaceFormatKHR {
-                format: vk::Format::B8G8R8A8_UNORM,
-                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-            });
+        let surface_format = if HDR {
+            surface_formats
+                .iter()
+                .find(|&format| {
+                    format.format == vk::Format::A2B10G10R10_UNORM_PACK32
+                        && format.color_space == vk::ColorSpaceKHR::HDR10_ST2084_EXT
+                })
+                .or_else(|| {
+                    surface_formats.iter().find(|&format| {
+                        format.format == vk::Format::R16G16B16A16_SFLOAT
+                            && format.color_space == vk::ColorSpaceKHR::EXTENDED_SRGB_LINEAR_EXT
+                    })
+                })
+        } else {
+            surface_formats
+                .iter()
+                .find(|&format| {
+                    format.format == vk::Format::B8G8R8A8_UNORM
+                        && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                })
+                .or_else(|| {
+                    surface_formats.iter().find(|&format| {
+                        format.format == vk::Format::B8G8R8A8_SRGB
+                            && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+                    })
+                })
+        }
+        .cloned()
+        .unwrap_or(vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_UNORM,
+            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+        });
         let surface_present_modes = unsafe {
             surface_loader
                 .get_physical_device_surface_present_modes(physical_gpu(), surface)
@@ -167,7 +192,9 @@ impl RenderCtx {
                 MemProp::CPU,
             );
             slf.add_semaphore("img available");
-            slf.add_semaphore("render finished");
+            for i in 0..3 {
+                slf.add_semaphore(&format!("render finished {i}"));
+            }
             slf.add_sampler(
                 "linear",
                 vk::SamplerAddressMode::REPEAT,
@@ -206,15 +233,16 @@ impl RenderCtx {
     // might cause swapchain resize so returns new optimal size
     pub(crate) fn end_frame(&mut self, window: &Window) -> vk::Extent2D {
         let cmd = self.cmd_manager.end();
+        let render_finished = format!("render finished {}", self.swapchain_img_idx);
         self.submit_cmd(
             cmd,
             &[self.semaphore("img available")],
-            &[self.semaphore("render finished")],
+            &[self.semaphore(&render_finished)],
             &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
         );
 
         window.pre_present_notify();
-        self.present(&[self.semaphore("render finished")])
+        self.present(&[self.semaphore(&render_finished)])
     }
 
     pub fn begin_render_swapchain(&mut self, resolve_img_view_name: &str) {
@@ -1166,21 +1194,24 @@ impl RenderCtx {
         img_layout: vk::ImageLayout,
         binding: u32,
     ) {
-        self.writes_ds(name, &[], &[(
-            img_view_name,
-            img_layout,
-            vk::Sampler::null(),
-            binding,
-        )]);
+        self.writes_ds(
+            name,
+            &[],
+            &[(img_view_name, img_layout, vk::Sampler::null(), binding)],
+        );
     }
 
     pub fn write_ds_sampler(&self, name: &str, sampler_name: &str, binding: u32) {
-        self.writes_ds(name, &[], &[(
-            "",
-            ImgLayout::UNDEFINED,
-            self.sampler(sampler_name),
-            binding,
-        )]);
+        self.writes_ds(
+            name,
+            &[],
+            &[(
+                "",
+                ImgLayout::UNDEFINED,
+                self.sampler(sampler_name),
+                binding,
+            )],
+        );
     }
 
     pub fn clear(&self, img: vk::Image, color: [f32; 4]) {
@@ -1319,15 +1350,18 @@ impl RenderCtx {
             let img_name = format!("swapchain image {i}");
             debug_name(&img_name, swap_img);
             let img_view_name = format!("swapchain image view {i}");
-            self.imgs.insert(img_name.clone(), ImageData {
-                img: swap_img,
-                views: vec![],
-                info: ImageInfo::new()
-                    .width(surf_res.width)
-                    .height(surf_res.height)
-                    .format(self.surface_format.format)
-                    .usage(ImgUsage::COLOR | ImgUsage::DST),
-            });
+            self.imgs.insert(
+                img_name.clone(),
+                ImageData {
+                    img: swap_img,
+                    views: vec![],
+                    info: ImageInfo::new()
+                        .width(surf_res.width)
+                        .height(surf_res.height)
+                        .format(self.surface_format.format)
+                        .usage(ImgUsage::COLOR | ImgUsage::DST),
+                },
+            );
             self.add_img_view(&img_view_name, &img_name);
         }
 

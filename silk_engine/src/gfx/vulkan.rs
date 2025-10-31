@@ -15,7 +15,7 @@ mod pipeline;
 mod pipeline_layout_manager;
 mod sampler_manager;
 
-pub use config::MSAA;
+pub use config::{HDR, MSAA};
 pub use image::ImageInfo;
 pub use pipeline::{Enable, GraphicsPipelineInfo};
 

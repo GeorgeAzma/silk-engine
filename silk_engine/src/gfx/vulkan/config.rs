@@ -1,8 +1,9 @@
 use std::ffi::{CStr, CString};
 
-use ash::khr;
+use ash::{ext, khr};
 
 pub const MSAA: u32 = 8;
+pub const HDR: bool = false;
 
 pub fn required_vulkan_instance_extensions() -> Vec<CString> {
     [
@@ -23,7 +24,8 @@ pub fn required_vulkan_instance_extensions() -> Vec<CString> {
 pub fn preferred_vulkan_instance_extensions() -> Vec<CString> {
     [
         #[cfg(debug_assertions)]
-        ash::ext::debug_utils::NAME,
+        ext::debug_utils::NAME,
+        ext::swapchain_colorspace::NAME,
     ]
     .into_iter()
     .map(|e: &CStr| e.to_owned())

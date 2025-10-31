@@ -54,6 +54,7 @@ impl Shader {
             // generate spirv
             let opts = naga::back::spv::Options {
                 lang_version: (1, 3),
+                flags: naga::back::spv::WriterFlags::ADJUST_COORDINATE_SPACE,
                 ..Default::default()
             };
             let mut writer = naga::back::spv::Writer::new(&opts).unwrap();

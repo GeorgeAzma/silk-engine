@@ -2,6 +2,7 @@
     mapped_lock_guards,
     once_cell_get_mut,
     slice_as_array,
+    slice_as_chunks,
     str_from_raw_parts,
     portable_simd
 )]

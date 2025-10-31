@@ -130,6 +130,8 @@ impl App for MyApp<'_> {
         // gfx.atlas();
         // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
         gfx.batch(&self.batch);
+
+        gfx.circle(Px(30), Px(30), Px(30));
     }
 }
 
