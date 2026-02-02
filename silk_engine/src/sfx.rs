@@ -64,11 +64,6 @@ impl Source {
         self
     }
 
-    /// returns source's uid
-    pub fn play(&mut self, sfx: &Sfx) -> usize {
-        sfx.play(self)
-    }
-
     fn update(&mut self, dt: f32) {
         let t = (dt * 150.0).clamp(0.0, 1.0);
         self.effective_volume = self.effective_volume * (1.0 - t) + self.goal_volume * t;
@@ -84,7 +79,7 @@ pub struct Sfx {
 }
 
 impl Sfx {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         let host = cpal::default_host();
         let device = host.default_output_device().expect("speaker not found");
 

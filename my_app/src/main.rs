@@ -3,6 +3,7 @@ use silk_engine::prelude::*;
 struct App {
     window_id: WindowId,
     gfx: Gfx,
+    sfx: Sfx,
 }
 
 impl silk_engine::App for App {
@@ -18,9 +19,14 @@ impl silk_engine::App for App {
             )
             .unwrap();
 
+        let sfx = Sfx::new();
+        let mut src = sfx.load("steingen");
+        sfx.play(&mut src);
+
         Self {
             window_id: window.id(),
             gfx,
+            sfx,
         }
     }
 
