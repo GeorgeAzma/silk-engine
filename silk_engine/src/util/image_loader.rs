@@ -1,4 +1,4 @@
-use crate::util::{Bmp, Qoi};
+use crate::util::{bmp::Bmp, qoi::Qoi};
 
 pub struct ImageData {
     pub img: Vec<u8>,
@@ -61,7 +61,7 @@ impl ImageLoader {
 
     pub fn load(file_name: &str) -> ImageData {
         let dot_pos = file_name.rfind('.').unwrap();
-        let file_ext = &file_name[dot_pos..];
+        let file_ext = &file_name[dot_pos + 1..];
         let name = &file_name[..dot_pos];
         match file_ext {
             "qoi" => {

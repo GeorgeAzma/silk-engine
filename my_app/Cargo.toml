@@ -2,7 +2,7 @@
 name = "my_app"
 version = "0.1.0"
 edition = "2024"
-description = "small test app for silk engine"
+description = "test app for silk engine"
 authors = ["GeorgeAzma"]
 repository = "https://github.com/GeorgeAzma/silk-engine"
 license = "MIT"

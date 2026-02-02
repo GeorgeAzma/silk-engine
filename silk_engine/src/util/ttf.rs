@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{RES_PATH, util::ReaderBe, warn};
+use crate::{util::reader::ReaderBe, warn};
 
 #[derive(Default, Debug, Clone)]
 pub(crate) struct GlyphMetrics {
@@ -100,7 +100,7 @@ pub(crate) struct Ttf {
 // TTF parsing: https://youtu.be/SO83KQuuZvg
 impl Ttf {
     pub(crate) fn new(name: &str) -> Self {
-        let path = format!("{RES_PATH}/fonts/{name}.ttf");
+        let path = format!("res/fonts/{name}.ttf");
         let bytes = std::fs::read(path).unwrap();
 
         let mut reader = ReaderBe::new(&bytes);
@@ -385,8 +385,10 @@ impl Ttf {
                             let kern = x_adv1 + x_adv2;
                             let first_glyph = first_glyphs[i];
                             if kern != 0 {
-                                kernings
-                                    .push((((first_glyph as u32) << 16) | second_glyph as u32, kern))
+                                kernings.push((
+                                    ((first_glyph as u32) << 16) | second_glyph as u32,
+                                    kern,
+                                ))
                             }
                         }
                     }

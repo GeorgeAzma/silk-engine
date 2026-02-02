@@ -1,4 +1,4 @@
-use super::cast_slice;
+use super::to_slice;
 
 pub struct Writer {
     idx: usize,
@@ -31,7 +31,7 @@ impl Writer {
 
     pub fn write<T: ?Sized>(&mut self, val: &T) {
         let size = size_of_val(val);
-        self.bytes[self.idx..][..size].copy_from_slice(cast_slice(val));
+        self.bytes[self.idx..][..size].copy_from_slice(to_slice(val));
         self.idx += size;
     }
 

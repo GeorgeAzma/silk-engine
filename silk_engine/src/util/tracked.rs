@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
+#[derive(Clone)]
 pub struct Tracked<T> {
     data: T,
     dirty: bool,

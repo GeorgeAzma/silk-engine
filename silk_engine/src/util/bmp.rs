@@ -1,6 +1,7 @@
-use crate::{
-    RES_PATH,
-    util::{ImageData, ImageFormat, Reader, Writer},
+use crate::util::{
+    image_loader::{ImageData, ImageFormat},
+    reader::Reader,
+    writer::Writer,
 };
 
 pub struct Bmp;
@@ -28,7 +29,7 @@ const BMP_HEAD_LEN: usize = size_of::<Head>();
 
 impl ImageFormat for Bmp {
     fn load(name: &str) -> ImageData {
-        let data = std::fs::read(format!("{RES_PATH}/images/{name}.bmp"))
+        let data = std::fs::read(format!("res/images/{name}.bmp"))
             .unwrap_or_else(|_| panic!("bmp image not found: {name}"));
         let mut reader = Reader::new(&data);
         let magic = reader.read16().to_le_bytes();
@@ -159,7 +160,7 @@ impl ImageFormat for Bmp {
             writer.skip(pad);
         }
         assert_eq!(writer.idx(), file_size, "BMP file size is incorrect");
-        let path = format!("{RES_PATH}/images/{name}.bmp");
+        let path = format!("res/images/{name}.bmp");
         let bytes = writer.finish();
         std::fs::write(path, bytes).unwrap();
     }

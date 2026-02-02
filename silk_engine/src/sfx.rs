@@ -8,7 +8,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-use crate::util::{ExtraFns, Wav};
+use crate::util::wav::Wav;
 
 #[derive(Clone, Default, Debug)]
 pub struct AudioData {
@@ -70,9 +70,8 @@ impl Source {
     }
 
     fn update(&mut self, dt: f32) {
-        self.effective_volume = self
-            .effective_volume
-            .lerp(self.goal_volume, (dt * 150.0).saturate());
+        let t = (dt * 150.0).clamp(0.0, 1.0);
+        self.effective_volume = self.effective_volume * (1.0 - t) + self.goal_volume * t;
     }
 }
 
@@ -107,7 +106,7 @@ impl Sfx {
                 move |output: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     let mut sources = sources_clone.lock().unwrap();
                     let ch = config.channels as f32;
-                    let dt = 1.0 / config.sample_rate.0 as f32 / ch;
+                    let dt = 1.0 / config.sample_rate as f32 / ch;
                     let fade = 1200.0 * ch;
                     for sample in output.iter_mut() {
                         *sample = 0.0;
@@ -161,6 +160,7 @@ impl Sfx {
         sources.push(source.to_owned());
         uid
     }
+
     pub fn load(&self, name: &str) -> Source {
         let AudioData {
             mut samples,
@@ -275,7 +275,7 @@ impl Sfx {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        self.config.sample_rate.0
+        self.config.sample_rate
     }
 
     pub fn channels(&self) -> u16 {

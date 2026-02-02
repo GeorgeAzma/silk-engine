@@ -1,60 +1,31 @@
 use silk_engine::prelude::*;
 
-struct MyApp<'a> {
-    app: &'a mut AppContext<Self>,
-    batch: Vec<Vertex>,
-    dt_accum: f32,
-    max_dt: f32,
-    uid: usize,
+struct App {
+    window_id: WindowId,
+    gfx: Gfx,
 }
 
-impl App for MyApp<'_> {
-    fn new(app: *mut AppContext<Self>) -> Self {
-        let app = unsafe { &mut *app };
+impl silk_engine::App for App {
+    fn new(context: &mut Engine<Self>) -> Self {
+        let mut gfx = Gfx::new(&context.vulkan).unwrap();
 
-        app.gfx.begin_batch();
-        app.gfx.font("roboto");
-        app.gfx.rgb(32, 123, 222);
-        for x in 0..192 {
-            for y in 0..108 {
-                app.gfx.text("a", Px(x), Px(y), Px(1));
-            }
-        }
-        let batch = app.gfx.end_batch();
+        gfx.load_img("cursor.qoi");
 
-        let uid = app.sfx.load("steingen").loops(4).play(&app.sfx);
+        let window = context
+            .create_window(
+                WindowAttributes::default().with_inner_size(PhysicalSize::new(1280, 720)),
+                &gfx,
+            )
+            .unwrap();
 
         Self {
-            app,
-            batch,
-            dt_accum: 0.0,
-            max_dt: 0.0,
-            uid,
+            window_id: window.id(),
+            gfx,
         }
     }
 
-    fn update(&mut self) {
-        self.dt_accum += self.app.dt;
-        self.max_dt = self.max_dt.max(self.app.dt);
-        if self.app.frame % 128 == 0 {
-            let avg_dt = self.dt_accum / 128.0;
-            self.app.window.set_title(&format!(
-                "{:.2} ms  |  {:.2} ms  |  {} fps  |  {} fps",
-                avg_dt * 1000.0,
-                self.max_dt * 1000.0,
-                (1.0 / avg_dt).round(),
-                (1.0 / self.max_dt).round(),
-            ));
-            self.dt_accum = 0.0;
-            self.max_dt = 0.0;
-        }
-    }
-
-    fn render(&mut self, gfx: &mut Gfx) {
-        let sfx = &self.app.sfx;
-        if self.app.key_pressed(Key::Space) {
-            sfx.pause(self.uid);
-        }
+    fn update(&mut self, ctx: &mut Engine<Self>) {
+        let gfx = &mut self.gfx;
 
         gfx.gradient_dir = 0.0;
         gfx.rgb(255, 0, 0);
@@ -109,10 +80,6 @@ impl App for MyApp<'_> {
         gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Px(50), Px(110), Px(24));
         gfx.font("segoe-ui");
         gfx.text("stuff be workin", Px(150), Px(250), Px(24));
-        gfx.font("roboto");
-        gfx.text("stuff be workin", Px(150), Px(350), Px(66));
-        gfx.font("opensans");
-        gfx.text("stuff be workin", Px(150), Px(290), Px(24));
         gfx.bold = 0.0;
         gfx.stroke_width = 0.0;
         gfx.stroke_blur = 0.0;
@@ -127,14 +94,45 @@ impl App for MyApp<'_> {
         gfx.no_gradient();
         gfx.font("zenmaru");
         gfx.text("鬱龍龍龜鷲鷹魁鬼鉄鬼こんにちは", Pc(0.7), Pc(0.7), Px(8));
-        // gfx.atlas();
-        // gfx.rect(Pc(0.3), Pc(0.3), Px(1024), Px(1024));
-        gfx.batch(&self.batch);
 
-        gfx.circle(Px(30), Px(30), Px(30));
+        gfx.atlas();
+        gfx.rect(Pc(0.4), Pc(0.4), Px(1024), Px(1024));
+        gfx.no_img();
+
+        gfx.superellipse =
+            ctx.input(self.window_id).mouse_x() * 2.0 + ctx.input(self.window_id).mouse_y() + 1.0;
+        gfx.stroke_width = 0.2;
+        gfx.rrect(Px(730), Px(30), Px(150), Px(150), 1.0);
+        gfx.rrect(Px(130), Px(30), Px(430), Px(150), 0.5);
+        gfx.rrect(Px(30), Px(130), Px(60), Px(150), 0.2);
+
+        gfx.circle(Px(30), Px(530), Px(30));
+
+        let window = ctx.window(self.window_id);
+        self.gfx.render(window);
+
+        window.request_redraw();
+    }
+
+    fn on_event(&mut self, context: &mut Engine<Self>, window_id: WindowId, event: WindowEvent) {
+        if window_id == self.window_id {
+            match event {
+                WindowEvent::Destroyed | WindowEvent::CloseRequested => {
+                    context.event_loop().exit();
+                }
+                _ => {}
+            }
+        }
     }
 }
 
-fn main() {
-    Engine::<MyApp>::window("App", 800, 600);
+fn main() -> ResultAny {
+    let _engine = Engine::<App>::new(EngineConfig {
+        vulkan_config: VulkanConfig {
+            ..Default::default()
+        },
+        ..Default::default()
+    })?;
+
+    Ok(())
 }

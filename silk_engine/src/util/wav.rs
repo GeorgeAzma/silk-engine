@@ -1,7 +1,6 @@
 use crate::{
-    RES_PATH,
     sfx::AudioData,
-    util::{Reader, Writer},
+    util::{reader::Reader, writer::Writer},
 };
 
 #[derive(Default)]
@@ -15,7 +14,7 @@ pub struct Wav;
 
 impl Wav {
     pub fn load(name: &str) -> AudioData {
-        let data = std::fs::read(format!("{RES_PATH}/audio/{name}.wav"))
+        let data = std::fs::read(format!("res/audio/{name}.wav"))
             .unwrap_or_else(|_| panic!("wav file not found: {name}"));
         let mut reader = Reader::new(&data);
         // Read WAVE header
@@ -116,7 +115,7 @@ impl Wav {
             );
         }
         assert_eq!(writer.idx(), size, "invalid WAV file size");
-        std::fs::write(format!("{RES_PATH}/audio/{name}.wav"), writer.finish())
+        std::fs::write(format!("res/audio/{name}.wav"), writer.finish())
             .unwrap_or_else(|_| panic!("failed to write wav file: {name}"));
     }
 }

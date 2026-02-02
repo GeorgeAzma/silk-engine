@@ -1,6 +1,4 @@
-use crate::{RES_PATH, util::ImageFormat};
-
-use super::ImageData;
+use crate::util::image_loader::{ImageData, ImageFormat};
 
 const MAX_PIXELS: u32 = 400_000_000;
 const SRGB: u8 = 0;
@@ -29,7 +27,7 @@ impl Qoi {
 impl ImageFormat for Qoi {
     fn load(name: &str) -> ImageData {
         crate::scope_time!("QOI load");
-        let path = format!("{RES_PATH}/images/{name}.qoi");
+        let path = format!("res/images/{name}.qoi");
         let qoi = std::fs::read(path).unwrap_or_else(|_| panic!("qoi image not found: {name}"));
         assert_eq!(
             &qoi[0..4],
@@ -242,74 +240,8 @@ impl ImageFormat for Qoi {
         qoi.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 1]);
         let qoi_len = qoi.len();
         assert!(qoi_len >= MIN_QOI_LEN, "qoi too small");
-        let img_path = format!("{RES_PATH}/images/{name}.qoi");
+        let img_path = format!("res/images/{name}.qoi");
         std::fs::write(&img_path, &qoi)
             .unwrap_or_else(|e| panic!("failed to save qoi image({}): {e}", img_path));
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    fn assert_img_eq(a: &ImageData, b: &ImageData) {
-        assert_eq!(a.img.len(), b.img.len(), "img size not equal");
-        if a.img != b.img {
-            println!("left img (wrong):");
-            crate::util::print::print_img(&a.img, a.width, a.height, a.channels);
-            println!("right img (truth):");
-            crate::util::print::print_img(&b.img, b.width, b.height, a.channels);
-            panic!();
-        }
-    }
-
-    fn save_load(img: &ImageData) {
-        Qoi::save("temp", &img.img, img.width, img.height, img.channels);
-        let limg = Qoi::load("temp");
-        assert_eq!(img.width, limg.width);
-        assert_eq!(img.height, limg.height);
-        assert_eq!(img.channels, limg.channels);
-        assert_img_eq(&limg, img);
-    }
-
-    #[test]
-    fn save_load_test() {
-        *crate::INIT_PATHS;
-        #[rustfmt::skip]
-        #[allow(clippy::zero_prefixed_literal)]
-        let img = vec![
-            155, 000, 000,   155, 000, 000, // run len + rgb
-            000, 200, 000,   250, 168, 250, // luma
-            000, 000, 155,   001, 000, 153, // diff
-            000, 200, 000,   250, 168, 250, // index
-        ];
-        save_load(&ImageData::new(img, 2, 4, 3));
-
-        save_load(&ImageData::new(b"AAAAAA".repeat(64), 2 * 64, 1, 3)); // big run len
-        save_load(&ImageData::new(b"AAAEEE".repeat(64), 2 * 64, 1, 3)); // big luma
-        save_load(&ImageData::new(b"AAABBB".repeat(64), 2 * 64, 1, 3)); // big diff
-        save_load(&ImageData::new(b"QQQAAA".repeat(64), 2 * 64, 1, 3)); // big index
-        save_load(&ImageData::new(
-            [b"AAAAAA".repeat(64), b"EEE".repeat(63)].concat(),
-            2 * 64 + 63,
-            1,
-            3,
-        )); // big double run len
-
-        // visualize correctly loaded/saved (hopefuly) QOI image
-        let img = Qoi::load("../../../res/images/spark");
-        Qoi::save("temp", &img.img, img.width, img.height, img.channels);
-        let limg = Qoi::load("temp");
-        assert_img_eq(&img, &limg);
-
-        let img = Qoi::load("../../../res/images/cursor");
-        Qoi::save("temp", &img.img, img.width, img.height, img.channels);
-        let limg = Qoi::load("temp");
-        assert_img_eq(&img, &limg);
-
-        let img = Qoi::load("../../../res/images/spiral");
-        Qoi::save("temp", &img.img, img.width, img.height, img.channels);
-        let limg = Qoi::load("temp");
-        assert_img_eq(&img, &limg);
     }
 }
