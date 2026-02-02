@@ -7,12 +7,12 @@ struct App {
 }
 
 impl silk_engine::App for App {
-    fn new(context: &mut Engine<Self>) -> Self {
-        let mut gfx = Gfx::new(&context.vulkan).unwrap();
+    fn new(ctx: &mut Engine<Self>) -> Self {
+        let mut gfx = Gfx::new(&ctx.vulkan).unwrap();
 
         gfx.load_img("cursor.qoi");
 
-        let window = context
+        let window = ctx
             .create_window(
                 WindowAttributes::default().with_inner_size(PhysicalSize::new(1280, 720)),
                 &gfx,
@@ -21,7 +21,7 @@ impl silk_engine::App for App {
 
         let sfx = Sfx::new();
         let mut src = sfx.load("steingen");
-        sfx.play(&mut src);
+        // sfx.play(&mut src);
 
         Self {
             window_id: window.id(),
@@ -30,10 +30,31 @@ impl silk_engine::App for App {
         }
     }
 
+    #[inline_tweak::tweak_fn]
     fn update(&mut self, ctx: &mut Engine<Self>) {
+        let input = ctx.input(self.window_id);
+        let key_escape = input.key_pressed(Key::Escape);
+        let ix = input.screen_mouse_press_x(Mouse::Left);
+        let iy = input.screen_mouse_press_y(Mouse::Left);
+        let mouse_dx = input.screen_mouse_drag_x(Mouse::Left);
+        let mouse_dy = input.screen_mouse_drag_y(Mouse::Left);
+        let mouse_x = input.screen_mouse_x();
+        let mouse_y = input.screen_mouse_y();
+
+        if key_escape {
+            std::process::exit(0);
+        }
+
+        let window = ctx.window(self.window_id);
+        let x = mouse_dx;
+        println!("{x}");
+        let y = mouse_dy;
+
+        window.set_outer_position(PhysicalPosition::new((ix + x) as i32, (iy + y) as i32));
+
         let gfx = &mut self.gfx;
 
-        gfx.gradient_dir = 0.0;
+        gfx.gradient_dir = 0.1;
         gfx.rgb(255, 0, 0);
         gfx.gradient_rgb(255, 255, 0);
         gfx.rect(Pc(0.2), Pc(0.8), Pc(0.1), Pc(0.1));
@@ -105,19 +126,18 @@ impl silk_engine::App for App {
         gfx.rect(Pc(0.4), Pc(0.4), Px(1024), Px(1024));
         gfx.no_img();
 
-        gfx.superellipse =
-            ctx.input(self.window_id).mouse_x() * 2.0 + ctx.input(self.window_id).mouse_y() + 1.0;
-        gfx.stroke_width = 0.2;
+        gfx.superellipse = mouse_x * 2.0 + mouse_y + 1.0;
+        gfx.stroke_width = 0.4;
         gfx.rrect(Px(730), Px(30), Px(150), Px(150), 1.0);
         gfx.rrect(Px(130), Px(30), Px(430), Px(150), 0.5);
         gfx.rrect(Px(30), Px(130), Px(60), Px(150), 0.2);
 
         gfx.circle(Px(30), Px(530), Px(30));
 
-        let window = ctx.window(self.window_id);
         self.gfx.render(window);
 
         window.request_redraw();
+        ctx.input(self.window_id).reset();
     }
 
     fn on_event(&mut self, context: &mut Engine<Self>, window_id: WindowId, event: WindowEvent) {

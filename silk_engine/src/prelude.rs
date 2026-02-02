@@ -1,6 +1,7 @@
 pub use crate::{
     engine::{App, Engine, EngineConfig},
     gfx::{Gfx, Unit::*},
+    input::{Key, Mouse},
     sfx::{AudioData, Sfx, Source},
     vulkan::{VulkanConfig, window::Window},
 };

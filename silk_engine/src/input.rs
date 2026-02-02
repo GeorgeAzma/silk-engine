@@ -11,15 +11,28 @@ pub struct Input {
     mouse_old: [bool; 5],
     /// [-1; 1] normalized mouse/touch/stylus X coordinate
     mouse_x: f32,
+    mouse_x_old: f32,
     /// [-1; 1] normalized mouse/touch/stylus Y coordinate
     mouse_y: f32,
+    mouse_y_old: f32,
+    /// screen-relative mouse X coordinate
+    screen_mouse_x: f32,
+    screen_mouse_x_old: f32,
+    /// screen-relative mouse Y coordinate
+    screen_mouse_y: f32,
+    screen_mouse_y_old: f32,
     mouse_scroll: f32,
     // drag X location of each mouse button
     mouse_press_x: [f32; 5],
     // drag Y location of each mouse button
     mouse_press_y: [f32; 5],
+    // screen drag X location of each mouse button
+    screen_mouse_press_x: [f32; 5],
+    // screen drag Y location of each mouse button
+    screen_mouse_press_y: [f32; 5],
     /// unnormalized or [0; 1] normalized pressure of a single touch or a stylus.
     pressure: f32,
+    pressure_old: f32,
     /// maximum possible pressure of a single touch or a stylus
     max_pressure: f32,
     /// stylus angle, 0 = parallel to surface (fully tilted), pi/2 = perpendicular to surface (held upright)
@@ -39,11 +52,20 @@ impl Input {
             mouse: [false; 5],
             mouse_old: [false; 5],
             mouse_x: 0.0,
+            mouse_x_old: 0.0,
             mouse_y: 0.0,
+            mouse_y_old: 0.0,
+            screen_mouse_x: 0.0,
+            screen_mouse_x_old: 0.0,
+            screen_mouse_y: 0.0,
+            screen_mouse_y_old: 0.0,
             mouse_scroll: 0.0,
             mouse_press_x: [0.0; 5],
             mouse_press_y: [0.0; 5],
+            screen_mouse_press_x: [0.0; 5],
+            screen_mouse_press_y: [0.0; 5],
             pressure: 0.0,
+            pressure_old: 0.0,
             max_pressure: 0.0,
             angle: 0.0,
             key: [false; 194],
@@ -54,18 +76,23 @@ impl Input {
         }
     }
 
-    pub fn event(&mut self, event: &WindowEvent, width: u32, height: u32) {
+    pub fn event(&mut self, event: &WindowEvent, window_x: i32, window_y: i32) {
         match event {
             WindowEvent::CursorMoved {
                 device_id: _,
                 position,
             } => {
-                if width > 0 {
-                    self.mouse_x = position.x as f32 / width as f32 * 2.0 - 1.0;
-                }
-                if height > 0 {
-                    self.mouse_y = 1.0 - position.y as f32 / height as f32 * 2.0;
-                }
+                self.screen_mouse_x_old = self.screen_mouse_x;
+                self.screen_mouse_y_old = self.screen_mouse_y;
+
+                self.screen_mouse_x = window_x as f32 + position.x as f32;
+                self.screen_mouse_y = window_y as f32 + position.y as f32;
+
+                self.mouse_x_old = self.mouse_x;
+                self.mouse_x = position.x as f32;
+
+                self.mouse_y_old = self.mouse_y;
+                self.mouse_y = position.y as f32;
             }
             WindowEvent::MouseInput {
                 device_id: _,
@@ -74,14 +101,18 @@ impl Input {
             } => {
                 let idx = Self::mouse_idx(*button);
                 if state.is_pressed() {
+                    self.pressure_old = self.pressure;
                     self.pressure = 1.0;
                     self.max_pressure = 1.0;
                     self.angle = 0.0;
                     self.mouse[idx] = true;
                     self.mouse_press_x[idx] = self.mouse_x;
                     self.mouse_press_y[idx] = self.mouse_y;
+                    self.screen_mouse_press_x[idx] = self.screen_mouse_x;
+                    self.screen_mouse_press_y[idx] = self.screen_mouse_y;
                 } else {
                     self.mouse[idx] = false;
+                    self.pressure_old = self.pressure;
                     self.pressure = 0.0;
                 }
             }
@@ -93,16 +124,14 @@ impl Input {
                 use winit::event::MouseScrollDelta;
                 match delta {
                     MouseScrollDelta::LineDelta(_, y) => self.mouse_scroll = *y,
-                    MouseScrollDelta::PixelDelta(p) => {
-                        if height > 0 {
-                            self.mouse_scroll = p.y as f32 / height as f32
-                        }
-                    }
+                    MouseScrollDelta::PixelDelta(p) => self.mouse_scroll = p.y as f32,
                 }
             }
             WindowEvent::Touch(touch) => {
                 let x = touch.location.x as f32;
                 let y = touch.location.y as f32;
+                self.mouse_x_old = self.mouse_x;
+                self.mouse_y_old = self.mouse_y;
                 self.mouse_x = x;
                 self.mouse_y = y;
                 use winit::event::TouchPhase;
@@ -116,33 +145,46 @@ impl Input {
                                     max_possible_force,
                                     altitude_angle,
                                 } => {
+                                    self.pressure_old = self.pressure;
                                     self.pressure = pressure as f32;
                                     self.max_pressure = max_possible_force as f32;
                                     self.angle = altitude_angle.unwrap_or(0.0) as f32;
                                     self.mouse[idx] = true;
                                     self.mouse_press_x[idx] = x;
                                     self.mouse_press_y[idx] = y;
+                                    self.screen_mouse_press_x[idx] = window_x as f32 + x;
+                                    self.screen_mouse_press_y[idx] = window_y as f32 + y;
                                     self.active_touches.insert(touch.id, (x, y, force));
                                 }
                                 Force::Normalized(pressure) => {
+                                    self.pressure_old = self.pressure;
                                     self.pressure = pressure as f32;
                                     self.max_pressure = 1.0;
                                     self.angle = 0.0;
                                     self.mouse[idx] = true;
                                     self.mouse_press_x[idx] = x;
                                     self.mouse_press_y[idx] = y;
+                                    self.screen_mouse_press_x[idx] = window_x as f32 + x;
+                                    self.screen_mouse_press_y[idx] = window_y as f32 + y;
                                     let force = touch.force.unwrap();
                                     self.active_touches.insert(touch.id, (x, y, force));
                                 }
                             }
                         } else {
+                            self.pressure_old = self.pressure;
                             self.pressure = 0.0;
                             self.max_pressure = 1.0;
+                            self.mouse[idx] = true;
+                            self.mouse_press_x[idx] = x;
+                            self.mouse_press_y[idx] = y;
+                            self.screen_mouse_press_x[idx] = window_x as f32 + x;
+                            self.screen_mouse_press_y[idx] = window_y as f32 + y;
                         }
                     }
                     TouchPhase::Ended | TouchPhase::Cancelled => {
                         let idx = Self::mouse_idx(Mouse::Left);
                         self.mouse[idx] = false;
+                        self.pressure_old = self.pressure;
                         self.pressure = 0.0;
                         self.active_touches.remove(&touch.id);
                     }
@@ -172,6 +214,10 @@ impl Input {
         self.mouse_old = self.mouse;
         self.key_old = self.key;
         self.focus_old = self.focus;
+        self.mouse_x_old = self.mouse_x;
+        self.mouse_y_old = self.mouse_y;
+        self.screen_mouse_x_old = self.screen_mouse_x;
+        self.screen_mouse_y_old = self.screen_mouse_y;
     }
 
     pub fn mouse_x(&self) -> f32 {
@@ -180,6 +226,30 @@ impl Input {
 
     pub fn mouse_y(&self) -> f32 {
         self.mouse_y
+    }
+
+    pub fn screen_mouse_x(&self) -> f32 {
+        self.screen_mouse_x
+    }
+
+    pub fn screen_mouse_y(&self) -> f32 {
+        self.screen_mouse_y
+    }
+
+    pub fn mouse_dx(&self) -> f32 {
+        self.mouse_x - self.mouse_x_old
+    }
+
+    pub fn mouse_dy(&self) -> f32 {
+        self.mouse_y - self.mouse_y_old
+    }
+
+    pub fn screen_mouse_dx(&self) -> f32 {
+        self.screen_mouse_x - self.screen_mouse_x_old
+    }
+
+    pub fn screen_mouse_dy(&self) -> f32 {
+        self.screen_mouse_y - self.screen_mouse_y_old
     }
 
     pub fn mouse_scroll(&self) -> f32 {
@@ -212,6 +282,22 @@ impl Input {
 
     pub fn mouse_drag_y(&self, m: Mouse) -> f32 {
         self.mouse_y - self.mouse_press_y[Self::mouse_idx(m)]
+    }
+
+    pub fn screen_mouse_press_x(&self, m: Mouse) -> f32 {
+        self.screen_mouse_press_x[Self::mouse_idx(m)]
+    }
+
+    pub fn screen_mouse_press_y(&self, m: Mouse) -> f32 {
+        self.screen_mouse_press_y[Self::mouse_idx(m)]
+    }
+
+    pub fn screen_mouse_drag_x(&self, m: Mouse) -> f32 {
+        self.screen_mouse_x - self.screen_mouse_press_x[Self::mouse_idx(m)]
+    }
+
+    pub fn screen_mouse_drag_y(&self, m: Mouse) -> f32 {
+        self.screen_mouse_y - self.screen_mouse_press_y[Self::mouse_idx(m)]
     }
 
     pub fn key_pressed(&self, k: Key) -> bool {

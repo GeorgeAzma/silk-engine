@@ -172,8 +172,9 @@ impl<A: App> ApplicationHandler<()> for Engine<A> {
     ) {
         self.event_loop = event_loop as *const _;
         if let Some(input) = self.window_input.get_mut(&window_id) {
-            let inner_size = self.windows[&window_id].inner_size();
-            input.event(&event, inner_size.width, inner_size.height);
+            let window = &self.windows[&window_id];
+            let outer_pos = window.outer_position().unwrap_or_default();
+            input.event(&event, outer_pos.x, outer_pos.y);
         }
 
         if !self.app.is_null() {

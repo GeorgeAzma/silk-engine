@@ -5,6 +5,7 @@ use std::{
 
 use ash::vk;
 use winit::{
+    dpi::PhysicalPosition,
     event_loop::ActiveEventLoop,
     window::{WindowAttributes, WindowId},
 };
@@ -101,12 +102,28 @@ impl Window {
         self.swapchain.create_info().image_extent
     }
 
+    pub fn x(&self) -> i32 {
+        let pos = self.window.outer_position().unwrap();
+        pos.x
+    }
+
+    pub fn y(&self) -> i32 {
+        let pos = self.window.outer_position().unwrap();
+        pos.y
+    }
+
     pub fn width(&self) -> u32 {
         self.extent().width
     }
 
     pub fn height(&self) -> u32 {
         self.extent().height
+    }
+
+    pub fn move_pos(&self, x: i32, y: i32) {
+        let pos = self.window.outer_position().unwrap();
+        self.window
+            .set_outer_position(PhysicalPosition::new(pos.x + x, pos.y + y));
     }
 
     pub fn is_minimized(&mut self) -> bool {

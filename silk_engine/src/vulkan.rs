@@ -1,4 +1,4 @@
-use ash::{ext, khr, vk};
+use ash::{khr, vk};
 
 use std::{
     ffi::{CStr, CString},
@@ -147,8 +147,8 @@ impl Default for VulkanConfig {
             ],
             preferred_instance_extensions: vec![
                 #[cfg(debug_assertions)]
-                ext::debug_utils::NAME,
-                // ext::swapchain_colorspace::NAME,
+                ash::ext::debug_utils::NAME,
+                // ash::ext::swapchain_colorspace::NAME,
             ],
             validation_layers: vec![
                 #[cfg(debug_assertions)]

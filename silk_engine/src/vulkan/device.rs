@@ -90,12 +90,16 @@ impl Device {
         mag_filter: vk::Filter,
         mip_filter: vk::SamplerMipmapMode,
     ) -> vk::Sampler {
-        let mgr = self.sampler_manager.get_or_init(|| SamplerManager::new(self));
+        let mgr = self
+            .sampler_manager
+            .get_or_init(|| SamplerManager::new(self));
         mgr.get(addr_mode_u, addr_mode_v, min_filter, mag_filter, mip_filter)
     }
 
     pub(crate) fn dsl_manager(self: &Arc<Self>) -> Arc<DSLManager> {
-        self.dsl_manager.get_or_init(|| DSLManager::new(self)).clone()
+        self.dsl_manager
+            .get_or_init(|| DSLManager::new(self))
+            .clone()
     }
 
     pub(crate) fn alloc_ds(
@@ -107,7 +111,9 @@ impl Device {
     }
 
     pub(crate) fn allocator(self: &Arc<Self>) -> Arc<VulkanAlloc> {
-        self.allocator.get_or_init(|| VulkanAlloc::new(self, &self.physical_device().memory_properties)).clone()
+        self.allocator
+            .get_or_init(|| VulkanAlloc::new(self, &self.physical_device().memory_properties))
+            .clone()
     }
 
     pub(crate) fn command_manager(
@@ -122,7 +128,9 @@ impl Device {
     }
 
     pub(crate) fn pipeline_cache(self: &Arc<Self>) -> Arc<PipelineCache> {
-        self.pipeline_cache.get_or_init(|| Arc::new(PipelineCache::new(self, "res/cache/pipeline.cache").unwrap())).clone()
+        self.pipeline_cache
+            .get_or_init(|| Arc::new(PipelineCache::new(self, "res/cache/pipeline.cache").unwrap()))
+            .clone()
     }
 
     pub(crate) fn ds_layout(
@@ -133,6 +141,9 @@ impl Device {
     }
 
     pub(crate) fn debug_name<T: vk::Handle>(&self, handle: T, name: &str) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
         let Ok(name) = CString::new(name) else {
             return;
         };
