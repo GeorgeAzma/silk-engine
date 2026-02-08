@@ -169,7 +169,7 @@ impl Surface {
 
         let formats = physical_device.get_surface_formats(surface)?;
         let present_modes = physical_device.get_surface_present_modes(surface)?;
-        let capabilities = physical_device.get_capabilities(surface);
+        let capabilities = physical_device.get_surface_capabilities(surface);
 
         Ok(Self {
             surface,
@@ -214,7 +214,9 @@ impl Surface {
     }
 
     pub(crate) fn update_capabilities(&mut self) -> &vk::SurfaceCapabilitiesKHR {
-        self.capabilities = self.physical_device().get_capabilities(self.surface);
+        self.capabilities = self
+            .physical_device()
+            .get_surface_capabilities(self.surface);
         &self.capabilities
     }
 

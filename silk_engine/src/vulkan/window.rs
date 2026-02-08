@@ -113,7 +113,7 @@ impl Window {
     }
 
     pub fn is_minimized(&mut self) -> bool {
-        let caps = self.surface.update_capabilities();
+        let caps = self.surface.capabilities();
         caps.current_extent.width == 0 || caps.current_extent.height == 0
     }
 
@@ -140,12 +140,12 @@ impl Window {
     /// The wait_fn callback is called to wait for the previous frame's command buffer if any.
     /// The returned Frame must be passed to end_frame after rendering.
     pub fn begin_frame(&mut self, mut wait_fn: impl FnMut(vk::CommandBuffer)) -> Option<Frame> {
-        if self.is_minimized() {
-            return None;
-        }
-
         if self.needs_resize() {
             self.update_swapchain().ok()?;
+        }
+
+        if self.is_minimized() {
+            return None;
         }
 
         if self.image_available.is_empty() {

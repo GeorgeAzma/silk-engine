@@ -37,7 +37,10 @@ impl PhysicalDevice {
         }?)
     }
 
-    pub(crate) fn get_capabilities(&self, surface: vk::SurfaceKHR) -> vk::SurfaceCapabilitiesKHR {
+    pub(crate) fn get_surface_capabilities(
+        &self,
+        surface: vk::SurfaceKHR,
+    ) -> vk::SurfaceCapabilitiesKHR {
         let mut capabilities = vk::SurfaceCapabilities2KHR::default();
         let surface_info = vk::PhysicalDeviceSurfaceInfo2KHR::default().surface(surface);
         unsafe {

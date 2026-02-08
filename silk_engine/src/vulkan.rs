@@ -3,7 +3,7 @@ use ash::{khr, vk};
 use std::{
     ffi::{CStr, CString},
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use crate::{
@@ -170,7 +170,7 @@ pub struct Vulkan {
     instance: ash::Instance,
     alloc_manager: Arc<Mutex<AllocManager>>,
     allocation_callbacks: Option<vk::AllocationCallbacks<'static>>,
-    physical_devices: Option<Vec<Arc<PhysicalDevice>>>,
+    physical_devices: OnceLock<Vec<Arc<PhysicalDevice>>>,
     surface_instance: ash::khr::surface::Instance,
     get_surface_capabilities2_instance: ash::khr::get_surface_capabilities2::Instance,
 }
@@ -308,7 +308,7 @@ impl Vulkan {
             instance,
             alloc_manager,
             allocation_callbacks,
-            physical_devices: None,
+            physical_devices: OnceLock::new(),
             surface_instance,
             get_surface_capabilities2_instance,
         }))
@@ -322,7 +322,6 @@ impl Vulkan {
         F: Fn(&PhysicalDevice) -> Option<u32>,
     {
         self.physical_devices()
-            .ok()?
             .iter()
             .filter_map(|physical_device| {
                 fitness(physical_device).map(|score| (physical_device, score))
@@ -403,12 +402,14 @@ impl Vulkan {
         })
     }
 
-    pub(crate) fn physical_devices(self: &Arc<Self>) -> ResultAny<Vec<Arc<PhysicalDevice>>> {
-        if let Some(physical_devices) = &self.physical_devices {
-            Ok(physical_devices.clone())
-        } else {
-            let physical_devices = unsafe { self.instance.enumerate_physical_devices() }?;
-            Ok(physical_devices
+    pub(crate) fn physical_devices(self: &Arc<Self>) -> &[Arc<PhysicalDevice>] {
+        self.physical_devices.get_or_init(|| {
+            let physical_devices = unsafe {
+                self.instance
+                    .enumerate_physical_devices()
+                    .unwrap_or_default()
+            };
+            physical_devices
                 .iter()
                 .map(|&physical_device| {
                     let mut properties = vk::PhysicalDeviceProperties2::default();
@@ -474,8 +475,8 @@ impl Vulkan {
                         vulkan: Arc::clone(self),
                     })
                 })
-                .collect())
-        }
+                .collect::<Vec<_>>()
+        })
     }
 
     pub fn version(&self) -> u32 {
