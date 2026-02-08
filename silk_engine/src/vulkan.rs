@@ -176,7 +176,7 @@ pub struct Vulkan {
 }
 
 impl Vulkan {
-    pub(crate) fn new(config: VulkanConfig) -> ResultAny<Arc<Self>> {
+    pub fn new(config: VulkanConfig) -> ResultAny<Arc<Self>> {
         let version = config.api_version;
 
         let entry = unsafe { ash::Entry::load()? };

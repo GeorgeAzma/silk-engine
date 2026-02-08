@@ -4,14 +4,7 @@ use std::{
 };
 
 use ash::vk;
-use winit::{
-    dpi::PhysicalPosition,
-    event_loop::ActiveEventLoop,
-    window::{WindowAttributes, WindowId},
-};
-
-#[cfg(target_os = "windows")]
-use winit::platform::windows::WindowAttributesExtWindows;
+use winit::{dpi::PhysicalPosition, window::WindowId};
 
 use crate::{
     prelude::ResultAny,
@@ -26,6 +19,7 @@ pub struct Frame {
     pub signal_semaphore: vk::Semaphore,
 }
 
+#[derive(bevy_ecs::resource::Resource)]
 pub struct Window {
     surface: Surface,
     swapchain: Swapchain,
@@ -42,19 +36,11 @@ pub struct Window {
 impl Window {
     pub(crate) fn new(
         device: &Arc<Device>,
-        event_loop: &ActiveEventLoop,
-        mut attributes: WindowAttributes,
+        window: winit::window::Window,
         mut preferred_surface_formats: Vec<vk::SurfaceFormatKHR>,
         mut preferred_present_modes: Vec<vk::PresentModeKHR>,
     ) -> ResultAny<Self> {
-        // Prevent white background flash during resize on Windows
-        #[cfg(target_os = "windows")]
-        {
-            attributes = attributes.with_no_redirection_bitmap(true);
-        }
-
-        let window = event_loop.create_window(attributes)?;
-        let mut surface = Surface::new(&device.physical_device(), &window)?;
+        let mut surface = Surface::new(device.physical_device(), &window)?;
 
         let mut swapchain = Swapchain::new(device, vk::SwapchainCreateInfoKHR::default());
 

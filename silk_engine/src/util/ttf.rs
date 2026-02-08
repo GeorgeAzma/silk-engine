@@ -228,7 +228,7 @@ impl Ttf {
                     todo!("kern format 2 is less common and maybe unsupported by windows")
                 }
                 // 3 is compacted 2, it is not as common/supported as others, so skip
-                3 | _ => warn!("invalid kern format: {format}, skipping kernings"),
+                _ => warn!("invalid kern format: {format}, skipping kernings"),
             }
         }
         if kernings.is_empty() {

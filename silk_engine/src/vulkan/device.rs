@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ash::vk::{self, Handle};
 
@@ -16,7 +16,7 @@ use crate::{
 
 pub(crate) struct Device {
     pub(crate) device: ash::Device,
-    physical_device: Weak<PhysicalDevice>,
+    physical_device: Arc<PhysicalDevice>,
     debug_utils: Option<ash::ext::debug_utils::Device>,
     swapchain_device: Option<ash::khr::swapchain::Device>,
     cached_queues: Mutex<Vec<Vec<vk::Queue>>>,
@@ -53,7 +53,7 @@ impl Device {
 
         Ok(Arc::new(Self {
             device,
-            physical_device: Arc::downgrade(physical_device),
+            physical_device: physical_device.clone(),
             debug_utils: None,
             swapchain_device: None,
             cached_queues: Mutex::new(cached_queues),
@@ -176,8 +176,8 @@ impl Device {
         })
     }
 
-    pub(crate) fn physical_device(&self) -> Arc<PhysicalDevice> {
-        self.physical_device.upgrade().unwrap()
+    pub(crate) fn physical_device(&self) -> &Arc<PhysicalDevice> {
+        &self.physical_device
     }
 
     pub(crate) fn allocation_callbacks(&self) -> Option<vk::AllocationCallbacks<'static>> {

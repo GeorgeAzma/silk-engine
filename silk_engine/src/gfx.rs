@@ -24,6 +24,7 @@ use crate::{
     },
 };
 use ash::vk::{self, BufferUsageFlags, ImageCreateInfo, MemoryPropertyFlags};
+use winit::{event_loop::ActiveEventLoop, window::WindowAttributes};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Unit {
@@ -127,10 +128,13 @@ struct Instances {
     vertex_buffer: Arc<Buffer>,
 }
 
+unsafe impl Send for Instances {}
+unsafe impl Sync for Instances {}
+
 impl Instances {
     fn new(device: &Arc<Device>, queue_family_index: u32, size: usize) -> ResultAny<Self> {
         let vertex_buffer = Buffer::new(
-            &device,
+            device,
             (size * size_of::<Vertex>()) as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER
                 | vk::BufferUsageFlags::TRANSFER_DST
@@ -171,6 +175,7 @@ impl Instances {
     }
 }
 
+#[derive(bevy_ecs::resource::Resource)]
 pub struct Gfx {
     pub(crate) physical_device: Arc<PhysicalDevice>,
     pub(crate) device: Arc<Device>,
@@ -199,6 +204,7 @@ pub struct Gfx {
     pub gradient: [u8; 4],
     /// f32::MAX = gradient
     pub gradient_dir: f32,
+    // k<0: cut; k=0: beveled; k=1: rounded; k=2: squircle; k=∞ square;
     pub superellipse: f32,
     /// packed whxy
     tex_coord: [u32; 2],
@@ -409,6 +415,21 @@ impl Gfx {
         })
     }
 
+    pub fn create_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        mut attributes: WindowAttributes,
+    ) -> Window {
+        // Prevent white background flash during resize on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attributes = attributes.with_no_redirection_bitmap(true);
+        }
+        let window = event_loop.create_window(attributes).unwrap();
+        Window::new(&self.device, window, vec![], vec![]).unwrap()
+    }
+
     pub fn alpha(&mut self, a: u8) {
         self.color[3] = a;
     }
@@ -499,7 +520,7 @@ impl Gfx {
                     Rect::new(x, y, width as u16, height as u16),
                 )
             });
-            (*off, tracked, rect.clone())
+            (*off, tracked, *rect)
         } else {
             panic!("failed to add img to atlas, out of space")
         }
@@ -508,7 +529,7 @@ impl Gfx {
     pub fn load_img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
         let mut img_data = ImageLoader::load(name);
         if img_data.channels != 4 {
-            img_data.img = ImageLoader::make4(&mut img_data.img, img_data.channels);
+            img_data.img = ImageLoader::make4(&img_data.img, img_data.channels);
         }
         let tracked_img_data = self.add_img(name, img_data.width, img_data.height).1;
         tracked_img_data.copy_from_slice(&img_data.img);
@@ -698,6 +719,7 @@ impl Gfx {
         self.roundness = old_roundness;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) {
         fn bezier(a: f32, b: f32, c: f32, t: f32) -> f32 {
             t * (t * (c - 2.0 * b + a) + 2.0 * (b - a)) + a
@@ -1065,5 +1087,11 @@ impl Gfx {
 
     pub fn device(&self) -> &ash::Device {
         &self.device.device
+    }
+}
+
+impl Drop for Gfx {
+    fn drop(&mut self) {
+        self.device.wait();
     }
 }

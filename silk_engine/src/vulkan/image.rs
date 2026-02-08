@@ -58,7 +58,7 @@ impl Image {
         create_info: &vk::ImageCreateInfo,
         mut image: vk::Image,
     ) -> ResultAny<Arc<Self>> {
-        let mut create_info = create_info.clone();
+        let mut create_info = *create_info;
         create_info.samples = create_info.samples.max(vk::SampleCountFlags::TYPE_1);
         create_info.mip_levels = create_info.mip_levels.max(1);
         create_info.array_layers = create_info.array_layers.max(1);

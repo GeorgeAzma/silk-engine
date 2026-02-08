@@ -51,9 +51,7 @@ impl ImageLoader {
         let rgb_chunks = data.chunks(channels);
         let rgba_chunks = unsafe { rgba.as_chunks_unchecked_mut::<4>() };
         for (rgb, rgba) in rgb_chunks.zip(rgba_chunks.iter_mut()) {
-            for c in 0..channels {
-                rgba[c] = rgb[c];
-            }
+            rgba[..channels].copy_from_slice(&rgb[..channels]);
             rgba[3] = 255;
         }
         rgba

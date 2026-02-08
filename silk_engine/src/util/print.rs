@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     io::{Read, Seek, Write},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 
 pub fn col(text: &str, col: [u8; 3]) -> String {
@@ -152,9 +152,9 @@ impl Sink for RotatingFileSink {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Logger {
-    pub sinks: Vec<Box<dyn Sink>>,
+    pub sinks: Vec<Arc<Mutex<dyn Sink>>>,
 }
 
 impl Logger {
@@ -168,14 +168,14 @@ impl Logger {
 impl Logger {
     pub fn log(&mut self, record: Record) {
         for sink in &mut self.sinks {
-            sink.write(&record);
+            sink.lock().unwrap().write(&record);
         }
     }
 
     pub fn log_to(&mut self, sink_name: &str, record: Record) {
         for sink in &mut self.sinks {
-            if sink.name() == sink_name {
-                sink.write(&record);
+            if sink.lock().unwrap().name() == sink_name {
+                sink.lock().unwrap().write(&record);
             }
         }
     }

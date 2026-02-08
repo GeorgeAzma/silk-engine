@@ -8,5 +8,6 @@ repository = "https://github.com/GeorgeAzma/silk-engine"
 license = "MIT"
 
 [dependencies]
+bevy_ecs = "0.18.0"
 inline_tweak = { version = "1.2.4", features = ["derive"] }
 silk_engine = { path = "../silk_engine" }

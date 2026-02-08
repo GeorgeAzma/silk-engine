@@ -64,7 +64,7 @@ impl ImageFormat for Bmp {
             let _color_table = reader.read(4 * colors_used as usize);
         }
         reader.goto(off as usize);
-        let row_size = ((width as usize * bit_count as usize + 31) / 32) * 4;
+        let row_size = (width as usize * bit_count as usize).div_ceil(32) * 4;
         let channels = match bit_count {
             1 | 4 | 8 => 1,
             16 | 24 => 3,
@@ -107,7 +107,7 @@ impl ImageFormat for Bmp {
             4 => 32,
             _ => panic!("BMP does not support channel count of {channels}"),
         };
-        let row_size = (width * bit_count as u32 + 31) / 32 * 4;
+        let row_size = (width * bit_count as u32).div_ceil(32) * 4;
         let padded_img_len = row_size * height;
         let file_size = (off + padded_img_len) as usize;
         let mut writer = Writer::new(file_size);

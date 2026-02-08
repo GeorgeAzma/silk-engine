@@ -1,5 +1,6 @@
 use ash::vk::{self, Handle};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::hash::Hash;
 use std::ptr::null;
 use std::sync::{Arc, Mutex};
@@ -7,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use crate::prelude::ResultAny;
 use crate::vulkan::device::Device;
 
-#[derive(Clone, Debug, Hash)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct DSLBinding {
     pub binding: u32,
     pub desc_ty: vk::DescriptorType,
@@ -40,14 +41,14 @@ impl From<&vk::DescriptorSetLayoutBinding<'_>> for DSLBinding {
 }
 
 pub(crate) struct DSLManager {
-    dsls: Mutex<HashMap<DSLBindings, vk::DescriptorSetLayout>>,
+    cache: Mutex<HashMap<Vec<DSLBinding>, vk::DescriptorSetLayout>>,
     pub(crate) device: Arc<Device>,
 }
 
 impl DSLManager {
     pub(crate) fn new(device: &Arc<Device>) -> Arc<Self> {
         Arc::new(Self {
-            dsls: Mutex::new(HashMap::new()),
+            cache: Mutex::new(HashMap::new()),
             device: Arc::clone(device),
         })
     }
@@ -56,16 +57,30 @@ impl DSLManager {
         &self,
         bindings: &[vk::DescriptorSetLayoutBinding<'static>],
     ) -> ResultAny<vk::DescriptorSetLayout> {
-        let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(bindings);
-        // TODO: think about descriptor indexing
-        // let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&[vk::DescriptorBindingFlags::PARTIALLY_BOUND | vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT])
-        // info.push_next(&mut binding_flags)
-        // vk::DescriptorSetVariableDescriptorCountAllocateInfo::default().descriptor_counts(&[]);
-        let dslbs = DSLBindings(bindings.iter().map(|binding| binding.into()).collect());
-        Ok(*self.dsls.lock().unwrap().entry(dslbs).or_insert(unsafe {
-            self.device()
-                .create_descriptor_set_layout(&info, self.device.allocation_callbacks().as_ref())?
-        }))
+        let mut key: Vec<DSLBinding> = bindings.iter().map(|b| b.into()).collect();
+        // sort bindings. ensures [A, B] and [B, A] result in the same cache hit
+        key.sort_unstable();
+        match self.cache.lock().unwrap().entry(key) {
+            Entry::Occupied(e) => Ok(*e.get()),
+            Entry::Vacant(e) => {
+                // TODO: think about descriptor indexing and immutable samplers
+                // let binding_flags = vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&[vk::DescriptorBindingFlags::PARTIALLY_BOUND | vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT])
+                // info.push_next(&mut binding_flags)
+                // vk::DescriptorSetVariableDescriptorCountAllocateInfo::default().descriptor_counts(&[]);
+                let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(bindings);
+
+                // Create the handle
+                let layout = unsafe {
+                    self.device().create_descriptor_set_layout(
+                        &info,
+                        self.device.allocation_callbacks().as_ref(),
+                    )?
+                };
+
+                e.insert(layout);
+                Ok(layout)
+            }
+        }
     }
 
     pub(crate) fn device(&self) -> &ash::Device {
@@ -75,7 +90,7 @@ impl DSLManager {
 
 impl Drop for DSLManager {
     fn drop(&mut self) {
-        for &dsl in self.dsls.lock().unwrap().values() {
+        for &dsl in self.cache.lock().unwrap().values() {
             if !dsl.is_null() {
                 unsafe {
                     self.device.device.destroy_descriptor_set_layout(
@@ -87,19 +102,3 @@ impl Drop for DSLManager {
         }
     }
 }
-
-#[derive(Hash)]
-struct DSLBindings(Vec<DSLBinding>);
-
-impl PartialEq for DSLBindings {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.len() == other.0.len() && self.0.iter().zip(other.0.iter()).all(|(a, b)| {
-            a.binding == b.binding
-                && a.desc_ty == b.desc_ty
-                && a.descriptor_count == b.descriptor_count
-                && a.stage_flags == b.stage_flags
-        })
-    }
-}
-
-impl Eq for DSLBindings {}

@@ -1,4 +1,4 @@
-use std::{cell::OnceCell, collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, path::Path, sync::Arc, sync::OnceLock};
 
 use ash::vk;
 use rspirv_reflect::{
@@ -177,7 +177,7 @@ pub(crate) struct VertexInput {
 
 pub(crate) struct Shader {
     shaders: Vec<(CompiledShader, vk::ShaderModule)>,
-    set_bindings: OnceCell<BTreeMap<u32, BTreeMap<u32, vk::DescriptorSetLayoutBinding<'static>>>>,
+    set_bindings: OnceLock<BTreeMap<u32, BTreeMap<u32, vk::DescriptorSetLayoutBinding<'static>>>>,
     device: Arc<Device>,
 }
 
@@ -201,7 +201,7 @@ impl Shader {
 
         Ok(Self {
             shaders,
-            set_bindings: OnceCell::new(),
+            set_bindings: OnceLock::new(),
             device: Arc::clone(device),
         })
     }

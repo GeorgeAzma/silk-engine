@@ -10,8 +10,6 @@ mod sfx;
 mod util;
 mod vulkan;
 
-pub use engine::App;
-
 const OS: &str = if cfg!(target_os = "linux") {
     "linux"
 } else if cfg!(target_os = "windows") {

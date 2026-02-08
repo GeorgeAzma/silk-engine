@@ -5,6 +5,7 @@ use winit::event::{Force, WindowEvent};
 pub type Key = winit::keyboard::KeyCode;
 pub type Mouse = winit::event::MouseButton;
 
+#[derive(bevy_ecs::resource::Resource)]
 pub struct Input {
     /// press state for each mouse button
     mouse: [bool; 5],
@@ -46,6 +47,12 @@ pub struct Input {
     focus_old: bool,
 }
 
+impl Default for Input {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Input {
     pub fn new() -> Self {
         Self {
@@ -76,7 +83,7 @@ impl Input {
         }
     }
 
-    pub fn event(&mut self, event: &WindowEvent, window_x: i32, window_y: i32) {
+    pub fn event(&mut self, event: &WindowEvent, window_x: i32, window_y: i32, window_height: u32) {
         match event {
             WindowEvent::CursorMoved {
                 device_id: _,
@@ -86,13 +93,13 @@ impl Input {
                 self.screen_mouse_y_old = self.screen_mouse_y;
 
                 self.screen_mouse_x = window_x as f32 + position.x as f32;
-                self.screen_mouse_y = window_y as f32 + position.y as f32;
+                self.screen_mouse_y = window_y as f32 + (window_height as f32 - position.y as f32);
 
                 self.mouse_x_old = self.mouse_x;
                 self.mouse_x = position.x as f32;
 
                 self.mouse_y_old = self.mouse_y;
-                self.mouse_y = position.y as f32;
+                self.mouse_y = window_height as f32 - position.y as f32;
             }
             WindowEvent::MouseInput {
                 device_id: _,
@@ -129,7 +136,7 @@ impl Input {
             }
             WindowEvent::Touch(touch) => {
                 let x = touch.location.x as f32;
-                let y = touch.location.y as f32;
+                let y = window_height as f32 - touch.location.y as f32;
                 self.mouse_x_old = self.mouse_x;
                 self.mouse_y_old = self.mouse_y;
                 self.mouse_x = x;

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
-pub trait AllocHandler: Send {
+pub trait AllocHandler: Send + Sync {
     fn on_alloc(
         &mut self,
         ptr: *mut c_void,

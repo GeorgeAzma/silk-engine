@@ -76,11 +76,9 @@ impl Font {
                 _ => {
                     if let Some(glyph) = self.uni2glyph.get(&c) {
                         let is_cjk = self.is_char_cjk(c);
-                        if !is_cjk {
-                            if let Some(prev_glyph) = self.uni2glyph.get(&prev_c) {
-                                let kerning = self.kerning(prev_glyph, glyph);
-                                x += self.em(kerning);
-                            }
+                        if !is_cjk && let Some(prev_glyph) = self.uni2glyph.get(&prev_c) {
+                            let kerning = self.kerning(prev_glyph, glyph);
+                            x += self.em(kerning);
                         }
                         let m = &glyph.metric;
                         let x_off = self.em(m.xmin);

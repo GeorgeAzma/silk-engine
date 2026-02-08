@@ -70,12 +70,19 @@ impl Source {
     }
 }
 
+#[derive(bevy_ecs::resource::Resource)]
 pub struct Sfx {
     stream: Stream,
     config: StreamConfig,
     /// sound samples for each active sound
     sources: Arc<Mutex<Vec<Source>>>,
     uid: AtomicUsize,
+}
+
+impl Default for Sfx {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Sfx {

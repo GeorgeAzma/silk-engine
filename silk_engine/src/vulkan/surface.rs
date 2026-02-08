@@ -155,7 +155,7 @@ impl Surface {
         let window_handle = window.window_handle()?;
         let display_handle = window.display_handle()?;
 
-        let vulkan = &physical_device.vulkan();
+        let vulkan = physical_device.vulkan();
 
         let surface = unsafe {
             create_surface(
