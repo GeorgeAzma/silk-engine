@@ -933,8 +933,7 @@ impl Gfx {
             );
             self.atlas
                 .transition(cmd, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
-            self.command_manager
-                .submit(self.queue, cmd, &[], &[], &[])?;
+            self.command_manager.submit(self.queue, cmd, &[], &[])?;
             self.command_manager.wait(cmd)?;
         }
         Ok(())
@@ -1075,9 +1074,16 @@ impl Gfx {
             .submit(
                 self.queue,
                 cmd,
-                std::slice::from_ref(&frame.wait_semaphore),
-                std::slice::from_ref(&frame.signal_semaphore),
-                &[vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT],
+                std::slice::from_ref(
+                    &vk::SemaphoreSubmitInfo::default()
+                        .semaphore(frame.wait_semaphore)
+                        .stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT),
+                ),
+                std::slice::from_ref(
+                    &vk::SemaphoreSubmitInfo::default()
+                        .semaphore(frame.signal_semaphore)
+                        .stage_mask(vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT),
+                ),
             )
             .unwrap();
 

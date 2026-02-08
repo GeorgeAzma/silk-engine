@@ -231,7 +231,7 @@ impl Image {
         );
 
         let queue = self.device().get_queue(queue_family_index, 0);
-        cmd_manager.submit(queue, cmd, &[], &[], &[])?;
+        cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
 
         Ok(())
@@ -269,7 +269,7 @@ impl Image {
         );
 
         let queue = self.device().get_queue(queue_family_index, 0);
-        cmd_manager.submit(queue, cmd, &[], &[], &[])?;
+        cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
 
         staging_buffer.read_mapped(data);
@@ -318,7 +318,7 @@ impl Image {
         self.copy_from_buffer_cmd(cmd, source, regions);
 
         let queue = self.device().get_queue(queue_family_index, 0);
-        cmd_manager.submit(queue, cmd, &[], &[], &[])?;
+        cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
         Ok(())
     }
@@ -382,7 +382,7 @@ impl Image {
         self.copy_to_buffer_cmd(cmd, dest, regions);
 
         let queue = self.device().get_queue(queue_family_index, 0);
-        cmd_manager.submit(queue, cmd, &[], &[], &[])?;
+        cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
         Ok(())
     }
@@ -466,7 +466,10 @@ fn layout_to_stage_access(
     is_dst: bool,
 ) -> (vk::PipelineStageFlags2, vk::AccessFlags2) {
     match layout {
-        vk::ImageLayout::UNDEFINED => (vk::PipelineStageFlags2::NONE, vk::AccessFlags2::NONE),
+        vk::ImageLayout::UNDEFINED => (
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::NONE,
+        ),
         vk::ImageLayout::GENERAL => (
             vk::PipelineStageFlags2::ALL_COMMANDS,
             vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE,
@@ -501,7 +504,10 @@ fn layout_to_stage_access(
             vk::PipelineStageFlags2::TRANSFER,
             vk::AccessFlags2::TRANSFER_WRITE,
         ),
-        vk::ImageLayout::PRESENT_SRC_KHR => (vk::PipelineStageFlags2::NONE, vk::AccessFlags2::NONE),
+        vk::ImageLayout::PRESENT_SRC_KHR => (
+            vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            vk::AccessFlags2::NONE,
+        ),
         _ => (
             vk::PipelineStageFlags2::ALL_COMMANDS,
             vk::AccessFlags2::MEMORY_READ | vk::AccessFlags2::MEMORY_WRITE,

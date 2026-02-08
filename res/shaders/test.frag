@@ -15,32 +15,21 @@ layout(location = 11) flat in float superellipse;
 
 layout(location = 0) out vec4 out_color;
 
-float superellipse_corner(vec2 p, float r, float n) {
-    p = abs(p);
-    float v = pow(pow(p.x, n) + pow(p.y, n), 1.0 / n);
-    return v - r;
+float superellipse_sdf(vec2 p, vec2 size, float r, float n) {
+    p = abs(p) - size + r;
+    if(all(greaterThan(p, vec2(0))))
+        return pow(dot(pow(p, vec2(n)), vec2(1)), 1.0 / n) - r;
+    return max(p.x, p.y) - r;
 }
 
-float superellipse_sdf(vec2 p, vec2 size, float corner_radius, float n) {
-    vec2 d = abs(p) - size;
-    if(d.x > -corner_radius && d.y > -corner_radius) {
-        vec2 corner_center = sign(p) * (size - vec2(corner_radius));
-        return superellipse_corner(p - corner_center, corner_radius, n);
-    } else {
-        return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+vec2 superellipse_grad(vec2 p, vec2 size, float r, float n) {
+    vec2 q = abs(p) - size + r;
+    if(all(greaterThan(q, vec2(0)))) {
+        vec2 pw = pow(q, vec2(n));
+        return pw / (q + 0.005 * sign(q)) * pow(dot(pw, vec2(1)), 1.0 / n - 1.0) * sign(p);
     }
-}
-
-float elongate(vec2 p, float r, vec2 h) {
-    vec2 q = abs(p) - h;
-    return superellipse_sdf(sign(p) * max(q, vec2(0)), vec2(1), r, exp2(superellipse)) + min(max(q.x, q.y), 0.0);
-}
-
-float elongated_rrect(vec2 p, float r, vec2 h) {
-    return elongate(p, r, h);
-    vec2 q = abs(p) - h;
-    vec2 a = max(q, vec2(0)) - 1.0 + r;
-    return length(max(a, vec2(0))) + min(max(a.x, a.y), 0.0) - r + min(max(q.x, q.y), 0.0);
+    float g = step(q.y, q.x);
+    return vec2(g, 1.0 - g) * sign(p);
 }
 
 vec3 lrgb2srgb(vec3 lrgb) {
@@ -48,11 +37,10 @@ vec3 lrgb2srgb(vec3 lrgb) {
 }
 
 vec4 oklab_mix(vec4 lin1, vec4 lin2, float a) {
-    if(a <= 0.0) {
+    if(a <= 0.0)
         return lin1;
-    } else if(a >= 1.0) {
+    else if(a >= 1.0)
         return lin2;
-    }
     mat3 cone2lms = mat3(0.4121656120, 0.2118591070, 0.0883097947, 0.5362752080, 0.6807189584, 0.2818474174, 0.0514575653, 0.1074065790, 0.6302613616);
     mat3 lms2cone = mat3(4.0767245293, -1.2681437731, -0.0041119885, -3.3072168827, 2.6093323231, -0.7034763098, 0.2307590544, -0.3411344290, 1.7068625689);
     vec3 lms1 = pow(cone2lms * lin1.rgb, vec3(1.0 / 3.0));
@@ -91,8 +79,10 @@ vec2 render(vec2 off, float blur) {
     }
     // primitive rendering
     else {
-        float r = elongated_rrect(uv * scale, roundness, scale - 1.0);
-        float d = length(vec2(dFdx(r), dFdy(r)));
+        vec2 uvs = uv * scale;
+        float r = superellipse_sdf(uvs, scale, roundness, superellipse);
+        vec2 gd = superellipse_grad(uvs, scale, roundness, superellipse);
+        float d = length(vec2(dot(gd, dFdx(uvs)), dot(gd, dFdy(uvs))));
         float edge = clamp(1.0 - roundness - r / mix(d, 0.5, blur), 0.0, 1.0);
         float strk = (stroke_width < 0.001 && blur >= 0.0) ? 0.0 : clamp((r + stroke_width * 1.05) / mix(d, 0.5, stroke_blur + blur), 0.0, 1.0);
         return vec2(edge, strk);

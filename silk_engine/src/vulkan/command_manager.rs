@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ptr::null;
 use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 
@@ -91,9 +90,8 @@ impl CommandThreadData {
         &self,
         queue: vk::Queue,
         cmd: vk::CommandBuffer,
-        waits: &[vk::Semaphore],
-        signals: &[vk::Semaphore],
-        wait_dst_stage_mask: &[vk::PipelineStageFlags],
+        wait_info: &[vk::SemaphoreSubmitInfo],
+        signal_info: &[vk::SemaphoreSubmitInfo],
     ) -> ResultAny {
         let mut state = self.state.lock().unwrap();
 
@@ -115,25 +113,14 @@ impl CommandThreadData {
         };
 
         unsafe {
-            self.device().device.queue_submit(
+            self.device().device.queue_submit2(
                 queue,
-                &[vk::SubmitInfo {
-                    wait_semaphore_count: waits.len() as u32,
-                    p_wait_semaphores: if waits.is_empty() {
-                        null()
-                    } else {
-                        waits.as_ptr()
-                    },
-                    signal_semaphore_count: signals.len() as u32,
-                    p_signal_semaphores: if signals.is_empty() {
-                        null()
-                    } else {
-                        signals.as_ptr()
-                    },
-                    ..Default::default()
-                }
-                .command_buffers(&[cmd])
-                .wait_dst_stage_mask(wait_dst_stage_mask)],
+                &[vk::SubmitInfo2::default()
+                    .wait_semaphore_infos(wait_info)
+                    .signal_semaphore_infos(signal_info)
+                    .command_buffer_infos(&[
+                        vk::CommandBufferSubmitInfo::default().command_buffer(cmd)
+                    ])],
                 fence,
             )
         }?;
@@ -265,12 +252,11 @@ impl CommandManager {
         &self,
         queue: vk::Queue,
         cmd: vk::CommandBuffer,
-        waits: &[vk::Semaphore],
-        signals: &[vk::Semaphore],
-        wait_dst_stage_mask: &[vk::PipelineStageFlags],
+        wait_info: &[vk::SemaphoreSubmitInfo],
+        signal_info: &[vk::SemaphoreSubmitInfo],
     ) -> ResultAny {
         self.get_thread_data()?
-            .submit(queue, cmd, waits, signals, wait_dst_stage_mask)
+            .submit(queue, cmd, wait_info, signal_info)
     }
 
     pub fn wait(&self, cmd: vk::CommandBuffer) -> ResultAny {

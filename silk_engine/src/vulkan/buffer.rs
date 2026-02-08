@@ -276,7 +276,7 @@ impl Buffer {
         self.copy_from_buffer_cmd(source, regions, cmd);
 
         let queue = self.device().get_queue(queue_family_index, 0);
-        cmd_manager.submit(queue, cmd, &[], &[], &[])?;
+        cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
         Ok(())
     }

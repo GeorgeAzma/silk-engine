@@ -12,8 +12,8 @@ fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
     gfx.load_img("cursor.qoi");
 
     let sfx = Sfx::new();
-    let mut src = sfx.load("steingen");
-    sfx.play(&mut src);
+    // let mut src = sfx.load("steingen");
+    // sfx.play(&mut src);
 
     cmd.insert_resource(window);
     cmd.insert_resource(Input::new());
@@ -27,7 +27,7 @@ fn update(mut gfx: ResMut<Gfx>, mut input: ResMut<Input>, mut window: ResMut<Win
         std::process::exit(0);
     }
 
-    gfx.gradient_dir = 0.1;
+    gfx.gradient_dir = 0.0;
     gfx.rgb(255, 0, 0);
     gfx.gradient_rgb(255, 255, 0);
     gfx.rect(Pc(0.2), Pc(0.8), Pc(0.1), Pc(0.1));
@@ -102,7 +102,7 @@ fn update(mut gfx: ResMut<Gfx>, mut input: ResMut<Input>, mut window: ResMut<Win
         + input.mouse_y() / window.height() as f32 * 2.0
         - 1.0)
         * 2.0;
-    gfx.stroke_width = 0.4;
+    gfx.stroke_width = 0.5;
     gfx.rrect(Px(730), Px(30), Px(150), Px(150), 1.0);
     gfx.rrect(Px(130), Px(30), Px(430), Px(150), 0.5);
     gfx.rrect(Px(30), Px(130), Px(60), Px(150), 0.2);

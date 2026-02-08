@@ -67,5 +67,5 @@ void main() {
     bool use_grad = abs(i_gradient_dir) < 1e9;
     gradient_color = use_grad ? gradient_color : color;
     gradient_dir = use_grad ? vec2(cos(i_gradient_dir), sin(i_gradient_dir)) : vec2(0);
-    superellipse = i_superellipse;
+    superellipse = exp2(i_superellipse);
 }
