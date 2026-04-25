@@ -11,7 +11,7 @@ use winit::{
 };
 
 use crate::{
-    util::print::{ConsoleSink, Logger, RotatingFileSink, set_global_logger},
+    util::print::{ConsoleSink, Level, Logger, RotatingFileSink, set_global_logger},
     vulkan::VulkanConfig,
 };
 
@@ -36,6 +36,7 @@ impl Default for EngineConfig {
     fn default() -> Self {
         Self {
             logger: Logger {
+                min_level: Level::Trace,
                 sinks: vec![
                     Arc::new(Mutex::new(ConsoleSink)),
                     Arc::new(Mutex::new(RotatingFileSink::new(

@@ -31,7 +31,9 @@ pub const WARN: &str = "\x1b[38;2;245;245;67m";
 pub const ERR: &str = "\x1b[38;2;241;76;76m";
 pub const FATAL: &str = "\x1b[38;2;241;76;76m";
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
+    #[default]
     Trace,
     Debug,
     Info,
@@ -154,12 +156,14 @@ impl Sink for RotatingFileSink {
 
 #[derive(Default, Clone)]
 pub struct Logger {
+    pub min_level: Level,
     pub sinks: Vec<Arc<Mutex<dyn Sink>>>,
 }
 
 impl Logger {
     pub fn new() -> Self {
         Self {
+            min_level: Level::Trace,
             ..Default::default()
         }
     }
@@ -167,12 +171,20 @@ impl Logger {
 
 impl Logger {
     pub fn log(&mut self, record: Record) {
+        if record.level < self.min_level {
+            return;
+        }
+
         for sink in &mut self.sinks {
             sink.lock().unwrap().write(&record);
         }
     }
 
     pub fn log_to(&mut self, sink_name: &str, record: Record) {
+        if record.level < self.min_level {
+            return;
+        }
+
         for sink in &mut self.sinks {
             if sink.lock().unwrap().name() == sink_name {
                 sink.lock().unwrap().write(&record);

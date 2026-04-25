@@ -142,8 +142,11 @@ fn on_event(
 
 fn main() -> ResultAny {
     let mut app = App::new();
+    let mut engine_config = EngineConfig::default();
+    engine_config.logger.min_level = Level::Debug;
+
     app.add_plugins(Engine)
-        .insert_resource(EngineConfig::default())
+        .insert_resource(engine_config)
         .add_systems(Startup, init)
         .add_systems(Update, update)
         .add_observer(on_event);

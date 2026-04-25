@@ -3,6 +3,7 @@ pub use crate::{
     gfx::{Gfx, Unit::*},
     input::{Input, Key, Mouse},
     sfx::{AudioData, Sfx, Source},
+    util::print::Level,
     vulkan::{Vulkan, VulkanConfig, window::Window},
 };
 
