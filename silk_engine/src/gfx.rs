@@ -418,14 +418,14 @@ impl Gfx {
     pub fn create_window(
         &mut self,
         event_loop: &ActiveEventLoop,
-        mut attributes: WindowAttributes,
+        attributes: WindowAttributes,
     ) -> Window {
-        // Prevent white background flash during resize on Windows
-        #[cfg(target_os = "windows")]
-        {
-            use winit::platform::windows::WindowAttributesExtWindows;
-            attributes = attributes.with_no_redirection_bitmap(true);
-        }
+        // // Prevent white background flash during resize on Windows
+        // #[cfg(target_os = "windows")]
+        // {
+        //     use winit::platform::windows::WindowAttributesExtWindows;
+        //     attributes = attributes.with_no_redirection_bitmap(true);
+        // }
         let window = event_loop.create_window(attributes).unwrap();
         Window::new(&self.device, window, vec![], vec![]).unwrap()
     }
