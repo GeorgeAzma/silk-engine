@@ -1,4 +1,4 @@
-#![feature(box_as_ptr, macro_metavar_expr)]
+#![feature(macro_metavar_expr)]
 #![allow(dead_code)]
 
 pub mod prelude;
@@ -6,6 +6,8 @@ pub mod prelude;
 mod engine;
 mod gfx;
 mod input;
+#[cfg(feature = "midi")]
+mod midi;
 mod sfx;
 mod util;
 mod vulkan;

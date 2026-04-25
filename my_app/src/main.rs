@@ -21,6 +21,10 @@ fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
     cmd.insert_resource(sfx);
 }
 
+fn on_midi(event: On<MidiEvent>) {
+    println!("{:?}", event.event());
+}
+
 #[inline_tweak::tweak_fn]
 fn update(mut gfx: ResMut<Gfx>, mut input: ResMut<Input>, mut window: ResMut<Window>) {
     if input.key_pressed(Key::Escape) {
@@ -149,6 +153,8 @@ fn main() -> ResultAny {
         .insert_resource(engine_config)
         .add_systems(Startup, init)
         .add_systems(Update, update)
+        .add_plugins(MidiPlugin)
+        .add_observer(on_midi)
         .add_observer(on_event);
     app.run();
 

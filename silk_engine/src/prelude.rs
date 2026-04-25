@@ -7,6 +7,9 @@ pub use crate::{
     vulkan::{Vulkan, VulkanConfig, window::Window},
 };
 
+#[cfg(feature = "midi")]
+pub use crate::midi::{Midi, MidiEvent, MidiPlugin};
+
 pub use std::{collections::HashMap, error::Error};
 
 pub use winit::{
