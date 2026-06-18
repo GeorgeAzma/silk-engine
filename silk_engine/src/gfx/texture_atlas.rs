@@ -9,7 +9,7 @@ use crate::{
         font::Font,
         image_loader::ImageLoader,
         packer::{Guillotine, Packer, Rect},
-        tracked::Tracked,
+        dirty::Dirty,
     },
     vulkan::{buffer::Buffer, device::Device, image::Image},
 };
@@ -19,7 +19,7 @@ pub struct TextureAtlas {
     atlas_staging: Mutex<Arc<Buffer>>,
     atlas_staging_end: u64,
     packer: Guillotine,
-    pub(crate) imgs: HashMap<String, (u64, Tracked<&'static mut [u8]>, Rect)>,
+    pub(crate) imgs: HashMap<String, (u64, Dirty<&'static mut [u8]>, Rect)>,
     pub(crate) fonts: HashMap<String, (Font, HashMap<char, Rect>)>,
 }
 
@@ -65,7 +65,7 @@ impl TextureAtlas {
         name: &str,
         width: u32,
         height: u32,
-    ) -> (u64, &mut Tracked<&'static mut [u8]>, Rect) {
+    ) -> (u64, &mut Dirty<&'static mut [u8]>, Rect) {
         assert!(!self.imgs.contains_key(name), "img already in atlas");
         if let Some((x, y)) = self.packer.pack(width as u16, height as u16) {
             let (off, tracked, rect) = self.imgs.entry(name.to_string()).or_insert_with(|| {
@@ -80,7 +80,7 @@ impl TextureAtlas {
                 self.atlas_staging_end += size;
                 (
                     self.atlas_staging_end - size,
-                    Tracked::new(slice),
+                    Dirty::new(slice),
                     Rect::new(x, y, width as u16, height as u16),
                 )
             });
@@ -90,7 +90,7 @@ impl TextureAtlas {
         }
     }
 
-    pub fn load_img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
+    pub fn load_img(&mut self, name: &str) -> &mut Dirty<&'static mut [u8]> {
         let mut img_data = ImageLoader::load(name);
         if img_data.channels != 4 {
             img_data.img = ImageLoader::make4(&img_data.img, img_data.channels);
@@ -109,7 +109,7 @@ impl TextureAtlas {
         [0, 0]
     }
 
-    pub fn img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
+    pub fn img(&mut self, name: &str) -> &mut Dirty<&'static mut [u8]> {
         let img_data = self
             .imgs
             .get_mut(name)

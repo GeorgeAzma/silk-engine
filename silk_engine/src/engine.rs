@@ -59,71 +59,76 @@ pub struct Time {
     pub frame: u32,
 }
 
-pub struct Engine;
+impl Deref for Time {
+    type Target = f32;
 
-impl Engine {
-    fn setup(config: Res<EngineConfig>) {
-        std::panic::set_hook(Box::new(|panic_info| {
-            let panic = |err: &str| {
-                println!(
-                    "\x1b[38;2;241;76;76m{err}\n\x1b[2m{}\x1b[0m",
-                    crate::util::print::backtrace(2)
-                );
-            };
-            if let Some(&str) = panic_info.payload().downcast_ref::<&str>() {
-                panic(str);
-            } else if let Some(str) = panic_info.payload().downcast_ref::<String>() {
-                panic(str);
-            } else {
-                panic("")
-            }
-        }));
-
-        set_global_logger(config.logger.clone()).unwrap();
-
-        use std::fs::create_dir;
-        create_dir("res").unwrap_or_default();
-        create_dir("res/images").unwrap_or_default();
-        create_dir("res/shaders").unwrap_or_default();
-        create_dir("res/cache").unwrap_or_default();
-        create_dir("res/cache/shaders").unwrap_or_default();
-        create_dir("res/cache/vulkan").unwrap_or_default();
-    }
-
-    fn on_event(event: On<WindowEvent>, mut time: ResMut<Time>) {
-        if event.window_event == WinitEvent::RedrawRequested {
-            let elapsed = Instant::now() - time.start_time;
-            let new_time = elapsed.as_secs_f32();
-            let dt = new_time - time.time;
-            time.time = new_time;
-            time.frame += 1;
-            time.dt = dt;
-            time.fps = 1.0 / time.dt;
-        }
-    }
-
-    fn runner(app: App) -> AppExit {
-        let mut context = Context::new(app);
-        let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
-        event_loop.set_control_flow(ControlFlow::Poll);
-        event_loop.listen_device_events(DeviceEvents::WhenFocused);
-        event_loop.run_app(&mut context).unwrap();
-        AppExit::Success
+    fn deref(&self) -> &Self::Target {
+        &self.time
     }
 }
 
-impl Plugin for Engine {
+fn runner(app: App) -> AppExit {
+    let mut context = Context::new(app);
+    let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.listen_device_events(DeviceEvents::WhenFocused);
+    event_loop.run_app(&mut context).unwrap();
+    AppExit::Success
+}
+
+fn setup(config: Res<EngineConfig>) {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let panic = |err: &str| {
+            println!(
+                "\x1b[38;2;241;76;76m{err}\n\x1b[2m{}\x1b[0m",
+                crate::util::print::backtrace(2)
+            );
+        };
+        if let Some(&str) = panic_info.payload().downcast_ref::<&str>() {
+            panic(str);
+        } else if let Some(str) = panic_info.payload().downcast_ref::<String>() {
+            panic(str);
+        } else {
+            panic("")
+        }
+    }));
+
+    set_global_logger(config.logger.clone()).unwrap();
+
+    use std::fs::create_dir;
+    create_dir("res").unwrap_or_default();
+    create_dir("res/images").unwrap_or_default();
+    create_dir("res/shaders").unwrap_or_default();
+    create_dir("res/cache").unwrap_or_default();
+    create_dir("res/cache/shaders").unwrap_or_default();
+    create_dir("res/cache/vulkan").unwrap_or_default();
+}
+
+fn update_time(mut time: ResMut<Time>) {
+    let elapsed = Instant::now() - time.start_time;
+    let new_time = elapsed.as_secs_f32();
+    let dt = new_time - time.time;
+    time.time = new_time;
+    time.frame += 1;
+    time.dt = dt;
+    if time.dt > 1e-8 {
+        time.fps = 1.0 / time.dt;
+    }
+}
+
+pub struct EnginePlugin;
+impl Plugin for EnginePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Time {
             start_time: Instant::now(),
-            time: Default::default(),
-            dt: Default::default(),
-            fps: Default::default(),
-            frame: Default::default(),
+            time: 0.0,
+            dt: 0.0,
+            fps: 0.0,
+            frame: 0,
         })
-        .add_observer(Self::on_event)
-        .set_runner(Self::runner)
-        .add_systems(PreStartup, Self::setup);
+        .set_runner(runner)
+        .add_systems(PreStartup, setup)
+        .add_systems(PreUpdate, update_time);
     }
 }
 

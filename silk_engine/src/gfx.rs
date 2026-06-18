@@ -18,7 +18,7 @@ use crate::{
         shader::Shader,
         window::{Frame, Window},
     },
-    util::{image_loader::ImageLoader, font::Font, tracked::Tracked, packer::Rect},
+    util::{image_loader::ImageLoader, font::Font, dirty::Dirty, packer::Rect},
 };
 use ash::vk;
 use winit::{event_loop::ActiveEventLoop, window::WindowAttributes};
@@ -346,11 +346,11 @@ impl Gfx {
         name: &str,
         width: u32,
         height: u32,
-    ) -> (u64, &mut Tracked<&'static mut [u8]>, Rect) {
+    ) -> (u64, &mut Dirty<&'static mut [u8]>, Rect) {
         self.atlas.add_img(name, width, height)
     }
 
-    pub fn load_img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
+    pub fn load_img(&mut self, name: &str) -> &mut Dirty<&'static mut [u8]> {
         self.atlas.load_img(name)
     }
 
@@ -362,7 +362,7 @@ impl Gfx {
         self.draw.tex_coord = self.atlas.no_img_tex_coord();
     }
 
-    pub fn img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
+    pub fn img(&mut self, name: &str) -> &mut Dirty<&'static mut [u8]> {
         self.draw.tex_coord = self.atlas.img_tex_coord(name);
         self.atlas.img(name)
     }
@@ -613,6 +613,7 @@ impl Gfx {
             .unwrap();
 
         window.end_frame(self.queue, cmd);
+        window.request_redraw();
         self.draw.reset();
     }
 

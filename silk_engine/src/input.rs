@@ -58,140 +58,6 @@ impl Default for Input {
     }
 }
 
-fn on_event(event: On<WindowEvent>, query: Query<(&Window, &mut Input)>) {
-    use winit::event::WindowEvent;
-
-    for (window, mut input) in query {
-        match &event.window_event {
-            WindowEvent::CursorMoved {
-                device_id: _,
-                position,
-            } => {
-                input.screen_mouse_x_old = input.screen_mouse_x;
-                input.screen_mouse_y_old = input.screen_mouse_y;
-                input.screen_mouse_x = window.x() as f32 + position.x as f32;
-                input.screen_mouse_y = window.y() as f32 + (window.height() as f32 - position.y as f32);
-                input.mouse_x_old = input.mouse_x;
-                input.mouse_x = position.x as f32;
-                input.mouse_y_old = input.mouse_y;
-                input.mouse_y = window.height() as f32 - position.y as f32;
-            }
-            WindowEvent::MouseInput {
-                device_id: _,
-                state,
-                button,
-            } => {
-                let idx = Input::mouse_idx(*button);
-                if state.is_pressed() {
-                    input.pressure_old = input.pressure;
-                    input.pressure = 1.0;
-                    input.max_pressure = 1.0;
-                    input.angle = 0.0;
-                    input.mouse[idx] = true;
-                    input.mouse_press_x[idx] = input.mouse_x;
-                    input.mouse_press_y[idx] = input.mouse_y;
-                    input.screen_mouse_press_x[idx] = input.screen_mouse_x;
-                    input.screen_mouse_press_y[idx] = input.screen_mouse_y;
-                } else {
-                    input.mouse[idx] = false;
-                    input.pressure_old = input.pressure;
-                    input.pressure = 0.0;
-                }
-            }
-            WindowEvent::MouseWheel {
-                device_id: _,
-                delta,
-                phase: _,
-            } => {
-                use winit::event::MouseScrollDelta;
-                match delta {
-                    MouseScrollDelta::LineDelta(_, y) => input.mouse_scroll = *y,
-                    MouseScrollDelta::PixelDelta(p) => input.mouse_scroll = p.y as f32,
-                }
-            }
-            WindowEvent::Touch(touch) => {
-                let x = touch.location.x as f32;
-                let y = window.height() as f32 - touch.location.y as f32;
-                input.mouse_x_old = input.mouse_x;
-                input.mouse_y_old = input.mouse_y;
-                input.mouse_x = x;
-                input.mouse_y = y;
-                use winit::event::TouchPhase;
-                match touch.phase {
-                    TouchPhase::Started | TouchPhase::Moved => {
-                        let idx = Input::mouse_idx(Mouse::Left);
-                        if let Some(force) = touch.force {
-                            match force {
-                                Force::Calibrated {
-                                    force: pressure,
-                                    max_possible_force,
-                                    altitude_angle,
-                                } => {
-                                    input.pressure_old = input.pressure;
-                                    input.pressure = pressure as f32;
-                                    input.max_pressure = max_possible_force as f32;
-                                    input.angle = altitude_angle.unwrap_or(0.0) as f32;
-                                    input.mouse[idx] = true;
-                                    input.mouse_press_x[idx] = x;
-                                    input.mouse_press_y[idx] = y;
-                                    input.screen_mouse_press_x[idx] = window.x() as f32 + x;
-                                    input.screen_mouse_press_y[idx] = window.y() as f32 + y;
-                                    input.active_touches.insert(touch.id, (x, y, force));
-                                }
-                                Force::Normalized(pressure) => {
-                                    input.pressure_old = input.pressure;
-                                    input.pressure = pressure as f32;
-                                    input.max_pressure = 1.0;
-                                    input.angle = 0.0;
-                                    input.mouse[idx] = true;
-                                    input.mouse_press_x[idx] = x;
-                                    input.mouse_press_y[idx] = y;
-                                    input.screen_mouse_press_x[idx] = window.x() as f32 + x;
-                                    input.screen_mouse_press_y[idx] = window.y() as f32 + y;
-                                    let force = touch.force.unwrap();
-                                    input.active_touches.insert(touch.id, (x, y, force));
-                                }
-                            }
-                        } else {
-                            input.pressure_old = input.pressure;
-                            input.pressure = 0.0;
-                            input.max_pressure = 1.0;
-                            input.mouse[idx] = true;
-                            input.mouse_press_x[idx] = x;
-                            input.mouse_press_y[idx] = y;
-                            input.screen_mouse_press_x[idx] = window.x() as f32 + x;
-                            input.screen_mouse_press_y[idx] = window.y() as f32 + y;
-                        }
-                    }
-                    TouchPhase::Ended | TouchPhase::Cancelled => {
-                        let idx = Input::mouse_idx(Mouse::Left);
-                        input.mouse[idx] = false;
-                        input.pressure_old = input.pressure;
-                        input.pressure = 0.0;
-                        input.active_touches.remove(&touch.id);
-                    }
-                }
-            }
-            WindowEvent::KeyboardInput {
-                device_id: _,
-                event,
-                is_synthetic: _,
-            } => {
-                if let winit::keyboard::PhysicalKey::Code(key) = event.physical_key {
-                    input.key[key as usize] = event.state.is_pressed();
-                }
-            }
-            WindowEvent::Focused(focus) => {
-                input.focus = *focus;
-                if !input.focus {
-                    input.reset();
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
 impl Input {
     pub fn new() -> Self {
         Self {
@@ -400,9 +266,150 @@ impl Input {
     }
 }
 
+fn on_event(event: On<WindowEvent>, query: Query<(&Window, &mut Input)>) {
+    use winit::event::WindowEvent;
+
+    for (window, mut input) in query {
+        match &event.window_event {
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
+                input.screen_mouse_x_old = input.screen_mouse_x;
+                input.screen_mouse_y_old = input.screen_mouse_y;
+                input.screen_mouse_x = window.x() as f32 + position.x as f32;
+                input.screen_mouse_y =
+                    window.y() as f32 + (window.height() as f32 - position.y as f32);
+                input.mouse_x_old = input.mouse_x;
+                input.mouse_x = position.x as f32;
+                input.mouse_y_old = input.mouse_y;
+                input.mouse_y = window.height() as f32 - position.y as f32;
+            }
+            WindowEvent::MouseInput {
+                device_id: _,
+                state,
+                button,
+            } => {
+                let idx = Input::mouse_idx(*button);
+                if state.is_pressed() {
+                    input.pressure_old = input.pressure;
+                    input.pressure = 1.0;
+                    input.max_pressure = 1.0;
+                    input.angle = 0.0;
+                    input.mouse[idx] = true;
+                    input.mouse_press_x[idx] = input.mouse_x;
+                    input.mouse_press_y[idx] = input.mouse_y;
+                    input.screen_mouse_press_x[idx] = input.screen_mouse_x;
+                    input.screen_mouse_press_y[idx] = input.screen_mouse_y;
+                } else {
+                    input.mouse[idx] = false;
+                    input.pressure_old = input.pressure;
+                    input.pressure = 0.0;
+                }
+            }
+            WindowEvent::MouseWheel {
+                device_id: _,
+                delta,
+                phase: _,
+            } => {
+                use winit::event::MouseScrollDelta;
+                match delta {
+                    MouseScrollDelta::LineDelta(_, y) => input.mouse_scroll = *y,
+                    MouseScrollDelta::PixelDelta(p) => input.mouse_scroll = p.y as f32,
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                let x = touch.location.x as f32;
+                let y = window.height() as f32 - touch.location.y as f32;
+                input.mouse_x_old = input.mouse_x;
+                input.mouse_y_old = input.mouse_y;
+                input.mouse_x = x;
+                input.mouse_y = y;
+                use winit::event::TouchPhase;
+                match touch.phase {
+                    TouchPhase::Started | TouchPhase::Moved => {
+                        let idx = Input::mouse_idx(Mouse::Left);
+                        if let Some(force) = touch.force {
+                            match force {
+                                Force::Calibrated {
+                                    force: pressure,
+                                    max_possible_force,
+                                    altitude_angle,
+                                } => {
+                                    input.pressure_old = input.pressure;
+                                    input.pressure = pressure as f32;
+                                    input.max_pressure = max_possible_force as f32;
+                                    input.angle = altitude_angle.unwrap_or(0.0) as f32;
+                                    input.mouse[idx] = true;
+                                    input.mouse_press_x[idx] = x;
+                                    input.mouse_press_y[idx] = y;
+                                    input.screen_mouse_press_x[idx] = window.x() as f32 + x;
+                                    input.screen_mouse_press_y[idx] = window.y() as f32 + y;
+                                    input.active_touches.insert(touch.id, (x, y, force));
+                                }
+                                Force::Normalized(pressure) => {
+                                    input.pressure_old = input.pressure;
+                                    input.pressure = pressure as f32;
+                                    input.max_pressure = 1.0;
+                                    input.angle = 0.0;
+                                    input.mouse[idx] = true;
+                                    input.mouse_press_x[idx] = x;
+                                    input.mouse_press_y[idx] = y;
+                                    input.screen_mouse_press_x[idx] = window.x() as f32 + x;
+                                    input.screen_mouse_press_y[idx] = window.y() as f32 + y;
+                                    let force = touch.force.unwrap();
+                                    input.active_touches.insert(touch.id, (x, y, force));
+                                }
+                            }
+                        } else {
+                            input.pressure_old = input.pressure;
+                            input.pressure = 0.0;
+                            input.max_pressure = 1.0;
+                            input.mouse[idx] = true;
+                            input.mouse_press_x[idx] = x;
+                            input.mouse_press_y[idx] = y;
+                            input.screen_mouse_press_x[idx] = window.x() as f32 + x;
+                            input.screen_mouse_press_y[idx] = window.y() as f32 + y;
+                        }
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        let idx = Input::mouse_idx(Mouse::Left);
+                        input.mouse[idx] = false;
+                        input.pressure_old = input.pressure;
+                        input.pressure = 0.0;
+                        input.active_touches.remove(&touch.id);
+                    }
+                }
+            }
+            WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic: _,
+            } => {
+                if let winit::keyboard::PhysicalKey::Code(key) = event.physical_key {
+                    input.key[key as usize] = event.state.is_pressed();
+                }
+            }
+            WindowEvent::Focused(focus) => {
+                input.focus = *focus;
+                if !input.focus {
+                    input.reset();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn reset(query: Query<&mut Input>) {
+    for mut input in query {
+        input.reset();
+    }
+}
+
 pub struct InputPlugin;
 impl Plugin for InputPlugin {
     fn build(&self, app: &mut App) {
-        app.add_observer(on_event);
+        app.add_observer(on_event).add_systems(PostUpdate, reset);
     }
 }

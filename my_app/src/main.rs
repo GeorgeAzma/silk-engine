@@ -11,10 +11,7 @@ fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
 
     gfx.load_img("cursor.qoi");
 
-    cmd.spawn((
-        window,
-        Input::new(),
-    ));
+    cmd.spawn((window, Input::new()));
     cmd.insert_resource(gfx);
 }
 
@@ -23,8 +20,8 @@ fn on_midi(event: On<MidiEvent>) {
 }
 
 #[inline_tweak::tweak_fn]
-fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
-    let (mut window, mut input) = window.into_inner();
+fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>, time: Res<Time>) {
+    let (mut window, input) = window.into_inner();
 
     if input.key_pressed(Key::Escape) {
         std::process::exit(0);
@@ -51,7 +48,7 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
     gfx.stroke_width = 0.25;
     gfx.rgb(255, 255, 255);
     gfx.blur = 1.0;
-    gfx.circle(Pc(0.7), Pc(0.5), Pc(0.04));
+    gfx.circle(Pc(0.7), Pc(0.5 + time.sin() * 0.1), Pc(0.04));
 
     gfx.blur = -1.0;
     gfx.circle(Pc(0.8), Pc(0.5), Pc(0.04));
@@ -93,6 +90,7 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
         Px(190),
         Px(8),
     );
+    gfx.text(&((time.fps as f32).ema(0.001).round() as u32).to_string(), Pc(0.9), Pc(0.95), Px(14));
     gfx.rgb(255, 255, 255);
     gfx.no_gradient();
     gfx.font("zenmaru");
@@ -113,9 +111,6 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
     gfx.circle(Px(30), Px(530), Px(30));
 
     gfx.render(&mut window);
-
-    window.request_redraw();
-    input.reset();
 }
 
 fn on_event(
@@ -144,9 +139,7 @@ fn main() -> ResultAny {
     let mut engine_config = EngineConfig::default();
     engine_config.logger.min_level = Level::Debug;
 
-    app.add_plugins(Engine)
-        .add_plugins(InputPlugin)
-        .add_plugins(SfxPlugin)
+    app.add_plugins(DefaultPlugins)
         .add_plugins(MidiPlugin)
         .insert_resource(engine_config)
         .add_systems(Startup, init)
