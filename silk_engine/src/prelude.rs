@@ -4,7 +4,7 @@ pub use crate::{
     input::{Input, InputPlugin, Key, Mouse},
     sfx::{AudioData, Sfx, SfxPlugin, Source},
     util::print::Level,
-    vulkan::{Vulkan, VulkanConfig, window::{Window, WindowState}},
+    vulkan::{Vulkan, VulkanConfig, window::Window},
 };
 
 #[cfg(feature = "midi")]

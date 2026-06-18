@@ -13,7 +13,6 @@ use winit::{
 use crate::{
     util::print::{ConsoleSink, Level, Logger, RotatingFileSink, set_global_logger},
     vulkan::VulkanConfig,
-    vulkan::window::WindowState,
 };
 
 pub type WinitEvent = winit::event::WindowEvent;
