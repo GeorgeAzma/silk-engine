@@ -24,6 +24,7 @@ pub(crate) mod command_pool;
 pub(crate) mod device;
 pub(crate) mod ds_alloc;
 pub(crate) mod dsl_manager;
+pub(crate) mod gpu_context;
 pub(crate) mod image;
 pub(crate) mod physical_device;
 pub(crate) mod pipeline;
@@ -33,19 +34,10 @@ pub(crate) mod shader;
 pub(crate) mod surface;
 pub(crate) mod swapchain;
 pub(crate) mod window;
+pub(crate) mod raytrace;
 
 pub enum PhysicalDeviceUse {
     General,
-}
-
-pub enum QueueFamilyUse {
-    General,
-    Graphics,
-    Compute,
-    Transfer,
-    SparseBinding,
-    VideoDecode,
-    VideoEncode,
 }
 
 /// pretty prints vulkan errors/warnings with backtrace and logs info/verbose/general messages
@@ -378,7 +370,7 @@ impl Vulkan {
     pub fn best_queue_family_for(
         &self,
         queue_family_properties: &[vk::QueueFamilyProperties],
-        usecase: QueueFamilyUse,
+        flags: vk::QueueFlags,
     ) -> Option<u32> {
         self.best_queue_family(queue_family_properties, |props| {
             let supports = |queue_flags: vk::QueueFlags| {
@@ -388,17 +380,7 @@ impl Vulkan {
                     .then_some(props.queue_count)
             };
 
-            match usecase {
-                QueueFamilyUse::General => supports(
-                    vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
-                ),
-                QueueFamilyUse::Graphics => supports(vk::QueueFlags::GRAPHICS),
-                QueueFamilyUse::Compute => supports(vk::QueueFlags::COMPUTE),
-                QueueFamilyUse::Transfer => supports(vk::QueueFlags::TRANSFER),
-                QueueFamilyUse::SparseBinding => supports(vk::QueueFlags::SPARSE_BINDING),
-                QueueFamilyUse::VideoDecode => supports(vk::QueueFlags::VIDEO_DECODE_KHR),
-                QueueFamilyUse::VideoEncode => supports(vk::QueueFlags::VIDEO_ENCODE_KHR),
-            }
+            supports(flags)
         })
     }
 

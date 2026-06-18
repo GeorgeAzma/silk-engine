@@ -1,29 +1,26 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+pub(crate) mod draw_context;
+pub(crate) mod texture_atlas;
+
+pub use draw_context::DrawContext;
+pub use texture_atlas::TextureAtlas;
+
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     prelude::ResultAny,
-    util::{
-        font::Font,
-        image_loader::ImageLoader,
-        packer::{Guillotine, Packer, Rect},
-        tracked::Tracked,
-    },
     vulkan::{
-        PhysicalDeviceUse, QueueFamilyUse, Vulkan,
+        PhysicalDeviceUse, Vulkan,
         buffer::Buffer,
         command_manager::CommandManager,
         device::Device,
-        image::Image,
         physical_device::PhysicalDevice,
         pipeline::{Pipeline, PipelineConfig, PipelineLayout},
         shader::Shader,
         window::{Frame, Window},
     },
+    util::{image_loader::ImageLoader, font::Font, tracked::Tracked, packer::Rect},
 };
-use ash::vk::{self, BufferUsageFlags, ImageCreateInfo, MemoryPropertyFlags};
+use ash::vk;
 use winit::{event_loop::ActiveEventLoop, window::WindowAttributes};
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
@@ -121,60 +118,6 @@ impl Vertex {
     }
 }
 
-struct Instances {
-    inst_ptr: *mut Vertex,
-    inst_len: usize,
-    inst_cap: usize,
-    vertex_buffer: Arc<Buffer>,
-}
-
-unsafe impl Send for Instances {}
-unsafe impl Sync for Instances {}
-
-impl Instances {
-    fn new(device: &Arc<Device>, queue_family_index: u32, size: usize) -> ResultAny<Self> {
-        let vertex_buffer = Buffer::new(
-            device,
-            (size * size_of::<Vertex>()) as u64,
-            vk::BufferUsageFlags::VERTEX_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::TRANSFER_SRC,
-            &[queue_family_index],
-            vk::SharingMode::EXCLUSIVE,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-
-        let inst_ptr = vertex_buffer.map() as *mut Vertex;
-
-        Ok(Self {
-            inst_ptr,
-            inst_len: 0,
-            inst_cap: size,
-            vertex_buffer,
-        })
-    }
-
-    fn add(&mut self, vertex: Vertex) -> ResultAny {
-        unsafe {
-            self.inst_ptr.add(self.inst_len).write(vertex);
-        }
-        self.inst_len += 1;
-        if self.inst_len >= self.inst_cap {
-            let new_cap = (self.inst_len + 1).next_power_of_two();
-            let new_size = (new_cap * size_of::<Vertex>()) as vk::DeviceSize;
-            self.vertex_buffer = self.vertex_buffer.clone().resize(new_size)?;
-            self.inst_ptr = self.vertex_buffer.map() as *mut Vertex;
-            self.inst_cap = new_cap;
-        }
-
-        Ok(())
-    }
-
-    fn reset(&mut self) {
-        self.inst_len = 0;
-    }
-}
-
 #[derive(bevy_ecs::resource::Resource)]
 pub struct Gfx {
     pub(crate) physical_device: Arc<PhysicalDevice>,
@@ -186,53 +129,26 @@ pub struct Gfx {
     pipeline: Option<Pipeline>,
     pipeline_layout: Option<PipelineLayout>,
     uniform: Arc<Buffer>,
-    atlas: Arc<Image>,
     width: f32,
     height: f32,
-
-    pub color: [u8; 4],
-    /// negative for text
-    pub roundness: f32,
-    pub rotation: f32,
-    pub stroke_width: f32,
-    pub stroke_color: [u8; 4],
-    /// [-1, 0, 1] = [thin, normal, bold]
-    pub bold: f32,
-    /// negative = glow
-    pub blur: f32,
-    pub stroke_blur: f32,
-    pub gradient: [u8; 4],
-    /// f32::MAX = gradient
-    pub gradient_dir: f32,
-    // k<0: cut; k=0: beveled; k=1: rounded; k=2: squircle; k=∞ square;
-    pub superellipse: f32,
-    /// packed whxy
-    tex_coord: [u32; 2],
-    font: String,
-    old_color: [u8; 4],
-    old_roundness: f32,
-    old_rotation: f32,
-    old_stroke_width: f32,
-    old_stroke_color: [u8; 4],
-    old_bold: f32,
-    old_blur: f32,
-    old_stroke_blur: f32,
-    old_gradient: [u8; 4],
-    old_gradient_dir: f32,
-    old_superellipse: f32,
-    old_tex_coord: [u32; 2],
-    old_font: String,
-
-    areas: Vec<[f32; 4]>,
-    packer: Guillotine,
-    imgs: HashMap<String, (u64, Tracked<&'static mut [u8]>, Rect)>,
-    fonts: HashMap<String, (Font, HashMap<char, Rect>)>,
-
-    instances: Instances,
-    atlas_staging: Mutex<Arc<Buffer>>,
-    atlas_staging_end: u64,
     descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     descriptor_sets: Vec<vk::DescriptorSet>,
+
+    pub draw: DrawContext,
+    pub atlas: TextureAtlas,
+}
+
+impl std::ops::Deref for Gfx {
+    type Target = DrawContext;
+    fn deref(&self) -> &Self::Target {
+        &self.draw
+    }
+}
+
+impl std::ops::DerefMut for Gfx {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.draw
+    }
 }
 
 impl Gfx {
@@ -244,7 +160,7 @@ impl Gfx {
         let queue_family_index = vulkan
             .best_queue_family_for(
                 &physical_device.queue_family_properties,
-                QueueFamilyUse::General,
+                vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
             )
             .ok_or("no suitable Queue Family found")?;
 
@@ -267,11 +183,27 @@ impl Gfx {
             .synchronization2(true)
             .dynamic_rendering(true);
 
+        let mut ray_tracing_pipeline_features =
+            vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default().ray_tracing_pipeline(true);
+        let mut acceleration_structure_features =
+            vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
+                .acceleration_structure(true);
+        let mut buffer_device_address_features =
+            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+
         let mut enabled_device_features = vk::PhysicalDeviceFeatures2::default()
             .push_next(&mut descriptor_indexing)
-            .push_next(&mut features13);
+            .push_next(&mut features13)
+            .push_next(&mut ray_tracing_pipeline_features)
+            .push_next(&mut acceleration_structure_features)
+            .push_next(&mut buffer_device_address_features);
 
-        let enabled_device_extensions = [ash::khr::swapchain::NAME.as_ptr()];
+        let enabled_device_extensions = [
+            ash::khr::swapchain::NAME.as_ptr(),
+            ash::khr::deferred_host_operations::NAME.as_ptr(),
+            ash::khr::acceleration_structure::NAME.as_ptr(),
+            ash::khr::ray_tracing_pipeline::NAME.as_ptr(),
+        ];
 
         let device_info = vk::DeviceCreateInfo::default()
             .queue_create_infos(&queue_create_infos)
@@ -296,25 +228,8 @@ impl Gfx {
             vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
         )?;
 
-        let packer = Guillotine::new(4096, 4096);
-
-        let atlas = Image::new(
-            &device,
-            &ImageCreateInfo::default()
-                .image_type(vk::ImageType::TYPE_2D)
-                .extent(vk::Extent3D {
-                    width: packer.width() as u32,
-                    height: packer.height() as u32,
-                    depth: 1,
-                })
-                .format(vk::Format::R8G8B8A8_UNORM)
-                .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED),
-            vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        )?;
-
-        let atlas_staging_size = packer.width() as u64 * packer.height() as u64 * 4;
-
-        let atlas_view = atlas.create_view()?;
+        let atlas = TextureAtlas::new(&device, queue_family_index)?;
+        let atlas_view = atlas.atlas_image().create_view()?;
         let atlas_sampler = device.get_sampler(
             vk::SamplerAddressMode::REPEAT,
             vk::SamplerAddressMode::REPEAT,
@@ -354,6 +269,8 @@ impl Gfx {
                 .update_descriptor_sets(&[ds_write_uniform, ds_write_atlas], &[])
         };
 
+        let draw = DrawContext::new(&device, queue_family_index)?;
+
         Ok(Self {
             physical_device,
             device: device.clone(),
@@ -364,54 +281,12 @@ impl Gfx {
             pipeline: None,
             pipeline_layout: None,
             uniform,
-            atlas,
             width: 0.0,
             height: 0.0,
-
-            color: [255, 255, 255, 255],
-            roundness: 0.0,
-            rotation: 0.0,
-            stroke_width: 0.0,
-            stroke_color: [0, 0, 0, 0],
-            bold: 0.0,
-            blur: 0.0,
-            stroke_blur: 0.0,
-            gradient: [255, 255, 255, 255],
-            gradient_dir: f32::MAX,
-            superellipse: 2.0,
-            tex_coord: [0, 0],
-            font: String::new(),
-            old_color: [255, 255, 255, 255],
-            old_roundness: 0.0,
-            old_rotation: 0.0,
-            old_stroke_width: 0.0,
-            old_stroke_color: [0, 0, 0, 0],
-            old_bold: 0.0,
-            old_blur: 0.0,
-            old_stroke_blur: 0.0,
-            old_gradient: [255, 255, 255, 255],
-            old_gradient_dir: f32::MAX,
-            old_superellipse: f32::MAX,
-            old_tex_coord: [0, 0],
-            old_font: String::new(),
-
-            areas: vec![],
-            packer, // TODO: resizable packer
-            imgs: HashMap::new(),
-            fonts: HashMap::new(),
-
-            instances: Instances::new(&device, queue_family_index, 1024)?,
-            atlas_staging: Mutex::new(Buffer::new(
-                &device,
-                atlas_staging_size,
-                BufferUsageFlags::TRANSFER_SRC | BufferUsageFlags::TRANSFER_DST,
-                &[queue_family_index],
-                vk::SharingMode::EXCLUSIVE,
-                MemoryPropertyFlags::HOST_VISIBLE | MemoryPropertyFlags::HOST_COHERENT,
-            )?),
-            atlas_staging_end: 0,
             descriptor_set_layouts,
             descriptor_sets,
+            draw,
+            atlas,
         })
     }
 
@@ -420,80 +295,50 @@ impl Gfx {
         event_loop: &ActiveEventLoop,
         attributes: WindowAttributes,
     ) -> Window {
-        // // Prevent white background flash during resize on Windows
-        // #[cfg(target_os = "windows")]
-        // {
-        //     use winit::platform::windows::WindowAttributesExtWindows;
-        //     attributes = attributes.with_no_redirection_bitmap(true);
-        // }
         let window = event_loop.create_window(attributes).unwrap();
         Window::new(&self.device, window, vec![], vec![]).unwrap()
     }
 
-    pub fn alpha(&mut self, a: u8) {
-        self.color[3] = a;
-    }
+    // Delegate drawing methods to DrawContext
+    pub fn alpha(&mut self, a: u8) { self.draw.alpha(a); }
+    pub fn rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.rgb(r, g, b); }
+    pub fn rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.rgba(r, g, b, a); }
+    pub fn hex(&mut self, hex: u32) { self.draw.hex(hex); }
+    pub fn glow(&mut self, glow: f32) { self.draw.glow(glow); }
+    pub fn stroke_alpha(&mut self, a: u8) { self.draw.stroke_alpha(a); }
+    pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.stroke_rgb(r, g, b); }
+    pub fn stroke_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.stroke_rgba(r, g, b, a); }
+    pub fn stroke_hex(&mut self, hex: u32) { self.draw.stroke_hex(hex); }
+    pub fn gradient_alpha(&mut self, a: u8) { self.draw.gradient_alpha(a); }
+    pub fn gradient_rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.gradient_rgb(r, g, b); }
+    pub fn gradient_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.gradient_rgba(r, g, b, a); }
+    pub fn gradient_hex(&mut self, hex: u32) { self.draw.gradient_hex(hex); }
+    pub fn no_gradient(&mut self) { self.draw.no_gradient(); }
+    pub fn font(&mut self, font: &str) { self.draw.font(font); }
 
-    pub fn rgb(&mut self, r: u8, g: u8, b: u8) {
-        self.color = [r, g, b, 255];
-    }
+    pub fn rectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.rectc(x, y, w, h); }
+    pub fn rect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.rect(x, y, w, h); }
+    pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) { self.draw.rrectc(x, y, w, h, r); }
+    pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) { self.draw.rrect(x, y, w, h, r); }
+    pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) { self.draw.squarec(x, y, w); }
+    pub fn square(&mut self, x: Unit, y: Unit, w: Unit) { self.draw.square(x, y, w); }
+    pub fn rsquare(&mut self, x: Unit, y: Unit, w: Unit, r: f32) { self.draw.rsquare(x, y, w, r); }
+    pub fn rsquarec(&mut self, x: Unit, y: Unit, w: Unit, r: f32) { self.draw.rsquarec(x, y, w, r); }
+    pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) { self.draw.aabb(x0, y0, x1, y1); }
+    pub fn circle(&mut self, x: Unit, y: Unit, r: Unit) { self.draw.circle(x, y, r); }
+    pub fn line(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) { self.draw.line(x0, y0, x1, y1, w); }
+    pub fn rline(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) { self.draw.rline(x0, y0, x1, y1, w); }
+    pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) { self.draw.bezier(x0, y0, x1, y1, x2, y2, w); }
+    pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.area(x, y, w, h); }
+    pub fn push_area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.push_area(x, y, w, h); }
+    pub fn pop_area(&mut self) { self.draw.pop_area(); }
+    pub fn begin_temp(&mut self) { self.draw.begin_temp(); }
+    pub fn end_temp(&mut self) { self.draw.end_temp(); }
 
-    pub fn rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
-        self.color = [r, g, b, a];
-    }
-
-    pub fn hex(&mut self, hex: u32) {
-        self.color = hex.to_be_bytes()
-    }
-
-    pub fn glow(&mut self, glow: f32) {
-        self.blur = -glow;
-    }
-
-    pub fn stroke_alpha(&mut self, a: u8) {
-        self.stroke_color[3] = a;
-    }
-
-    pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) {
-        self.stroke_color = [r, g, b, 255];
-    }
-
-    pub fn stroke_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
-        self.stroke_color = [r, g, b, a];
-    }
-
-    pub fn stroke_hex(&mut self, hex: u32) {
-        self.stroke_color = hex.to_be_bytes()
-    }
-
-    pub fn gradient_alpha(&mut self, a: u8) {
-        self.gradient[3] = a;
-    }
-
-    pub fn gradient_rgb(&mut self, r: u8, g: u8, b: u8) {
-        self.gradient = [r, g, b, 255];
-    }
-
-    pub fn gradient_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
-        self.gradient = [r, g, b, a];
-    }
-
-    pub fn gradient_hex(&mut self, hex: u32) {
-        self.gradient = hex.to_be_bytes()
-    }
-
-    pub fn no_gradient(&mut self) {
-        self.gradient_dir = f32::MAX;
-    }
-
-    pub fn font(&mut self, font: &str) {
-        self.font = font.to_string();
-    }
-
+    // Delegate atlas methods to TextureAtlas
     pub fn add_font(&mut self, name: &str) {
-        let font = Font::new(name);
-        self.font = name.to_string();
-        self.fonts.insert(self.font.clone(), (font, HashMap::new()));
+        self.atlas.add_font(name);
+        self.draw.font = name.to_string();
     }
 
     pub fn add_img(
@@ -502,270 +347,54 @@ impl Gfx {
         width: u32,
         height: u32,
     ) -> (u64, &mut Tracked<&'static mut [u8]>, Rect) {
-        assert!(!self.imgs.contains_key(name), "img already in atlas");
-        if let Some((x, y)) = self.packer.pack(width as u16, height as u16) {
-            let (off, tracked, rect) = self.imgs.entry(name.to_string()).or_insert_with(|| {
-                let size = width as u64 * height as u64 * 4;
-                let ptr = self.atlas_staging.lock().unwrap().map();
-                let slice = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        ptr.add(self.atlas_staging_end as usize),
-                        size as usize,
-                    )
-                };
-                self.atlas_staging_end += size;
-                (
-                    self.atlas_staging_end - size,
-                    Tracked::new(slice),
-                    Rect::new(x, y, width as u16, height as u16),
-                )
-            });
-            (*off, tracked, *rect)
-        } else {
-            panic!("failed to add img to atlas, out of space")
-        }
+        self.atlas.add_img(name, width, height)
     }
 
     pub fn load_img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
-        let mut img_data = ImageLoader::load(name);
-        if img_data.channels != 4 {
-            img_data.img = ImageLoader::make4(&img_data.img, img_data.channels);
-        }
-        let tracked_img_data = self.add_img(name, img_data.width, img_data.height).1;
-        tracked_img_data.copy_from_slice(&img_data.img);
-        tracked_img_data
+        self.atlas.load_img(name)
     }
 
     pub fn atlas(&mut self) {
-        let r = Rect::new(0, 0, self.packer.width(), self.packer.height()).packed_whxy();
-        self.tex_coord = [(r >> 32) as u32, r as u32];
+        self.draw.tex_coord = self.atlas.atlas_tex_coord();
     }
 
     pub fn no_img(&mut self) {
-        self.tex_coord = [0, 0];
+        self.draw.tex_coord = self.atlas.no_img_tex_coord();
     }
 
     pub fn img(&mut self, name: &str) -> &mut Tracked<&'static mut [u8]> {
-        let img_data = self
-            .imgs
-            .get_mut(name)
-            .unwrap_or_else(|| panic!("img not found in atlas: {name}"));
-        let r = img_data.2.packed_whxy();
-        self.tex_coord = [(r >> 32) as u32, r as u32];
-        &mut img_data.1
+        self.draw.tex_coord = self.atlas.img_tex_coord(name);
+        self.atlas.img(name)
     }
 
     pub fn img_data(&self, name: &str) -> (&[u8], u32, u32) {
-        let img_data = self
-            .imgs
-            .get(name)
-            .unwrap_or_else(|| panic!("img not found in atlas: {name}"));
-        let (w, h) = img_data.2.wh();
-        (&img_data.1, w as u32, h as u32)
-    }
-
-    fn pc_x(&self, unit: Unit) -> f32 {
-        match unit {
-            Unit::Px(px) => px as f32 / self.width,
-            Unit::Mn(mn) => mn * self.width.min(self.height) / self.width,
-            Unit::Mx(mx) => mx * self.width.max(self.height) / self.width,
-            Unit::Pc(pc) => pc,
-        }
-    }
-
-    fn pc_y(&self, unit: Unit) -> f32 {
-        match unit {
-            Unit::Px(px) => px as f32 / self.height,
-            Unit::Mn(mn) => mn * self.width.min(self.height) / self.height,
-            Unit::Mx(mx) => mx * self.width.max(self.height) / self.height,
-            Unit::Pc(pc) => pc,
-        }
-    }
-
-    fn px_x(&self, unit: Unit) -> f32 {
-        match unit {
-            Unit::Px(px) => px as f32,
-            Unit::Mn(mn) => mn * self.width.min(self.height),
-            Unit::Mx(mx) => mx * self.width.max(self.height),
-            Unit::Pc(pc) => pc * self.width,
-        }
-    }
-
-    fn px_y(&self, unit: Unit) -> f32 {
-        match unit {
-            Unit::Px(px) => px as f32,
-            Unit::Mn(mn) => mn * self.width.min(self.height),
-            Unit::Mx(mx) => mx * self.width.max(self.height),
-            Unit::Pc(pc) => pc * self.height,
-        }
-    }
-
-    fn vert(&mut self, x: f32, y: f32, w: f32, h: f32) -> Vertex {
-        Vertex {
-            pos: Default::default(),
-            scale: Default::default(),
-            color: self.color,
-            roundness: self.roundness,
-            rotation: self.rotation,
-            stroke_width: self.stroke_width,
-            stroke_color: self.stroke_color,
-            tex_coord: self.tex_coord,
-            blur: self.blur,
-            stroke_blur: self.stroke_blur,
-            gradient: self.gradient,
-            gradient_dir: self.gradient_dir,
-            superellipse: self.superellipse,
-        }
-        .pos(x, y)
-        .scale(w, h)
-    }
-
-    fn instance(&mut self, mut x: f32, mut y: f32, mut w: f32, mut h: f32) {
-        let area = self.areas.last().unwrap_or(&[0.0, 0.0, 1.0, 1.0]);
-        x = x * area[2] + area[0];
-        y = y * area[3] + area[1];
-        w *= area[2];
-        h *= area[3];
-        let vertex = self.vert(x, y, w, h);
-        self.instances.add(vertex).unwrap();
-    }
-
-    pub fn rectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
-        let (x, y, w, h) = (self.pc_x(x), self.pc_y(y), self.pc_x(w), self.pc_y(h));
-        self.instance(x, y, w, h)
-    }
-
-    pub fn rect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
-        let (x, y, w, h) = (
-            self.pc_x(x),
-            self.pc_y(y),
-            self.pc_x(w) * 0.5,
-            self.pc_y(h) * 0.5,
-        );
-        self.instance(x + w, y + h, w, h)
-    }
-
-    /// rounded centered rect
-    pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
-        let old_roundness = self.roundness;
-        self.roundness = r;
-        self.rectc(x, y, w, h);
-        self.roundness = old_roundness;
-    }
-
-    /// rounded rect
-    pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
-        let old_roundness = self.roundness;
-        self.roundness = r;
-        self.rect(x, y, w, h);
-        self.roundness = old_roundness;
-    }
-
-    /// centered square
-    pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) {
-        self.rectc(x, y, w, w)
-    }
-
-    pub fn square(&mut self, x: Unit, y: Unit, w: Unit) {
-        self.rect(x, y, w, w)
-    }
-
-    /// rounded square
-    pub fn rsquare(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
-        self.rrect(x, y, w, w, r)
-    }
-
-    /// rounded centered square
-    pub fn rsquarec(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
-        self.rrect(x, y, w, w, r)
-    }
-
-    pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) {
-        let (x0, y0, x1, y1) = (self.pc_x(x0), self.pc_y(y0), self.pc_x(x1), self.pc_y(y1));
-        let (w, h) = ((x1 - x0) * 0.5, (y1 - y0) * 0.5);
-        let (x, y) = (x0 + w, y0 + h);
-        self.instance(x, y, w, h);
-    }
-
-    pub fn circle(&mut self, x: Unit, y: Unit, r: Unit) {
-        self.roundness += 1.0;
-        self.rectc(x, y, r, r);
-        self.roundness -= 1.0;
-    }
-
-    pub fn line(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) {
-        let (x0, y0) = (self.px_x(x0), self.px_y(y0));
-        let (x1, y1) = (self.px_x(x1), self.px_y(y1));
-        let (dx, dy) = (x1 - x0, y1 - y0);
-        let an = dy.atan2(dx);
-        self.rotation += an;
-        let (rw, rh) = (self.width, self.height);
-        let len = (dx * dx + dy * dy).sqrt() / rw * 0.5;
-        let dw = self.pc_y(w) * 0.5;
-        self.instance(
-            (x0 + x1) * 0.5 / rw,
-            (y0 + y1) * 0.5 / rh,
-            len + self.pc_x(w) * 0.5,
-            dw,
-        );
-        self.rotation -= an;
-    }
-
-    /// rounded line
-    pub fn rline(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) {
-        let old_roundness = self.roundness;
-        self.roundness = 0.999;
-        self.line(x0, y0, x1, y1, w);
-        self.roundness = old_roundness;
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) {
-        fn bezier(a: f32, b: f32, c: f32, t: f32) -> f32 {
-            t * (t * (c - 2.0 * b + a) + 2.0 * (b - a)) + a
-        }
-
-        let (x0, y0) = (self.pc_x(x0), self.pc_y(y0));
-        let (x1, y1) = (self.pc_x(x1), self.pc_y(y1));
-        let (x2, y2) = (self.pc_x(x2), self.pc_y(y2));
-        use Unit::Pc;
-        let (mut px, mut py) = (x0, y0);
-        let old_roundness = self.roundness;
-        self.roundness = 0.999;
-        const ITERS: usize = 32;
-        for i in 0..ITERS {
-            let t = (i + 1) as f32 / ITERS as f32;
-            let x = bezier(x0, x1, x2, t);
-            let y = bezier(y0, y1, y2, t);
-            self.line(Pc(px), Pc(py), Pc(x), Pc(y), w);
-            px = x;
-            py = y;
-        }
-        self.roundness = old_roundness;
+        self.atlas.img_data(name)
     }
 
     /// Renders text. Returns bounding rect in pixels
     pub fn text(&mut self, text: &str, x: Unit, y: Unit, w: Unit) -> (i32, i32, i32, i32) {
-        let old_tex_coord = self.tex_coord;
+        let old_tex_coord = self.draw.tex_coord;
         assert!(
-            self.font.as_str() != "",
+            self.draw.font.as_str() != "",
             "failed to render text, no font is active"
         );
-        let old_roundness = self.roundness;
-        self.roundness = -(self.bold + 1.0 + 1e-5);
-        let (x, y) = (self.pc_x(x), self.pc_y(y));
-        let (w, h) = (self.pc_x(w), self.pc_y(w));
+        let old_roundness = self.draw.roundness;
+        self.draw.roundness = -(self.draw.bold + 1.0 + 1e-5);
+        let (x, y) = (self.draw.pc_x(x), self.draw.pc_y(y));
+        let (w, h) = (self.draw.pc_x(w), self.draw.pc_y(w));
+
         let self_ptr = self as *mut Self;
         let (font, char_rects) = unsafe { &mut *self_ptr }
+            .atlas
             .fonts
-            .entry(self.font.clone())
+            .entry(self.draw.font.clone())
             .or_insert_with(|| {
-                if let Ok(true) = std::fs::exists(format!("res/fonts/{}.ttf", self.font)) {
-                    (Font::new(&self.font), HashMap::new())
+                if let Ok(true) = std::fs::exists(format!("res/fonts/{}.ttf", self.draw.font)) {
+                    (Font::new(&self.draw.font), HashMap::new())
                 } else {
                     panic!(
                         "failed to render text \"{text}\", font does not exist: {}",
-                        self.font
+                        self.draw.font
                     )
                 }
             });
@@ -782,7 +411,9 @@ impl Gfx {
             let rect = *char_rects.entry(c).or_insert_with(|| {
                 let sdf_img = font.gen_char_sdf(c, SDF_PX);
                 let name = format!("{}-{c}", font.name());
-                let (_, img, rect) = self.add_img(&name, sdf_img.width, sdf_img.height);
+                let (_, img, rect) = unsafe { &mut *self_ptr }
+                    .atlas
+                    .add_img(&name, sdf_img.width, sdf_img.height);
                 img.copy_from_slice(&ImageLoader::make4(&sdf_img.img, 1));
                 rect
             });
@@ -791,147 +422,40 @@ impl Gfx {
             let (rw, rh) = rect.wh();
             let (rw, rh) = (rw as f32 / px * w, rh as f32 / px * h);
             let r = rect.packed_whxy();
-            self.tex_coord = [(r >> 32) as u32, r as u32];
+            self.draw.tex_coord = [(r >> 32) as u32, r as u32];
             let (x, y) = (x + lx * w, y + ly * h);
             let (w, h) = (rw, rh);
-            self.instance(x + w, y + h, w, h);
+            let vertex = self.draw.vert(x + w, y + h, w, h);
+            self.draw.instances.add(vertex).unwrap();
             ax = ax.min(x);
             ay = ay.min(y);
             bx = bx.max(x + w * 2.0);
             by = by.max(y + h * 2.0);
         }
-        self.roundness = old_roundness;
-        self.tex_coord = old_tex_coord;
+        self.draw.roundness = old_roundness;
+        self.draw.tex_coord = old_tex_coord;
         use Unit::*;
         let (ax, ay, bx, by) = (
-            self.px_x(Pc(ax)),
-            self.px_y(Pc(ay)),
-            self.px_x(Pc(bx)),
-            self.px_y(Pc(by)),
+            self.draw.px_x(Pc(ax)),
+            self.draw.px_y(Pc(ay)),
+            self.draw.px_x(Pc(bx)),
+            self.draw.px_y(Pc(by)),
         );
         (ax as i32, ay as i32, bx as i32, by as i32)
     }
 
-    /// defines rendering sub-area inside full rendering area `[-1; 1]`\
-    /// primitives following this will render inside sub-area as if it were full rendering area
-    pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
-        let area = [self.pc_x(x), self.pc_y(y), self.pc_x(w), self.pc_y(h)];
-        if self.areas.is_empty() {
-            self.areas.push(area);
-        } else {
-            let last = self.areas.len() - 1;
-            self.areas[last] = area;
-        }
-    }
-
-    /// defines rendering sub-area inside last pushed rendering sub-area\
-    /// primitives following this will render inside sub-area as if it were full rendering area
-    pub fn push_area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
-        let mut area = [self.pc_x(x), self.pc_y(y), self.pc_x(w), self.pc_y(h)];
-        if let Some(last) = self.areas.last() {
-            area[0] += last[0];
-            area[1] += last[1];
-            area[2] *= last[2];
-            area[3] *= last[3];
-        }
-        self.areas.push(area);
-    }
-
-    pub fn pop_area(&mut self) {
-        self.areas.pop();
-    }
-
-    /// saves rendering parameters to reset to when end_temp() is called
-    pub fn begin_temp(&mut self) {
-        self.old_color = self.color;
-        self.old_stroke_color = self.stroke_color;
-        self.old_stroke_width = self.stroke_width;
-        self.old_roundness = self.roundness;
-        self.old_rotation = self.rotation;
-        self.old_tex_coord = self.tex_coord;
-        self.old_font = self.font.clone();
-        self.old_bold = self.bold;
-        self.old_blur = self.blur;
-        self.old_stroke_blur = self.stroke_blur;
-        self.old_gradient = self.gradient;
-        self.old_gradient_dir = self.gradient_dir;
-        self.old_superellipse = self.superellipse;
-    }
-
-    /// resets rendering parameters to values before begin_temp() was called
-    pub fn end_temp(&mut self) {
-        self.color = self.old_color;
-        self.stroke_color = self.old_stroke_color;
-        self.stroke_width = self.old_stroke_width;
-        self.roundness = self.old_roundness;
-        self.rotation = self.old_rotation;
-        self.tex_coord = self.old_tex_coord;
-        self.font = self.old_font.clone();
-        self.bold = self.old_bold;
-        self.blur = self.old_blur;
-        self.stroke_blur = self.old_stroke_blur;
-        self.gradient = self.old_gradient;
-        self.gradient_dir = self.old_gradient_dir;
-        self.superellipse = self.old_superellipse;
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.color = [255, 255, 255, 255];
-        self.stroke_color = [0; 4];
-        self.stroke_width = 0.0;
-        self.roundness = 0.0;
-        self.rotation = 0.0;
-        self.areas = Vec::new();
-        self.tex_coord = [0, 0];
-        self.font = String::new();
-        self.bold = 0.0;
-        self.blur = 0.0;
-        self.stroke_blur = 0.0;
-        self.gradient = [255, 255, 255, 255];
-        self.gradient_dir = f32::MAX;
-        self.superellipse = 2.0;
-
-        self.instances.reset();
-        self.begin_temp();
-    }
-
     pub(crate) fn flush(&mut self) -> ResultAny {
-        let dirty_imgs = self.imgs.values_mut().filter(|i| i.1.is_dirty());
-        let buf_copies = dirty_imgs
-            .map(|(off, tracked, rect)| {
-                let (x, y, w, h) = rect.xywh();
-                let copy = vk::BufferImageCopy {
-                    buffer_offset: *off,
-                    buffer_row_length: 0,
-                    buffer_image_height: 0,
-                    image_subresource: vk::ImageSubresourceLayers::default()
-                        .aspect_mask(vk::ImageAspectFlags::COLOR)
-                        .layer_count(1),
-                    image_offset: vk::Offset3D {
-                        x: x as i32,
-                        y: y as i32,
-                        z: 0,
-                    },
-                    image_extent: vk::Extent3D {
-                        width: w as u32,
-                        height: h as u32,
-                        depth: 1,
-                    },
-                };
-                tracked.reset();
-                copy
-            })
-            .collect::<Vec<_>>();
+        let buf_copies = self.atlas.dirty_copies();
         if !buf_copies.is_empty() {
             let cmd = self.command_manager.begin()?;
-            self.atlas
+            self.atlas.atlas_image()
                 .transition(cmd, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
-            self.atlas.copy_from_buffer_cmd(
+            self.atlas.atlas_image().copy_from_buffer_cmd(
                 cmd,
-                self.atlas_staging.lock().unwrap().as_ref(),
+                self.atlas.atlas_staging().lock().unwrap().as_ref(),
                 &buf_copies,
             );
-            self.atlas
+            self.atlas.atlas_image()
                 .transition(cmd, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
             self.command_manager.submit(self.queue, cmd, &[], &[])?;
             self.command_manager.wait(cmd)?;
@@ -989,7 +513,7 @@ impl Gfx {
 
             swapchain_image.transition(cmd, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
-            self.atlas
+            self.atlas.atlas_image()
                 .transition(cmd, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
             unsafe { self.device().cmd_begin_rendering(cmd, &rendering_info) };
@@ -1029,13 +553,13 @@ impl Gfx {
                     self.device().cmd_bind_vertex_buffers(
                         cmd,
                         1,
-                        &[self.instances.vertex_buffer.handle()],
+                        &[self.draw.instances.vertex_buffer.handle()],
                         &[0],
                     );
                 }
                 unsafe {
                     self.device()
-                        .cmd_draw(cmd, 4, self.instances.inst_len as u32, 0, 0)
+                        .cmd_draw(cmd, 4, self.draw.instances.inst_len as u32, 0, 0)
                 };
             }
             unsafe { self.device().cmd_end_rendering(cmd) };
@@ -1052,6 +576,7 @@ impl Gfx {
             self.width = window.width() as f32;
             self.height = window.height() as f32;
             self.uniform.write_mapped(&[self.width, self.height]);
+            self.draw.set_size(self.width, self.height);
         }
 
         self.flush().unwrap();
@@ -1088,7 +613,7 @@ impl Gfx {
             .unwrap();
 
         window.end_frame(self.queue, cmd);
-        self.reset();
+        self.draw.reset();
     }
 
     pub fn device(&self) -> &ash::Device {

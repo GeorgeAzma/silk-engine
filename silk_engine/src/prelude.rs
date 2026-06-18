@@ -1,10 +1,10 @@
 pub use crate::{
     engine::{Engine, EngineConfig, EventLoop, WindowEvent, WinitEvent},
-    gfx::{Gfx, Unit::*},
+    gfx::{DrawContext, Gfx, TextureAtlas, Unit::*},
     input::{Input, Key, Mouse},
     sfx::{AudioData, Sfx, Source},
     util::print::Level,
-    vulkan::{Vulkan, VulkanConfig, window::Window},
+    vulkan::{Vulkan, VulkanConfig, window::{Window, WindowState}},
 };
 
 #[cfg(feature = "midi")]
