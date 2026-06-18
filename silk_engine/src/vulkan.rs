@@ -12,7 +12,7 @@ use crate::{
     fatal,
     prelude::ResultAny,
     vulkan::{
-        alloc_callback::{AllocHandler, AllocManager, NoOpAllocHandler},
+        alloc_callback::{AllocHandler, AllocManager},
         physical_device::PhysicalDevice,
     },
     warn,
@@ -113,6 +113,7 @@ pub(crate) unsafe extern "system" fn debug_callback(
     vk::FALSE
 }
 
+#[derive(Clone)]
 pub struct VulkanConfig {
     pub required_instance_extensions: Vec<&'static CStr>,
     pub preferred_instance_extensions: Vec<&'static CStr>,
@@ -122,7 +123,7 @@ pub struct VulkanConfig {
     pub app_version: u32,
     pub engine_name: &'static CStr,
     pub engine_version: u32,
-    pub alloc_handler: Box<dyn AllocHandler>,
+    pub alloc_handler: AllocHandler,
 }
 
 impl Default for VulkanConfig {
@@ -152,7 +153,7 @@ impl Default for VulkanConfig {
             app_version: ash::vk::make_api_version(0, 0, 0, 0),
             engine_name: c"Engine",
             engine_version: ash::vk::make_api_version(0, 0, 0, 0),
-            alloc_handler: Box::new(NoOpAllocHandler),
+            alloc_handler: AllocHandler::NoOp,
         }
     }
 }

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 
-pub trait AllocHandler: Send + Sync {
+trait AllocHandlerImpl: Send + Sync + Clone {
     fn on_alloc(
         &mut self,
         ptr: *mut c_void,
@@ -40,18 +40,19 @@ pub trait AllocHandler: Send + Sync {
     );
 }
 
-#[derive(Default)]
-pub struct ConsoleAllocHandler {
-    pub min_print_size: usize,
+#[derive(Clone)]
+pub enum AllocHandler {
+    Console { min_print_size: usize },
+    NoOp,
 }
 
-impl ConsoleAllocHandler {
+impl AllocHandler {
     const ALLOC_COL: &str = "\x1b[38;2;241;76;76m";
     const FREE_COL: &str = "\x1b[38;2;35;209;139m";
     const ALIGN_COL: &str = "\x1b[38;41;184;219m";
 }
 
-impl AllocHandler for ConsoleAllocHandler {
+impl AllocHandlerImpl for AllocHandler {
     fn on_alloc(
         &mut self,
         ptr: *mut c_void,
@@ -59,15 +60,20 @@ impl AllocHandler for ConsoleAllocHandler {
         alignment: usize,
         scope: vk::SystemAllocationScope,
     ) {
-        if size < self.min_print_size {
-            return;
+        match self {
+            AllocHandler::Console { min_print_size } => {
+                if size < *min_print_size {
+                    return;
+                }
+                println!(
+                    "[VkAlloc] \x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m {}a{alignment}\x1b[0m {scope:?}",
+                    Self::ALLOC_COL,
+                    Mem::b(size),
+                    Self::ALIGN_COL
+                );
+            }
+            AllocHandler::NoOp => {}
         }
-        println!(
-            "[VkAlloc] \x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m {}a{alignment}\x1b[0m {scope:?}",
-            Self::ALLOC_COL,
-            Mem::b(size),
-            Self::ALIGN_COL
-        );
     }
 
     fn on_realloc(
@@ -79,28 +85,38 @@ impl AllocHandler for ConsoleAllocHandler {
         alignment: usize,
         scope: vk::SystemAllocationScope,
     ) {
-        if new_size < self.min_print_size {
-            return;
+        match self {
+            AllocHandler::Console { min_print_size } => {
+                if new_size < *min_print_size {
+                    return;
+                }
+                println!(
+                    "[VkAlloc] (\x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m) => (\x1b[2m{new_ptr:p}\x1b[0m {}{}\x1b[0m) {}a{alignment}\x1b[0m {scope:?}",
+                    Self::FREE_COL,
+                    Mem::b(old_size),
+                    Self::ALLOC_COL,
+                    Mem::b(new_size),
+                    Self::ALIGN_COL
+                );
+            }
+            AllocHandler::NoOp => {}
         }
-        println!(
-            "[VkAlloc] (\x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m) => (\x1b[2m{new_ptr:p}\x1b[0m {}{}\x1b[0m) {}a{alignment}\x1b[0m {scope:?}",
-            Self::FREE_COL,
-            Mem::b(old_size),
-            Self::ALLOC_COL,
-            Mem::b(new_size),
-            Self::ALIGN_COL
-        );
     }
 
     fn on_free(&mut self, ptr: *mut c_void, size: usize, scope: vk::SystemAllocationScope) {
-        if size < self.min_print_size {
-            return;
+        match self {
+            AllocHandler::Console { min_print_size } => {
+                if size < *min_print_size {
+                    return;
+                }
+                println!(
+                    "[VkAlloc] \x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m {scope:?}",
+                    Self::FREE_COL,
+                    Mem::b(size)
+                );
+            }
+            AllocHandler::NoOp => {}
         }
-        println!(
-            "[VkAlloc] \x1b[2m{ptr:p}\x1b[0m {}{}\x1b[0m {scope:?}",
-            Self::FREE_COL,
-            Mem::b(size)
-        );
     }
 
     fn on_internal_alloc(
@@ -109,14 +125,19 @@ impl AllocHandler for ConsoleAllocHandler {
         _alloc_type: vk::InternalAllocationType,
         scope: vk::SystemAllocationScope,
     ) {
-        if size < self.min_print_size {
-            return;
+        match self {
+            AllocHandler::Console { min_print_size } => {
+                if size < *min_print_size {
+                    return;
+                }
+                println!(
+                    "[VkAlloc] {}{}\x1b[0m {scope:?}",
+                    Self::ALLOC_COL,
+                    Mem::b(size)
+                );
+            }
+            AllocHandler::NoOp => {}
         }
-        println!(
-            "[VkAlloc] {}{}\x1b[0m {scope:?}",
-            Self::ALLOC_COL,
-            Mem::b(size)
-        );
     }
 
     fn on_internal_free(
@@ -125,64 +146,32 @@ impl AllocHandler for ConsoleAllocHandler {
         _alloc_type: vk::InternalAllocationType,
         scope: vk::SystemAllocationScope,
     ) {
-        if size < self.min_print_size {
-            return;
+        match self {
+            AllocHandler::Console { min_print_size } => {
+                if size < *min_print_size {
+                    return;
+                }
+                println!(
+                    "[VkAlloc] {}{}\x1b[0m {scope:?}",
+                    Self::FREE_COL,
+                    Mem::b(size)
+                );
+            }
+            AllocHandler::NoOp => {}
         }
-        println!(
-            "[VkAlloc] {}{}\x1b[0m {scope:?}",
-            Self::FREE_COL,
-            Mem::b(size)
-        );
     }
 }
 
-pub struct NoOpAllocHandler;
-
-impl AllocHandler for NoOpAllocHandler {
-    fn on_alloc(
-        &mut self,
-        _ptr: *mut c_void,
-        _size: usize,
-        _alignment: usize,
-        _scope: vk::SystemAllocationScope,
-    ) {
-    }
-    fn on_realloc(
-        &mut self,
-        _ptr: *mut c_void,
-        _new_ptr: *mut c_void,
-        _old_size: usize,
-        _new_size: usize,
-        _alignment: usize,
-        _scope: vk::SystemAllocationScope,
-    ) {
-    }
-    fn on_free(&mut self, _ptr: *mut c_void, _size: usize, _scope: vk::SystemAllocationScope) {}
-    fn on_internal_alloc(
-        &mut self,
-        _size: usize,
-        _alloc_type: vk::InternalAllocationType,
-        _scope: vk::SystemAllocationScope,
-    ) {
-    }
-    fn on_internal_free(
-        &mut self,
-        _size: usize,
-        _alloc_type: vk::InternalAllocationType,
-        _scope: vk::SystemAllocationScope,
-    ) {
-    }
-}
 
 /// Tracks allocations + size, used for correctly freeing allocated vulkan objects. also logs allocations
 pub(crate) struct AllocManager {
     // ptr: (layout, scope)
     allocs: HashMap<usize, (core::alloc::Layout, vk::SystemAllocationScope)>,
-    logger: Box<dyn AllocHandler>,
+    logger: AllocHandler,
 }
 
 impl AllocManager {
-    pub(crate) fn new(logger: Box<dyn AllocHandler>) -> Self {
+    pub(crate) fn new(logger: AllocHandler) -> Self {
         Self {
             allocs: Default::default(),
             logger,

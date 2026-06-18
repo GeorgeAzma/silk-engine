@@ -26,7 +26,7 @@ pub struct WindowEvent {
     pub window_event: WinitEvent,
 }
 
-#[derive(Resource)]
+#[derive(Clone, Resource)]
 pub struct EngineConfig {
     pub logger: Logger,
     pub vulkan_config: VulkanConfig,
@@ -71,7 +71,7 @@ fn runner(app: App) -> AppExit {
     let mut context = Context::new(app);
     let event_loop = winit::event_loop::EventLoop::builder().build().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop.listen_device_events(DeviceEvents::WhenFocused);
+    event_loop.listen_device_events(DeviceEvents::Never);
     event_loop.run_app(&mut context).unwrap();
     AppExit::Success
 }
@@ -116,10 +116,13 @@ fn update_time(mut time: ResMut<Time>) {
     }
 }
 
-pub struct EnginePlugin;
+pub struct EnginePlugin {
+    pub engine_config: EngineConfig,
+}
 impl Plugin for EnginePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Time {
+        app.insert_resource(self.engine_config.clone())
+           .insert_resource(Time {
             start_time: Instant::now(),
             time: 0.0,
             dt: 0.0,
@@ -171,7 +174,6 @@ impl ApplicationHandler<()> for Context {
             window_event: window_event.clone(),
         });
 
-        self.app.update();
         if let Some(_exit) = self.app.should_exit() {
             event_loop.exit();
         }
@@ -185,5 +187,7 @@ impl ApplicationHandler<()> for Context {
     ) {
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {}
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        self.app.update();
+    }
 }

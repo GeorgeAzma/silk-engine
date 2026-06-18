@@ -1,9 +1,9 @@
 pub use crate::{
-    engine::{EnginePlugin, Time, EngineConfig, EventLoop, WindowEvent, WinitEvent},
+    engine::{EngineConfig, EnginePlugin, EventLoop, Time, WindowEvent, WinitEvent},
     gfx::{DrawContext, Gfx, TextureAtlas, Unit::*},
     input::{Input, InputPlugin, Key, Mouse},
     sfx::{AudioData, Sfx, SfxPlugin, Source},
-    util::{print::Level, ema::Ema},
+    util::{ema::Ema, print::Level},
     vulkan::{Vulkan, VulkanConfig, window::Window},
 };
 
@@ -26,8 +26,11 @@ pub type ResultAny<T = ()> = Result<T, Box<dyn Error>>;
 pub struct DefaultPlugins;
 impl PluginGroup for DefaultPlugins {
     fn build(self) -> bevy_app::PluginGroupBuilder {
+        let mut engine_config = EngineConfig::default();
+        engine_config.logger.min_level = Level::Debug;
+
         bevy_app::PluginGroupBuilder::start::<Self>()
-            .add(EnginePlugin)
+            .add(EnginePlugin { engine_config })
             .add(InputPlugin)
             .add(SfxPlugin)
     }
