@@ -122,7 +122,6 @@ impl Plugin for Engine {
             fps: Default::default(),
             frame: Default::default(),
         })
-        .init_resource::<WindowState>()
         .add_observer(Self::on_event)
         .set_runner(Self::runner)
         .add_systems(PreStartup, Self::setup);
@@ -163,12 +162,6 @@ impl ApplicationHandler<()> for Context {
         window_id: WindowId,
         window_event: WinitEvent,
     ) {
-        if let WinitEvent::Resized(size) = &window_event {
-            if let Some(mut state) = self.app.world_mut().get_resource_mut::<WindowState>() {
-                state.update(window_id, size.width, size.height);
-            }
-        }
-
         self.app.world_mut().trigger(WindowEvent {
             window_id,
             window_event: window_event.clone(),

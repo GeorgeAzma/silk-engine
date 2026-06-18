@@ -11,14 +11,11 @@ fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
 
     gfx.load_img("cursor.qoi");
 
-    let sfx = Sfx::new();
-    // let mut src = sfx.load("steingen");
-    // sfx.play(&mut src);
-
-    cmd.insert_resource(window);
-    cmd.insert_resource(Input::new());
+    cmd.spawn((
+        window,
+        Input::new(),
+    ));
     cmd.insert_resource(gfx);
-    cmd.insert_resource(sfx);
 }
 
 fn on_midi(event: On<MidiEvent>) {
@@ -26,7 +23,9 @@ fn on_midi(event: On<MidiEvent>) {
 }
 
 #[inline_tweak::tweak_fn]
-fn update(mut gfx: ResMut<Gfx>, mut input: ResMut<Input>, mut window: ResMut<Window>) {
+fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
+    let (mut window, mut input) = window.into_inner();
+    
     if input.key_pressed(Key::Escape) {
         std::process::exit(0);
     }
@@ -122,14 +121,10 @@ fn update(mut gfx: ResMut<Gfx>, mut input: ResMut<Input>, mut window: ResMut<Win
 fn on_event(
     event: On<WindowEvent>,
     event_loop: Res<EventLoop>,
-    window: Res<Window>,
-    mut input: ResMut<Input>,
+    window: Query<&Window>,
 ) {
-    if event.window_id == window.id() {
+    if let Some(window) = window.iter().find(|w| w.id() == event.window_id) {
         let event = &event.window_event;
-        let outer_pos = window.outer_position().unwrap_or_default();
-        let window_height = window.inner_size().height;
-        input.event(event, outer_pos.x, outer_pos.y, window_height);
         match event {
             WinitEvent::Destroyed | WinitEvent::CloseRequested => {
                 event_loop.exit();
@@ -150,10 +145,12 @@ fn main() -> ResultAny {
     engine_config.logger.min_level = Level::Debug;
 
     app.add_plugins(Engine)
+        .add_plugins(InputPlugin)
+        .add_plugins(SfxPlugin)
+        .add_plugins(MidiPlugin)
         .insert_resource(engine_config)
         .add_systems(Startup, init)
         .add_systems(Update, update)
-        .add_plugins(MidiPlugin)
         .add_observer(on_midi)
         .add_observer(on_event);
     app.run();

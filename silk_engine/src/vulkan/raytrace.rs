@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use ash::vk::{self, ImageCreateInfo};
 
-use crate::{prelude::ResultAny, vulkan::{buffer::Buffer, device::Device, image::Image}};
+use crate::{
+    prelude::ResultAny,
+    vulkan::{buffer::Buffer, device::Device, image::Image},
+};
 
 pub(crate) struct Raytrace {}
 
@@ -155,9 +158,7 @@ impl Raytrace {
 
         let cmd_manager = device.command_manager(queue_family_index);
         let cmd = cmd_manager.begin()?;
-        unsafe {
-            accel.cmd_build_acceleration_structures(cmd, &[build_geometry], &[&[range]])
-        };
+        unsafe { accel.cmd_build_acceleration_structures(cmd, &[build_geometry], &[&[range]]) };
         cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
 
@@ -262,31 +263,30 @@ impl Raytrace {
 
         let cmd_manager = device.command_manager(queue_family_index);
         let cmd = cmd_manager.begin()?;
-        unsafe {
-            accel.cmd_build_acceleration_structures(cmd, &[build_geometry], &[&[range]])
-        };
+        unsafe { accel.cmd_build_acceleration_structures(cmd, &[build_geometry], &[&[range]]) };
         cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
 
-        
-        // let raytrace_image = Image::new(
-        //     &device,
-        //     &ImageCreateInfo::default()
-        //         .image_type(vk::ImageType::TYPE_2D)
-        //         .extent(vk::Extent3D {
-        //             width: packer.width() as u32,
-        //             height: packer.height() as u32,
-        //             depth: 1,
-        //         })
-        //         .format(vk::Format::R8G8B8A8_UNORM)
-        //         .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED),
-        //     vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        // )?;
+        let extent = vk::Extent3D { width: 1280, height: 720, depth: 1 }; 
 
-        // let rt_pipeline = ash::khr::ray_tracing_pipeline::Device::new(
-        //     &device.physical_device().vulkan().instance,
-        //     &device.device,
-        // );
+        let raytrace_image = Image::new(
+            &device,
+            &ImageCreateInfo::default()
+                .image_type(vk::ImageType::TYPE_2D)
+                .extent(extent)
+                .format(vk::Format::B8G8R8A8_UNORM)
+                .usage(
+                    vk::ImageUsageFlags::STORAGE
+                        | vk::ImageUsageFlags::TRANSFER_SRC
+                        | vk::ImageUsageFlags::TRANSFER_DST,
+                ),
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )?;
+
+        let rt_pipeline = ash::khr::ray_tracing_pipeline::Device::new(
+            &device.physical_device().vulkan().instance,
+            &device.device,
+        );
 
         Ok(Self {})
     }

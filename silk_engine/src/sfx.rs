@@ -8,6 +8,9 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
+
 use crate::util::wav::Wav;
 
 #[derive(Clone, Default, Debug)]
@@ -70,7 +73,7 @@ impl Source {
     }
 }
 
-#[derive(bevy_ecs::resource::Resource)]
+#[derive(Resource)]
 pub struct Sfx {
     stream: Stream,
     config: StreamConfig,
@@ -325,5 +328,12 @@ impl Sfx {
         }
 
         resampled
+    }
+}
+
+pub struct SfxPlugin;
+impl Plugin for SfxPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(Sfx::new());
     }
 }

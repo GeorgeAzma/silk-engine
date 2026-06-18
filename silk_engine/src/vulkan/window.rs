@@ -20,13 +20,16 @@ pub struct Frame {
     pub signal_semaphore: vk::Semaphore,
 }
 
-#[derive(bevy_ecs::resource::Resource)]
+
+#[derive(Component)]
 pub struct Window {
+    pub id: WindowId,
+    pub window: winit::window::Window,
+
     surface: Surface,
     swapchain: Swapchain,
     device: Weak<Device>,
-    pub id: WindowId,
-    pub window: winit::window::Window,
+
     image_available: Vec<vk::Semaphore>,
     render_finished: Vec<vk::Semaphore>,
     current_frame: usize,
@@ -72,11 +75,11 @@ impl Window {
         )?;
 
         Ok(Self {
+            id: window.id(),
+            window,
             surface,
             swapchain,
             device: Arc::downgrade(device),
-            id: window.id(),
-            window,
             image_available: vec![],
             render_finished: vec![],
             current_frame: 0,
@@ -312,37 +315,5 @@ impl Deref for Window {
 impl DerefMut for Window {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.window
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Resource)]
-pub struct WindowState {
-    pub window_id: Option<WindowId>,
-    pub width: u32,
-    pub height: u32,
-    pub resize_generation: u64,
-}
-
-impl WindowState {
-    pub fn resize_generation(&self) -> u64 {
-        self.resize_generation
-    }
-
-    pub fn is_stale(&self, seen_generation: u64) -> bool {
-        self.resize_generation != seen_generation
-    }
-
-    pub fn update(&mut self, window_id: WindowId, width: u32, height: u32) -> bool {
-        let changed = self.window_id != Some(window_id) || self.width != width || self.height != height;
-
-        self.window_id = Some(window_id);
-        self.width = width;
-        self.height = height;
-
-        if changed {
-            self.resize_generation = self.resize_generation.saturating_add(1);
-        }
-
-        changed
     }
 }

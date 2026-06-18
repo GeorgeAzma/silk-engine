@@ -1,8 +1,8 @@
 pub use crate::{
     engine::{Engine, EngineConfig, EventLoop, WindowEvent, WinitEvent},
     gfx::{DrawContext, Gfx, TextureAtlas, Unit::*},
-    input::{Input, Key, Mouse},
-    sfx::{AudioData, Sfx, Source},
+    input::{Input, InputPlugin, Key, Mouse},
+    sfx::{AudioData, Sfx, SfxPlugin, Source},
     util::print::Level,
     vulkan::{Vulkan, VulkanConfig, window::{Window, WindowState}},
 };
