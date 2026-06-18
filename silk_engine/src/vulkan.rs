@@ -24,7 +24,6 @@ pub(crate) mod command_pool;
 pub(crate) mod device;
 pub(crate) mod ds_alloc;
 pub(crate) mod dsl_manager;
-pub(crate) mod gpu_context;
 pub(crate) mod image;
 pub(crate) mod physical_device;
 pub(crate) mod pipeline;
