@@ -3,8 +3,8 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use bevy_ecs::prelude::*;
 use ash::vk;
+use bevy_ecs::prelude::*;
 use winit::{dpi::PhysicalPosition, window::WindowId};
 
 use crate::{
@@ -20,6 +20,154 @@ pub struct Frame {
     pub signal_semaphore: vk::Semaphore,
 }
 
+struct FrameSync {
+    image_available: Vec<vk::Semaphore>,
+    render_finished: Vec<vk::Semaphore>,
+    last_submitted_cmd: Vec<vk::CommandBuffer>,
+    current_frame: usize,
+    pending_frame: Option<Frame>,
+}
+
+impl FrameSync {
+    fn new() -> Self {
+        Self {
+            image_available: vec![],
+            render_finished: vec![],
+            last_submitted_cmd: vec![],
+            current_frame: 0,
+            pending_frame: None,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.image_available.is_empty()
+    }
+
+    fn wait_for_current_frame(&self, mut wait_fn: impl FnMut(vk::CommandBuffer)) {
+        if let Some(&last_cmd) = self
+            .last_submitted_cmd
+            .get(self.current_frame)
+            .filter(|&&cmd| cmd != vk::CommandBuffer::null())
+        {
+            wait_fn(last_cmd);
+        }
+    }
+
+    fn wait_semaphore(&self) -> vk::Semaphore {
+        self.image_available[self.current_frame]
+    }
+
+    fn signal_semaphore(&self, image_index: u32) -> vk::Semaphore {
+        self.render_finished[image_index as usize]
+    }
+
+    fn set_pending(&mut self, frame: Frame) {
+        self.pending_frame = Some(frame);
+    }
+
+    fn take_pending(&mut self) -> Option<Frame> {
+        self.pending_frame.take()
+    }
+
+    fn remember_submitted(&mut self, submitted_cmd: vk::CommandBuffer) {
+        if let Some(last_cmd) = self.last_submitted_cmd.get_mut(self.current_frame) {
+            *last_cmd = submitted_cmd;
+        }
+    }
+
+    fn advance_to_image(&mut self, image_index: u32) {
+        self.current_frame = image_index as usize;
+    }
+
+    fn recreate(&mut self, device: &Device, image_count: usize) -> ResultAny {
+        self.destroy(device);
+
+        self.image_available
+            .resize(image_count, vk::Semaphore::null());
+        self.render_finished
+            .resize(image_count, vk::Semaphore::null());
+        self.last_submitted_cmd
+            .resize(image_count, vk::CommandBuffer::null());
+
+        let alloc_callbacks = device.allocation_callbacks();
+        for i in 0..image_count {
+            let image_available = unsafe {
+                device.device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    alloc_callbacks.as_ref(),
+                )
+            }?;
+            device.debug_name(image_available, &format!("image_available_{i}"));
+            self.image_available[i] = image_available;
+
+            let render_finished = unsafe {
+                device.device.create_semaphore(
+                    &vk::SemaphoreCreateInfo::default(),
+                    alloc_callbacks.as_ref(),
+                )
+            }?;
+            device.debug_name(render_finished, &format!("render_finished_{i}"));
+            self.render_finished[i] = render_finished;
+        }
+
+        Ok(())
+    }
+
+    fn destroy(&mut self, device: &Device) {
+        if self.image_available.is_empty() {
+            return;
+        }
+
+        device.wait();
+        let alloc_callbacks = device.allocation_callbacks();
+        for &semaphore in &self.image_available {
+            unsafe {
+                device
+                    .device
+                    .destroy_semaphore(semaphore, alloc_callbacks.as_ref())
+            };
+        }
+        for &semaphore in &self.render_finished {
+            unsafe {
+                device
+                    .device
+                    .destroy_semaphore(semaphore, alloc_callbacks.as_ref())
+            };
+        }
+
+        self.image_available.clear();
+        self.render_finished.clear();
+        self.last_submitted_cmd.clear();
+        self.current_frame = 0;
+        self.pending_frame = None;
+    }
+}
+
+fn with_default_surface_formats(
+    mut formats: Vec<vk::SurfaceFormatKHR>,
+) -> Vec<vk::SurfaceFormatKHR> {
+    formats.extend([
+        vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_UNORM,
+            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+        },
+        vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_SRGB,
+            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+        },
+    ]);
+    formats
+}
+
+fn with_default_present_modes(mut modes: Vec<vk::PresentModeKHR>) -> Vec<vk::PresentModeKHR> {
+    modes.extend([
+        vk::PresentModeKHR::MAILBOX,
+        vk::PresentModeKHR::FIFO,
+        vk::PresentModeKHR::FIFO_RELAXED,
+        vk::PresentModeKHR::IMMEDIATE,
+    ]);
+    modes
+}
 
 #[derive(Component)]
 pub struct Window {
@@ -30,48 +178,29 @@ pub struct Window {
     swapchain: Swapchain,
     device: Weak<Device>,
 
-    image_available: Vec<vk::Semaphore>,
-    render_finished: Vec<vk::Semaphore>,
-    current_frame: usize,
-    pending_frame: Option<Frame>,
-    last_submitted_cmd: Vec<vk::CommandBuffer>,
+    sync: FrameSync,
 }
 
 impl Window {
     pub(crate) fn new(
         device: &Arc<Device>,
         window: winit::window::Window,
-        mut preferred_surface_formats: Vec<vk::SurfaceFormatKHR>,
-        mut preferred_present_modes: Vec<vk::PresentModeKHR>,
+        preferred_surface_formats: Vec<vk::SurfaceFormatKHR>,
+        preferred_present_modes: Vec<vk::PresentModeKHR>,
     ) -> ResultAny<Self> {
         let mut surface = Surface::new(device.physical_device(), &window)?;
 
         let mut swapchain = Swapchain::new(device, vk::SwapchainCreateInfoKHR::default());
 
-        preferred_surface_formats.extend([
-            vk::SurfaceFormatKHR {
-                format: vk::Format::B8G8R8A8_UNORM,
-                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-            },
-            vk::SurfaceFormatKHR {
-                format: vk::Format::B8G8R8A8_SRGB,
-                color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-            },
-        ]);
-
-        preferred_present_modes.extend([
-            vk::PresentModeKHR::MAILBOX,
-            vk::PresentModeKHR::FIFO,
-            vk::PresentModeKHR::FIFO_RELAXED,
-            vk::PresentModeKHR::IMMEDIATE,
-        ]);
+        let surface_formats = with_default_surface_formats(preferred_surface_formats);
+        let present_modes = with_default_present_modes(preferred_present_modes);
 
         _ = swapchain.recreate_from_surface(
             &mut surface,
             window.inner_size().width,
             window.inner_size().height,
-            &preferred_surface_formats,
-            &preferred_present_modes,
+            &surface_formats,
+            &present_modes,
         )?;
 
         Ok(Self {
@@ -80,11 +209,7 @@ impl Window {
             surface,
             swapchain,
             device: Arc::downgrade(device),
-            image_available: vec![],
-            render_finished: vec![],
-            current_frame: 0,
-            pending_frame: None,
-            last_submitted_cmd: vec![],
+            sync: FrameSync::new(),
         })
     }
 
@@ -152,21 +277,14 @@ impl Window {
             return None;
         }
 
-        if self.image_available.is_empty() {
+        if self.sync.is_empty() {
             self.recreate_sync_objects().ok()?;
         }
 
-        // Wait for previous frame using this slot
-        if let Some(&last_cmd) = self
-            .last_submitted_cmd
-            .get(self.current_frame)
-            .filter(|&&c| c != vk::CommandBuffer::null())
-        {
-            wait_fn(last_cmd);
-        }
+        self.sync.wait_for_current_frame(&mut wait_fn);
 
         let device = self.device.upgrade()?;
-        let wait_semaphore = self.image_available[self.current_frame];
+        let wait_semaphore = self.sync.wait_semaphore();
 
         let (image_index, suboptimal) = match unsafe {
             device.swapchain_device().acquire_next_image(
@@ -189,7 +307,7 @@ impl Window {
             return None;
         }
 
-        let signal_semaphore = self.render_finished[image_index as usize];
+        let signal_semaphore = self.sync.signal_semaphore(image_index);
 
         let frame = Frame {
             image_index,
@@ -197,7 +315,7 @@ impl Window {
             signal_semaphore,
         };
 
-        self.pending_frame = Some(frame);
+        self.sync.set_pending(frame);
 
         Some(frame)
     }
@@ -205,14 +323,11 @@ impl Window {
     /// End the current frame and present. Must be called after rendering is submitted.
     /// Pass the command buffer that was submitted so we can wait for it next frame.
     pub fn end_frame(&mut self, queue: vk::Queue, submitted_cmd: vk::CommandBuffer) {
-        let Some(frame) = self.pending_frame.take() else {
+        let Some(frame) = self.sync.take_pending() else {
             return;
         };
 
-        // Track the submitted command for waiting next frame
-        if self.last_submitted_cmd.len() > self.current_frame {
-            self.last_submitted_cmd[self.current_frame] = submitted_cmd;
-        }
+        self.sync.remember_submitted(submitted_cmd);
 
         let Some(device) = self.device.upgrade() else {
             return;
@@ -239,56 +354,12 @@ impl Window {
             Err(err) => panic!("{err}"),
         }
 
-        self.current_frame = frame.image_index as usize;
+        self.sync.advance_to_image(frame.image_index);
     }
 
     fn recreate_sync_objects(&mut self) -> ResultAny {
         let device = self.device.upgrade().ok_or("device dropped")?;
-        let alloc_callbacks = device.allocation_callbacks();
-        let max_frames = self.swapchain.images().len();
-
-        if !self.image_available.is_empty() {
-            device.wait();
-            for i in 0..self.image_available.len() {
-                unsafe {
-                    device
-                        .device
-                        .destroy_semaphore(self.image_available[i], alloc_callbacks.as_ref())
-                };
-                unsafe {
-                    device
-                        .device
-                        .destroy_semaphore(self.render_finished[i], alloc_callbacks.as_ref())
-                };
-            }
-            self.image_available.clear();
-            self.render_finished.clear();
-        }
-        self.image_available
-            .resize(max_frames, vk::Semaphore::null());
-        self.render_finished
-            .resize(max_frames, vk::Semaphore::null());
-        self.last_submitted_cmd
-            .resize(max_frames, vk::CommandBuffer::null());
-        for i in 0..max_frames {
-            let image_available = unsafe {
-                device.device.create_semaphore(
-                    &vk::SemaphoreCreateInfo::default(),
-                    alloc_callbacks.as_ref(),
-                )
-            }?;
-            device.debug_name(image_available, &format!("image_available_{i}"));
-            self.image_available[i] = image_available;
-            let render_finished = unsafe {
-                device.device.create_semaphore(
-                    &vk::SemaphoreCreateInfo::default(),
-                    alloc_callbacks.as_ref(),
-                )
-            }?;
-            device.debug_name(render_finished, &format!("render_finished_{i}"));
-            self.render_finished[i] = render_finished;
-        }
-        Ok(())
+        self.sync.recreate(&device, self.swapchain.images().len())
     }
 
     pub(crate) fn surface(&self) -> &Surface {
@@ -301,6 +372,14 @@ impl Window {
 
     pub(crate) fn swapchain(&mut self) -> &mut Swapchain {
         &mut self.swapchain
+    }
+}
+
+impl Drop for Window {
+    fn drop(&mut self) {
+        if let Some(device) = self.device.upgrade() {
+            self.sync.destroy(&device);
+        }
     }
 }
 

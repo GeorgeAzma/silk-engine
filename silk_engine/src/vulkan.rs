@@ -6,6 +6,8 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
+use bevy_ecs::prelude::*;
+
 use crate::{
     fatal,
     prelude::ResultAny,
@@ -28,12 +30,12 @@ pub(crate) mod image;
 pub(crate) mod physical_device;
 pub(crate) mod pipeline;
 pub(crate) mod pipeline_cache;
+pub(crate) mod raytrace;
 pub(crate) mod sampler_manager;
 pub(crate) mod shader;
 pub(crate) mod surface;
 pub(crate) mod swapchain;
 pub(crate) mod window;
-pub(crate) mod raytrace;
 
 pub enum PhysicalDeviceUse {
     General,
@@ -155,6 +157,7 @@ impl Default for VulkanConfig {
     }
 }
 
+#[derive(Resource)]
 pub struct Vulkan {
     version: u32,
     entry: ash::Entry,

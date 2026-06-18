@@ -25,7 +25,7 @@ fn on_midi(event: On<MidiEvent>) {
 #[inline_tweak::tweak_fn]
 fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>) {
     let (mut window, mut input) = window.into_inner();
-    
+
     if input.key_pressed(Key::Escape) {
         std::process::exit(0);
     }
