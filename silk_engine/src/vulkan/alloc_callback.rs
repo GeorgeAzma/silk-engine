@@ -162,7 +162,6 @@ impl AllocHandlerImpl for AllocHandler {
     }
 }
 
-
 /// Tracks allocations + size, used for correctly freeing allocated vulkan objects. also logs allocations
 pub(crate) struct AllocManager {
     // ptr: (layout, scope)

@@ -10,6 +10,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     prelude::ResultAny,
+    util::{dirty::Dirty, font::Font, image_loader::ImageLoader, packer::Rect},
     vulkan::{
         PhysicalDeviceUse, Vulkan,
         buffer::Buffer,
@@ -20,13 +21,12 @@ use crate::{
         shader::Shader,
         window::{Frame, Window},
     },
-    util::{image_loader::ImageLoader, font::Font, dirty::Dirty, packer::Rect},
 };
 use ash::vk;
 use winit::{event_loop::ActiveEventLoop, window::WindowAttributes};
 
-use bevy_ecs::prelude::*;
 use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Unit {
@@ -71,40 +71,106 @@ impl Gfx {
     }
 
     // Delegate drawing methods to DrawContext
-    pub fn alpha(&mut self, a: u8) { self.draw.alpha(a); }
-    pub fn rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.rgb(r, g, b); }
-    pub fn rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.rgba(r, g, b, a); }
-    pub fn hex(&mut self, hex: u32) { self.draw.hex(hex); }
-    pub fn glow(&mut self, glow: f32) { self.draw.glow(glow); }
-    pub fn stroke_alpha(&mut self, a: u8) { self.draw.stroke_alpha(a); }
-    pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.stroke_rgb(r, g, b); }
-    pub fn stroke_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.stroke_rgba(r, g, b, a); }
-    pub fn stroke_hex(&mut self, hex: u32) { self.draw.stroke_hex(hex); }
-    pub fn gradient_alpha(&mut self, a: u8) { self.draw.gradient_alpha(a); }
-    pub fn gradient_rgb(&mut self, r: u8, g: u8, b: u8) { self.draw.gradient_rgb(r, g, b); }
-    pub fn gradient_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) { self.draw.gradient_rgba(r, g, b, a); }
-    pub fn gradient_hex(&mut self, hex: u32) { self.draw.gradient_hex(hex); }
-    pub fn no_gradient(&mut self) { self.draw.no_gradient(); }
-    pub fn font(&mut self, font: &str) { self.draw.font(font); }
+    pub fn alpha(&mut self, a: u8) {
+        self.draw.alpha(a);
+    }
+    pub fn rgb(&mut self, r: u8, g: u8, b: u8) {
+        self.draw.rgb(r, g, b);
+    }
+    pub fn rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
+        self.draw.rgba(r, g, b, a);
+    }
+    pub fn hex(&mut self, hex: u32) {
+        self.draw.hex(hex);
+    }
+    pub fn glow(&mut self, glow: f32) {
+        self.draw.glow(glow);
+    }
+    pub fn stroke_alpha(&mut self, a: u8) {
+        self.draw.stroke_alpha(a);
+    }
+    pub fn stroke_rgb(&mut self, r: u8, g: u8, b: u8) {
+        self.draw.stroke_rgb(r, g, b);
+    }
+    pub fn stroke_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
+        self.draw.stroke_rgba(r, g, b, a);
+    }
+    pub fn stroke_hex(&mut self, hex: u32) {
+        self.draw.stroke_hex(hex);
+    }
+    pub fn gradient_alpha(&mut self, a: u8) {
+        self.draw.gradient_alpha(a);
+    }
+    pub fn gradient_rgb(&mut self, r: u8, g: u8, b: u8) {
+        self.draw.gradient_rgb(r, g, b);
+    }
+    pub fn gradient_rgba(&mut self, r: u8, g: u8, b: u8, a: u8) {
+        self.draw.gradient_rgba(r, g, b, a);
+    }
+    pub fn gradient_hex(&mut self, hex: u32) {
+        self.draw.gradient_hex(hex);
+    }
+    pub fn no_gradient(&mut self) {
+        self.draw.no_gradient();
+    }
+    pub fn font(&mut self, font: &str) {
+        self.draw.font(font);
+    }
 
-    pub fn rectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.rectc(x, y, w, h); }
-    pub fn rect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.rect(x, y, w, h); }
-    pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) { self.draw.rrectc(x, y, w, h, r); }
-    pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) { self.draw.rrect(x, y, w, h, r); }
-    pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) { self.draw.squarec(x, y, w); }
-    pub fn square(&mut self, x: Unit, y: Unit, w: Unit) { self.draw.square(x, y, w); }
-    pub fn rsquare(&mut self, x: Unit, y: Unit, w: Unit, r: f32) { self.draw.rsquare(x, y, w, r); }
-    pub fn rsquarec(&mut self, x: Unit, y: Unit, w: Unit, r: f32) { self.draw.rsquarec(x, y, w, r); }
-    pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) { self.draw.aabb(x0, y0, x1, y1); }
-    pub fn circle(&mut self, x: Unit, y: Unit, r: Unit) { self.draw.circle(x, y, r); }
-    pub fn line(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) { self.draw.line(x0, y0, x1, y1, w); }
-    pub fn rline(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) { self.draw.rline(x0, y0, x1, y1, w); }
-    pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) { self.draw.bezier(x0, y0, x1, y1, x2, y2, w); }
-    pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.area(x, y, w, h); }
-    pub fn push_area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) { self.draw.push_area(x, y, w, h); }
-    pub fn pop_area(&mut self) { self.draw.pop_area(); }
-    pub fn begin_temp(&mut self) { self.draw.begin_temp(); }
-    pub fn end_temp(&mut self) { self.draw.end_temp(); }
+    pub fn rectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        self.draw.rectc(x, y, w, h);
+    }
+    pub fn rect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        self.draw.rect(x, y, w, h);
+    }
+    pub fn rrectc(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
+        self.draw.rrectc(x, y, w, h, r);
+    }
+    pub fn rrect(&mut self, x: Unit, y: Unit, w: Unit, h: Unit, r: f32) {
+        self.draw.rrect(x, y, w, h, r);
+    }
+    pub fn squarec(&mut self, x: Unit, y: Unit, w: Unit) {
+        self.draw.squarec(x, y, w);
+    }
+    pub fn square(&mut self, x: Unit, y: Unit, w: Unit) {
+        self.draw.square(x, y, w);
+    }
+    pub fn rsquare(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
+        self.draw.rsquare(x, y, w, r);
+    }
+    pub fn rsquarec(&mut self, x: Unit, y: Unit, w: Unit, r: f32) {
+        self.draw.rsquarec(x, y, w, r);
+    }
+    pub fn aabb(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit) {
+        self.draw.aabb(x0, y0, x1, y1);
+    }
+    pub fn circle(&mut self, x: Unit, y: Unit, r: Unit) {
+        self.draw.circle(x, y, r);
+    }
+    pub fn line(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) {
+        self.draw.line(x0, y0, x1, y1, w);
+    }
+    pub fn rline(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) {
+        self.draw.rline(x0, y0, x1, y1, w);
+    }
+    pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) {
+        self.draw.bezier(x0, y0, x1, y1, x2, y2, w);
+    }
+    pub fn area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        self.draw.area(x, y, w, h);
+    }
+    pub fn push_area(&mut self, x: Unit, y: Unit, w: Unit, h: Unit) {
+        self.draw.push_area(x, y, w, h);
+    }
+    pub fn pop_area(&mut self) {
+        self.draw.pop_area();
+    }
+    pub fn begin_temp(&mut self) {
+        self.draw.begin_temp();
+    }
+    pub fn end_temp(&mut self) {
+        self.draw.end_temp();
+    }
 
     // Delegate atlas methods to TextureAtlas
     pub fn add_font(&mut self, name: &str) {
@@ -182,9 +248,10 @@ impl Gfx {
             let rect = *char_rects.entry(c).or_insert_with(|| {
                 let sdf_img = font.gen_char_sdf(c, SDF_PX);
                 let name = format!("{}-{c}", font.name());
-                let (_, img, rect) = unsafe { &mut *self_ptr }
-                    .atlas
-                    .add_img(&name, sdf_img.width, sdf_img.height);
+                let (_, img, rect) =
+                    unsafe { &mut *self_ptr }
+                        .atlas
+                        .add_img(&name, sdf_img.width, sdf_img.height);
                 img.copy_from_slice(&ImageLoader::make4(&sdf_img.img, 1));
                 rect
             });
@@ -219,14 +286,16 @@ impl Gfx {
         let buf_copies = self.atlas.dirty_copies();
         if !buf_copies.is_empty() {
             let cmd = self.command_manager.begin()?;
-            self.atlas.atlas_image()
+            self.atlas
+                .atlas_image()
                 .transition(cmd, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
             self.atlas.atlas_image().copy_from_buffer_cmd(
                 cmd,
                 self.atlas.atlas_staging().lock().unwrap().as_ref(),
                 &buf_copies,
             );
-            self.atlas.atlas_image()
+            self.atlas
+                .atlas_image()
                 .transition(cmd, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
             self.command_manager.submit(self.queue, cmd, &[], &[])?;
             self.command_manager.wait(cmd)?;
@@ -284,7 +353,8 @@ impl Gfx {
 
             swapchain_image.transition(cmd, vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
 
-            self.atlas.atlas_image()
+            self.atlas
+                .atlas_image()
                 .transition(cmd, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL);
 
             unsafe { self.device().cmd_begin_rendering(cmd, &rendering_info) };
@@ -446,8 +516,7 @@ pub fn setup(vulkan: &Vulkan) -> ResultAny<Gfx> {
     let mut ray_tracing_pipeline_features =
         vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default().ray_tracing_pipeline(true);
     let mut acceleration_structure_features =
-        vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
-            .acceleration_structure(true);
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default().acceleration_structure(true);
     let mut buffer_device_address_features =
         vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
 

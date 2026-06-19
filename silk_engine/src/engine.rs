@@ -115,14 +115,14 @@ impl Plugin for EnginePlugin {
         create_dir("res/cache/vulkan").unwrap_or_default();
 
         app.insert_resource(Time {
-                start_time: Instant::now(),
-                time: 0.0,
-                dt: 0.0,
-                fps: 0.0,
-                frame: 0,
-            })
-            .set_runner(runner)
-            .add_systems(PreUpdate, update_time);
+            start_time: Instant::now(),
+            time: 0.0,
+            dt: 0.0,
+            fps: 0.0,
+            frame: 0,
+        })
+        .set_runner(runner)
+        .add_systems(PreUpdate, update_time);
     }
 }
 

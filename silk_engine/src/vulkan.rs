@@ -1,7 +1,10 @@
 use ash::{khr, vk};
 
 use std::{
-    ffi::{CStr, CString}, ops::{Deref, DerefMut}, path::Path, sync::{Arc, Mutex, OnceLock}
+    ffi::{CStr, CString},
+    ops::{Deref, DerefMut},
+    path::Path,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use bevy_app::prelude::*;
@@ -512,7 +515,9 @@ pub struct VulkanPlugin {
 
 impl Plugin for VulkanPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(Vulkan(Arc::new(VulkanInner::new(self.vulkan_config.clone()).unwrap())));
+        app.insert_resource(Vulkan(Arc::new(
+            VulkanInner::new(self.vulkan_config.clone()).unwrap(),
+        )));
     }
 }
 

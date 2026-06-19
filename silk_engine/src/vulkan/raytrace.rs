@@ -267,7 +267,11 @@ impl Raytrace {
         cmd_manager.submit(queue, cmd, &[], &[])?;
         cmd_manager.wait(cmd)?;
 
-        let extent = vk::Extent3D { width: 1280, height: 720, depth: 1 }; 
+        let extent = vk::Extent3D {
+            width: 1280,
+            height: 720,
+            depth: 1,
+        };
 
         let raytrace_image = Image::new(
             &device,

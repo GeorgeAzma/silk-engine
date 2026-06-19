@@ -86,7 +86,12 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>, time:
         Px(190),
         Px(8),
     );
-    gfx.text(&((time.fps as f32).ema(0.001).round() as u32).to_string(), Pc(0.9), Pc(0.95), Px(14));
+    gfx.text(
+        &((time.fps as f32).ema(0.001).round() as u32).to_string(),
+        Pc(0.9),
+        Pc(0.95),
+        Px(14),
+    );
     gfx.rgb(255, 255, 255);
     gfx.no_gradient();
     gfx.font("zenmaru");
@@ -109,11 +114,7 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>, time:
     gfx.render(&mut window);
 }
 
-fn on_event(
-    event: On<WindowEvent>,
-    event_loop: Res<EventLoop>,
-    window: Query<&Window>,
-) {
+fn on_event(event: On<WindowEvent>, event_loop: Res<EventLoop>, window: Query<&Window>) {
     if let Some(window) = window.iter().find(|w| w.id() == event.window_id) {
         let event = &event.window_event;
         match event {

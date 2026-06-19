@@ -6,10 +6,10 @@ use ash::vk;
 use crate::{
     prelude::ResultAny,
     util::{
+        dirty::Dirty,
         font::Font,
         image_loader::ImageLoader,
         packer::{Guillotine, Packer, Rect},
-        dirty::Dirty,
     },
     vulkan::{buffer::Buffer, device::Device, image::Image},
 };
@@ -137,8 +137,7 @@ impl TextureAtlas {
 
     pub fn add_font(&mut self, name: &str) {
         let font = Font::new(name);
-        self.fonts
-            .insert(name.to_string(), (font, HashMap::new()));
+        self.fonts.insert(name.to_string(), (font, HashMap::new()));
     }
 
     pub(crate) fn atlas_image(&self) -> &Arc<Image> {

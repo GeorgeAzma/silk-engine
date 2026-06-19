@@ -4,10 +4,8 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-static EMA_F32: LazyLock<Mutex<HashMap<usize, f32>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-static EMA_F64: LazyLock<Mutex<HashMap<usize, f64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+static EMA_F32: LazyLock<Mutex<HashMap<usize, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static EMA_F64: LazyLock<Mutex<HashMap<usize, f64>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Build a stable `usize` key from the caller's source location.
 /// `Location::file()` is a `&'static str`, so its pointer is constant
@@ -17,7 +15,9 @@ fn caller_key() -> usize {
     let loc = Location::caller();
     let mut h = loc.file().as_ptr() as usize;
     h = h.wrapping_mul(0x9e3779b9).wrapping_add(loc.line() as usize);
-    h = h.wrapping_mul(0x9e3779b9).wrapping_add(loc.column() as usize);
+    h = h
+        .wrapping_mul(0x9e3779b9)
+        .wrapping_add(loc.column() as usize);
     h
 }
 
