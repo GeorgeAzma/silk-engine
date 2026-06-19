@@ -1,4 +1,4 @@
-use std::{ffi::CString, sync::Arc};
+use std::ffi::CString;
 
 use ash::vk;
 
@@ -11,7 +11,7 @@ pub(crate) struct PhysicalDevice {
     pub(crate) extensions: Vec<CString>,
     pub(crate) memory_properties: vk::PhysicalDeviceMemoryProperties,
     pub(crate) queue_family_properties: Vec<vk::QueueFamilyProperties>,
-    pub(crate) vulkan: Arc<Vulkan>,
+    pub(crate) vulkan: Vulkan,
 }
 
 impl PhysicalDevice {
@@ -56,7 +56,7 @@ impl PhysicalDevice {
         capabilities.surface_capabilities
     }
 
-    pub(crate) fn vulkan(&self) -> &Arc<Vulkan> {
+    pub(crate) fn vulkan(&self) -> &Vulkan {
         &self.vulkan
     }
 }

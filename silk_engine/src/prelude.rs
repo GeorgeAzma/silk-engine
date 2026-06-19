@@ -1,10 +1,10 @@
 pub use crate::{
     engine::{EngineConfig, EnginePlugin, EventLoop, Time, WindowEvent, WinitEvent},
-    gfx::{DrawContext, Gfx, TextureAtlas, Unit::*},
+    gfx::{DrawContext, Gfx, GfxPlugin, TextureAtlas, Unit::*},
     input::{Input, InputPlugin, Key, Mouse},
     sfx::{AudioData, Sfx, SfxPlugin, Source},
     util::{ema::Ema, print::Level},
-    vulkan::{Vulkan, VulkanConfig, window::Window},
+    vulkan::{Vulkan, VulkanConfig, VulkanPlugin, window::Window},
 };
 
 #[cfg(feature = "midi")]
@@ -31,6 +31,10 @@ impl PluginGroup for DefaultPlugins {
 
         bevy_app::PluginGroupBuilder::start::<Self>()
             .add(EnginePlugin { engine_config })
+            .add(VulkanPlugin {
+                vulkan_config: VulkanConfig::default(),
+            })
+            .add(GfxPlugin)
             .add(InputPlugin)
             .add(SfxPlugin)
     }

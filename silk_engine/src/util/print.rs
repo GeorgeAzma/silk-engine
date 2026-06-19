@@ -222,30 +222,34 @@ pub fn set_global_logger(logger: Logger) -> Result<(), &'static str> {
 #[macro_export]
 macro_rules! log_level {
     ($level:expr, $($args:tt)*) => {{
-        $crate::util::print::GLOBAL_LOGGER
-            .get()
-            .expect("Global logger not set")
-            .lock()
-            .unwrap()
-            .log($crate::util::print::Record {
-                level: $level,
-                msg: format_args!("{}\n", format_args!($($args)*)),
-            });
+        if let Some(logger) = $crate::util::print::GLOBAL_LOGGER.get() {
+            logger
+                .lock()
+                .unwrap()
+                .log($crate::util::print::Record {
+                    level: $level,
+                    msg: format_args!("{}\n", format_args!($($args)*)),
+                });
+        } else {
+            eprintln!("[{:?}] {}", $level, format_args!($($args)*));
+        }
     }}
 }
 
 #[macro_export]
 macro_rules! log_sink {
     ($sink_name:expr, $level:expr, $($args:tt)*) => {
-        $crate::util::print::GLOBAL_LOGGER
-            .get()
-            .expect("Global logger not set")
-            .lock()
-            .unwrap()
-            .log_to($sink_name, $crate::util::print::Record {
-                level: $level,
-                msg: format_args!("{}\n", format_args!($($args)*)),
-            });
+        if let Some(logger) = $crate::util::print::GLOBAL_LOGGER.get() {
+            logger
+                .lock()
+                .unwrap()
+                .log_to($sink_name, $crate::util::print::Record {
+                    level: $level,
+                    msg: format_args!("{}\n", format_args!($($args)*)),
+                });
+        } else {
+            eprintln!("[{:?}] {}", $level, format_args!($($args)*));
+        }
     };
 }
 

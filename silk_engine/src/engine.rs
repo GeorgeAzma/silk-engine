@@ -10,10 +10,7 @@ use winit::{
     window::WindowId,
 };
 
-use crate::{
-    util::print::{ConsoleSink, Level, Logger, RotatingFileSink, set_global_logger},
-    vulkan::VulkanConfig,
-};
+use crate::util::print::{ConsoleSink, Level, Logger, RotatingFileSink, set_global_logger};
 
 pub type WinitEvent = winit::event::WindowEvent;
 
@@ -29,7 +26,6 @@ pub struct WindowEvent {
 #[derive(Clone, Resource)]
 pub struct EngineConfig {
     pub logger: Logger,
-    pub vulkan_config: VulkanConfig,
 }
 
 impl Default for EngineConfig {
@@ -45,7 +41,6 @@ impl Default for EngineConfig {
                     ))),
                 ],
             },
-            vulkan_config: VulkanConfig::default(),
         }
     }
 }
@@ -76,34 +71,6 @@ fn runner(app: App) -> AppExit {
     AppExit::Success
 }
 
-fn setup(config: Res<EngineConfig>) {
-    std::panic::set_hook(Box::new(|panic_info| {
-        let panic = |err: &str| {
-            println!(
-                "\x1b[38;2;241;76;76m{err}\n\x1b[2m{}\x1b[0m",
-                crate::util::print::backtrace(2)
-            );
-        };
-        if let Some(&str) = panic_info.payload().downcast_ref::<&str>() {
-            panic(str);
-        } else if let Some(str) = panic_info.payload().downcast_ref::<String>() {
-            panic(str);
-        } else {
-            panic("")
-        }
-    }));
-
-    set_global_logger(config.logger.clone()).unwrap();
-
-    use std::fs::create_dir;
-    create_dir("res").unwrap_or_default();
-    create_dir("res/images").unwrap_or_default();
-    create_dir("res/shaders").unwrap_or_default();
-    create_dir("res/cache").unwrap_or_default();
-    create_dir("res/cache/shaders").unwrap_or_default();
-    create_dir("res/cache/vulkan").unwrap_or_default();
-}
-
 fn update_time(mut time: ResMut<Time>) {
     let elapsed = Instant::now() - time.start_time;
     let new_time = elapsed.as_secs_f32();
@@ -121,17 +88,41 @@ pub struct EnginePlugin {
 }
 impl Plugin for EnginePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.engine_config.clone())
-           .insert_resource(Time {
-            start_time: Instant::now(),
-            time: 0.0,
-            dt: 0.0,
-            fps: 0.0,
-            frame: 0,
-        })
-        .set_runner(runner)
-        .add_systems(PreStartup, setup)
-        .add_systems(PreUpdate, update_time);
+        std::panic::set_hook(Box::new(|panic_info| {
+            let panic = |err: &str| {
+                println!(
+                    "\x1b[38;2;241;76;76m{err}\n\x1b[2m{}\x1b[0m",
+                    crate::util::print::backtrace(2)
+                );
+            };
+            if let Some(&str) = panic_info.payload().downcast_ref::<&str>() {
+                panic(str);
+            } else if let Some(str) = panic_info.payload().downcast_ref::<String>() {
+                panic(str);
+            } else {
+                panic("")
+            }
+        }));
+
+        set_global_logger(self.engine_config.logger.clone()).unwrap();
+
+        use std::fs::create_dir;
+        create_dir("res").unwrap_or_default();
+        create_dir("res/images").unwrap_or_default();
+        create_dir("res/shaders").unwrap_or_default();
+        create_dir("res/cache").unwrap_or_default();
+        create_dir("res/cache/shaders").unwrap_or_default();
+        create_dir("res/cache/vulkan").unwrap_or_default();
+
+        app.insert_resource(Time {
+                start_time: Instant::now(),
+                time: 0.0,
+                dt: 0.0,
+                fps: 0.0,
+                frame: 0,
+            })
+            .set_runner(runner)
+            .add_systems(PreUpdate, update_time);
     }
 }
 

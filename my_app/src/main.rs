@@ -1,9 +1,6 @@
 use silk_engine::prelude::*;
 
-fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
-    let vulkan = Vulkan::new(VulkanConfig::default()).unwrap();
-    let mut gfx = Gfx::new(&vulkan).unwrap();
-
+fn init(event_loop: Res<EventLoop>, mut gfx: ResMut<Gfx>, mut cmd: Commands) {
     let window = gfx.create_window(
         &event_loop,
         WindowAttributes::default().with_inner_size(PhysicalSize::new(1280, 720)),
@@ -12,7 +9,6 @@ fn init(event_loop: Res<EventLoop>, mut cmd: Commands) {
     gfx.load_img("cursor.qoi");
 
     cmd.spawn((window, Input::new()));
-    cmd.insert_resource(gfx);
 }
 
 fn on_midi(event: On<MidiEvent>) {

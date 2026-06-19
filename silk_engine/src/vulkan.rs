@@ -1,11 +1,10 @@
 use ash::{khr, vk};
 
 use std::{
-    ffi::{CStr, CString},
-    path::Path,
-    sync::{Arc, Mutex, OnceLock},
+    ffi::{CStr, CString}, ops::{Deref, DerefMut}, path::Path, sync::{Arc, Mutex, OnceLock}
 };
 
+use bevy_app::prelude::*;
 use bevy_ecs::prelude::*;
 
 use crate::{
@@ -158,8 +157,7 @@ impl Default for VulkanConfig {
     }
 }
 
-#[derive(Resource)]
-pub struct Vulkan {
+pub struct VulkanInner {
     version: u32,
     entry: ash::Entry,
     instance: ash::Instance,
@@ -170,8 +168,8 @@ pub struct Vulkan {
     get_surface_capabilities2_instance: ash::khr::get_surface_capabilities2::Instance,
 }
 
-impl Vulkan {
-    pub fn new(config: VulkanConfig) -> ResultAny<Arc<Self>> {
+impl VulkanInner {
+    pub fn new(config: VulkanConfig) -> ResultAny<Self> {
         let version = config.api_version;
 
         let entry = unsafe { ash::Entry::load()? };
@@ -297,7 +295,7 @@ impl Vulkan {
         let get_surface_capabilities2_instance =
             ash::khr::get_surface_capabilities2::Instance::new(&entry, &instance);
 
-        Ok(Arc::new(Self {
+        Ok(Self {
             version,
             entry,
             instance,
@@ -306,7 +304,7 @@ impl Vulkan {
             physical_devices: OnceLock::new(),
             surface_instance,
             get_surface_capabilities2_instance,
-        }))
+        })
     }
 
     pub(crate) fn best_physical_device<F>(
@@ -457,7 +455,7 @@ impl Vulkan {
                         extensions,
                         memory_properties,
                         queue_family_properties,
-                        vulkan: Arc::clone(self),
+                        vulkan: Vulkan(Arc::clone(self)),
                     })
                 })
                 .collect::<Vec<_>>()
@@ -488,6 +486,33 @@ impl Vulkan {
         &self,
     ) -> &ash::khr::get_surface_capabilities2::Instance {
         &self.get_surface_capabilities2_instance
+    }
+}
+
+#[derive(Resource)]
+pub struct Vulkan(Arc<VulkanInner>);
+
+impl Deref for Vulkan {
+    type Target = Arc<VulkanInner>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Vulkan {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub struct VulkanPlugin {
+    pub vulkan_config: VulkanConfig,
+}
+
+impl Plugin for VulkanPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(Vulkan(Arc::new(VulkanInner::new(self.vulkan_config.clone()).unwrap())));
     }
 }
 

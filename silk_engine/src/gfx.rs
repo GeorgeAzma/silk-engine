@@ -23,6 +23,9 @@ use crate::{
 use ash::vk;
 use winit::{event_loop::ActiveEventLoop, window::WindowAttributes};
 
+use bevy_ecs::prelude::*;
+use bevy_app::prelude::*;
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Unit {
     /// pixels
@@ -118,7 +121,7 @@ impl Vertex {
     }
 }
 
-#[derive(bevy_ecs::resource::Resource)]
+#[derive(Resource)]
 pub struct Gfx {
     pub(crate) physical_device: Arc<PhysicalDevice>,
     pub(crate) device: Arc<Device>,
@@ -138,158 +141,7 @@ pub struct Gfx {
     pub atlas: TextureAtlas,
 }
 
-impl std::ops::Deref for Gfx {
-    type Target = DrawContext;
-    fn deref(&self) -> &Self::Target {
-        &self.draw
-    }
-}
-
-impl std::ops::DerefMut for Gfx {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.draw
-    }
-}
-
 impl Gfx {
-    pub fn new(vulkan: &Arc<Vulkan>) -> ResultAny<Self> {
-        let physical_device = vulkan
-            .best_physical_device_for(PhysicalDeviceUse::General)
-            .ok_or("no suitable GPU found")?;
-
-        let queue_family_index = vulkan
-            .best_queue_family_for(
-                &physical_device.queue_family_properties,
-                vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
-            )
-            .ok_or("no suitable Queue Family found")?;
-
-        let queue_create_infos = [vk::DeviceQueueCreateInfo::default()
-            .queue_family_index(queue_family_index)
-            .queue_priorities(&[1.0])];
-
-        let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
-            .shader_sampled_image_array_non_uniform_indexing(true)
-            .shader_storage_buffer_array_non_uniform_indexing(true)
-            .shader_storage_image_array_non_uniform_indexing(true)
-            .descriptor_binding_sampled_image_update_after_bind(true)
-            .descriptor_binding_storage_buffer_update_after_bind(true)
-            .descriptor_binding_storage_image_update_after_bind(true)
-            .descriptor_binding_partially_bound(true)
-            .descriptor_binding_variable_descriptor_count(true)
-            .runtime_descriptor_array(true);
-
-        let mut features13 = vk::PhysicalDeviceVulkan13Features::default()
-            .synchronization2(true)
-            .dynamic_rendering(true);
-
-        let mut ray_tracing_pipeline_features =
-            vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default().ray_tracing_pipeline(true);
-        let mut acceleration_structure_features =
-            vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
-                .acceleration_structure(true);
-        let mut buffer_device_address_features =
-            vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
-
-        let mut enabled_device_features = vk::PhysicalDeviceFeatures2::default()
-            .push_next(&mut descriptor_indexing)
-            .push_next(&mut features13)
-            .push_next(&mut ray_tracing_pipeline_features)
-            .push_next(&mut acceleration_structure_features)
-            .push_next(&mut buffer_device_address_features);
-
-        let enabled_device_extensions = [
-            ash::khr::swapchain::NAME.as_ptr(),
-            ash::khr::deferred_host_operations::NAME.as_ptr(),
-            ash::khr::acceleration_structure::NAME.as_ptr(),
-            ash::khr::ray_tracing_pipeline::NAME.as_ptr(),
-        ];
-
-        let device_info = vk::DeviceCreateInfo::default()
-            .queue_create_infos(&queue_create_infos)
-            .enabled_extension_names(&enabled_device_extensions)
-            .push_next(&mut enabled_device_features);
-
-        let device = Device::new(&physical_device, &device_info)?;
-
-        let queue = device.get_queue(queue_family_index, 0);
-        device.debug_name(queue, "gfx");
-
-        let command_manager = device.command_manager(queue_family_index);
-
-        let shader = Shader::new(&["test.vert", "test.frag"], &device)?;
-
-        let uniform = Buffer::new(
-            &device,
-            (2 * size_of::<f32>()) as u64,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            &[queue_family_index],
-            vk::SharingMode::EXCLUSIVE,
-            vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
-        )?;
-
-        let atlas = TextureAtlas::new(&device, queue_family_index)?;
-        let atlas_view = atlas.atlas_image().create_view()?;
-        let atlas_sampler = device.get_sampler(
-            vk::SamplerAddressMode::REPEAT,
-            vk::SamplerAddressMode::REPEAT,
-            vk::Filter::LINEAR,
-            vk::Filter::LINEAR,
-            vk::SamplerMipmapMode::LINEAR,
-        );
-
-        let descriptor_set_layouts = shader
-            .reflect_descriptor_set_layouts()?
-            .into_values()
-            .collect::<Vec<_>>();
-        let descriptor_sets = device.alloc_ds(&descriptor_set_layouts);
-        let uniform_info = vk::DescriptorBufferInfo::default()
-            .buffer(uniform.handle())
-            .offset(0)
-            .range(vk::WHOLE_SIZE);
-        let atlas_info = vk::DescriptorImageInfo::default()
-            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .image_view(atlas_view)
-            .sampler(atlas_sampler);
-        let ds_write_uniform = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_sets[0])
-            .dst_binding(0)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-            .buffer_info(std::slice::from_ref(&uniform_info));
-        let ds_write_atlas = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_sets[0])
-            .dst_binding(1)
-            .descriptor_count(1)
-            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-            .image_info(std::slice::from_ref(&atlas_info));
-        unsafe {
-            device
-                .device
-                .update_descriptor_sets(&[ds_write_uniform, ds_write_atlas], &[])
-        };
-
-        let draw = DrawContext::new(&device, queue_family_index)?;
-
-        Ok(Self {
-            physical_device,
-            device: device.clone(),
-            queue,
-            surface_format: None,
-            command_manager,
-            shader,
-            pipeline: None,
-            pipeline_layout: None,
-            uniform,
-            width: 0.0,
-            height: 0.0,
-            descriptor_set_layouts,
-            descriptor_sets,
-            draw,
-            atlas,
-        })
-    }
-
     pub fn create_window(
         &mut self,
         event_loop: &ActiveEventLoop,
@@ -625,5 +477,164 @@ impl Gfx {
 impl Drop for Gfx {
     fn drop(&mut self) {
         self.device.wait();
+    }
+}
+
+impl std::ops::Deref for Gfx {
+    type Target = DrawContext;
+    fn deref(&self) -> &Self::Target {
+        &self.draw
+    }
+}
+
+impl std::ops::DerefMut for Gfx {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.draw
+    }
+}
+
+pub fn setup(vulkan: &Vulkan) -> ResultAny<Gfx> {
+    let physical_device = vulkan
+        .best_physical_device_for(PhysicalDeviceUse::General)
+        .ok_or("no suitable GPU found")?;
+
+    let queue_family_index = vulkan
+        .best_queue_family_for(
+            &physical_device.queue_family_properties,
+            vk::QueueFlags::GRAPHICS | vk::QueueFlags::COMPUTE | vk::QueueFlags::TRANSFER,
+        )
+        .ok_or("no suitable Queue Family found")?;
+
+    let queue_create_infos = [vk::DeviceQueueCreateInfo::default()
+        .queue_family_index(queue_family_index)
+        .queue_priorities(&[1.0])];
+
+    let mut descriptor_indexing = vk::PhysicalDeviceDescriptorIndexingFeatures::default()
+        .shader_sampled_image_array_non_uniform_indexing(true)
+        .shader_storage_buffer_array_non_uniform_indexing(true)
+        .shader_storage_image_array_non_uniform_indexing(true)
+        .descriptor_binding_sampled_image_update_after_bind(true)
+        .descriptor_binding_storage_buffer_update_after_bind(true)
+        .descriptor_binding_storage_image_update_after_bind(true)
+        .descriptor_binding_partially_bound(true)
+        .descriptor_binding_variable_descriptor_count(true)
+        .runtime_descriptor_array(true);
+
+    let mut features13 = vk::PhysicalDeviceVulkan13Features::default()
+        .synchronization2(true)
+        .dynamic_rendering(true);
+
+    let mut ray_tracing_pipeline_features =
+        vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default().ray_tracing_pipeline(true);
+    let mut acceleration_structure_features =
+        vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default()
+            .acceleration_structure(true);
+    let mut buffer_device_address_features =
+        vk::PhysicalDeviceBufferDeviceAddressFeatures::default().buffer_device_address(true);
+
+    let mut enabled_device_features = vk::PhysicalDeviceFeatures2::default()
+        .push_next(&mut descriptor_indexing)
+        .push_next(&mut features13)
+        .push_next(&mut ray_tracing_pipeline_features)
+        .push_next(&mut acceleration_structure_features)
+        .push_next(&mut buffer_device_address_features);
+
+    let enabled_device_extensions = [
+        ash::khr::swapchain::NAME.as_ptr(),
+        ash::khr::deferred_host_operations::NAME.as_ptr(),
+        ash::khr::acceleration_structure::NAME.as_ptr(),
+        ash::khr::ray_tracing_pipeline::NAME.as_ptr(),
+    ];
+
+    let device_info = vk::DeviceCreateInfo::default()
+        .queue_create_infos(&queue_create_infos)
+        .enabled_extension_names(&enabled_device_extensions)
+        .push_next(&mut enabled_device_features);
+
+    let device = Device::new(&physical_device, &device_info)?;
+
+    let queue = device.get_queue(queue_family_index, 0);
+    device.debug_name(queue, "gfx");
+
+    let command_manager = device.command_manager(queue_family_index);
+
+    let shader = Shader::new(&["test.vert", "test.frag"], &device)?;
+
+    let uniform = Buffer::new(
+        &device,
+        (2 * size_of::<f32>()) as u64,
+        vk::BufferUsageFlags::UNIFORM_BUFFER,
+        &[queue_family_index],
+        vk::SharingMode::EXCLUSIVE,
+        vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT,
+    )?;
+
+    let atlas = TextureAtlas::new(&device, queue_family_index)?;
+    let atlas_view = atlas.atlas_image().create_view()?;
+    let atlas_sampler = device.get_sampler(
+        vk::SamplerAddressMode::REPEAT,
+        vk::SamplerAddressMode::REPEAT,
+        vk::Filter::LINEAR,
+        vk::Filter::LINEAR,
+        vk::SamplerMipmapMode::LINEAR,
+    );
+
+    let descriptor_set_layouts = shader
+        .reflect_descriptor_set_layouts()?
+        .into_values()
+        .collect::<Vec<_>>();
+    let descriptor_sets = device.alloc_ds(&descriptor_set_layouts);
+    let uniform_info = vk::DescriptorBufferInfo::default()
+        .buffer(uniform.handle())
+        .offset(0)
+        .range(vk::WHOLE_SIZE);
+    let atlas_info = vk::DescriptorImageInfo::default()
+        .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        .image_view(atlas_view)
+        .sampler(atlas_sampler);
+    let ds_write_uniform = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_sets[0])
+        .dst_binding(0)
+        .descriptor_count(1)
+        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+        .buffer_info(std::slice::from_ref(&uniform_info));
+    let ds_write_atlas = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_sets[0])
+        .dst_binding(1)
+        .descriptor_count(1)
+        .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+        .image_info(std::slice::from_ref(&atlas_info));
+    unsafe {
+        device
+            .device
+            .update_descriptor_sets(&[ds_write_uniform, ds_write_atlas], &[])
+    };
+
+    let draw = DrawContext::new(&device, queue_family_index)?;
+
+    Ok(Gfx {
+        physical_device,
+        device: device.clone(),
+        queue,
+        surface_format: None,
+        command_manager,
+        shader,
+        pipeline: None,
+        pipeline_layout: None,
+        uniform,
+        width: 0.0,
+        height: 0.0,
+        descriptor_set_layouts,
+        descriptor_sets,
+        draw,
+        atlas,
+    })
+}
+
+pub struct GfxPlugin;
+impl Plugin for GfxPlugin {
+    fn build(&self, app: &mut App) {
+        let gfx = setup(app.world().resource::<Vulkan>()).unwrap();
+        app.insert_resource(gfx);
     }
 }
