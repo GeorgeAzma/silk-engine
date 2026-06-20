@@ -100,7 +100,7 @@ impl Font {
     pub fn bounding_box(&self, str: &str) -> (f32, f32, f32, f32) {
         let layout = self.layout(str);
         let (mut ax, mut ay, mut bx, mut by) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-        for (c, (lx, ly)) in str.chars().zip(layout.into_iter()) {
+        for (c, (lx, ly)) in str.chars().zip(layout) {
             ax = ax.min(lx);
             ay = ay.min(ly);
             let (w, h) = self.glyph_size(c);

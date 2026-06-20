@@ -153,6 +153,7 @@ impl Gfx {
     pub fn rline(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, w: Unit) {
         self.draw.rline(x0, y0, x1, y1, w);
     }
+    #[allow(clippy::too_many_arguments)]
     pub fn bezier(&mut self, x0: Unit, y0: Unit, x1: Unit, y1: Unit, x2: Unit, y2: Unit, w: Unit) {
         self.draw.bezier(x0, y0, x1, y1, x2, y2, w);
     }

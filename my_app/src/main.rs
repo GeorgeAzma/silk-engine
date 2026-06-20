@@ -87,7 +87,7 @@ fn update(mut gfx: ResMut<Gfx>, window: Single<(&mut Window, &mut Input)>, time:
         Px(8),
     );
     gfx.text(
-        &((time.fps as f32).ema(0.001).round() as u32).to_string(),
+        &(time.fps.ema(0.001).round() as u32).to_string(),
         Pc(0.9),
         Pc(0.95),
         Px(14),
@@ -121,10 +121,8 @@ fn on_event(event: On<WindowEvent>, event_loop: Res<EventLoop>, window: Query<&W
             WinitEvent::Destroyed | WinitEvent::CloseRequested => {
                 event_loop.exit();
             }
-            WinitEvent::MouseInput { state, button, .. } => {
-                if *button == Mouse::Left && state.is_pressed() {
-                    _ = window.drag_window();
-                }
+            WinitEvent::MouseInput { state, button, .. } if *button == Mouse::Left && state.is_pressed()  =>  {
+                _ = window.drag_window();
             }
             _ => {}
         }

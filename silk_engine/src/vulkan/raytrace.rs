@@ -35,7 +35,7 @@ impl Raytrace {
         let indices: [u32; _] = [0, 1, 2];
 
         let rt_vertex_buffer = Buffer::new(
-            &device,
+            device,
             size_of_val(&vertices) as u64,
             vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
@@ -46,7 +46,7 @@ impl Raytrace {
         rt_vertex_buffer.write(&vertices, 0)?;
 
         let rt_index_buffer = Buffer::new(
-            &device,
+            device,
             size_of_val(&indices) as u64,
             vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
@@ -106,7 +106,7 @@ impl Raytrace {
         };
 
         let blas_buffer = Buffer::new(
-            &device,
+            device,
             size_info.acceleration_structure_size,
             vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR,
@@ -116,7 +116,7 @@ impl Raytrace {
         )?;
 
         let scratch_buffer = Buffer::new(
-            &device,
+            device,
             size_info.build_scratch_size,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             &[queue_family_index],
@@ -175,7 +175,7 @@ impl Raytrace {
         let instances = [instance];
 
         let instance_buffer = Buffer::new(
-            &device,
+            device,
             size_of_val(&instances) as u64,
             vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                 | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
@@ -218,7 +218,7 @@ impl Raytrace {
         };
 
         let tlas_buffer = Buffer::new(
-            &device,
+            device,
             size_info.acceleration_structure_size,
             vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR,
@@ -228,7 +228,7 @@ impl Raytrace {
         )?;
 
         let scratch_buffer = Buffer::new(
-            &device,
+            device,
             size_info.build_scratch_size,
             vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
             &[queue_family_index],
@@ -274,7 +274,7 @@ impl Raytrace {
         };
 
         let raytrace_image = Image::new(
-            &device,
+            device,
             &ImageCreateInfo::default()
                 .image_type(vk::ImageType::TYPE_2D)
                 .extent(extent)
